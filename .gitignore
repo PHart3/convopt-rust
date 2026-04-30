@@ -1,0 +1,8 @@
+/target
+*~
+*.tex
+*.aux
+*.gz
+*.log
+*.out
+*.pdf
