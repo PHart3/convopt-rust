@@ -20,7 +20,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
     let mut dual_y : Vector;
     let var_dim_tot = (var_dim * (var_dim + 1)) / 2;
     let (mut prim_z, mut dual_s) : (SymMatrix, SymMatrix) = (ident_sym_mat(var_dim), vec![0.0; var_dim_tot]);
-    let (mut pinf, mut dinf, mut gap, mut comp) : (f64, f64, f64, f64);
+    let (mut pinf, mut dinf, mut gap) : (f64, f64, f64);
     let mut delta : f64;
     let mut best = f64::INFINITY;
     let (mut inverse_y, mut dual_sfull, mut dual_sfull_temp, mut diff) : (Vector, SymMatrix, SymMatrix, SymMatrix);
@@ -59,8 +59,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 
 	(prim_val, dual_val) = (frob_prod_sym(obj_frob, &prim_z, var_dim), dot_prod(&point, &dual_y));
 	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
-	comp = frob_prod_sym(&prim_z, &dual_s, var_dim);
-	delta = pinf.max(dinf).max(gap).max(comp);
+	delta = pinf.max(dinf).max(gap);
 	if pos_def_check(&prim_z, var_dim) && delta < TOL {
 	    if block_size_sum == 0 {
 		result.push(prim_z);
@@ -106,7 +105,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 		}
 	    }
 	    println!("\nsdpad terminated after {} iterations", TOTAL_STEPS);
-	    println!("solution quality: pinf={:.3e} dinf={:.3e} gap={:.3e} comp={:.3e}", pinf, dinf, gap, comp);
+	    println!("solution quality: pinf={:.3e} dinf={:.3e} gap={:.3e}", pinf, dinf, gap);
 	    return (result, prim_val);
 	}
 
