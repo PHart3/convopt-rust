@@ -4,7 +4,7 @@ This repository provides a first-order semidefinite programming (SDP) solver wit
 
 Z. Wen, D. Goldfarb, and W. Yin, “Alternating direction augmented Lagrangian methods for semidefinite programming,” *Mathematical Programming Computation*, 2, 203–230, 2010. DOI: 10.1007/s12532-010-0017-1.
 
-For the paper's convergence guarantees to hold, the user should ensure that both the primal and the dual satisfy Slater's condition. In our implementation, however, if the solver converges on an input, then the returned solution will have small KKT residuals and therefore be optimal up to numerical error. So, in practice, one can simply run the solver on a general SDP problem to see if it converges to a solution.
+For the paper's convergence guarantees to hold, the user should ensure that both the primal and the dual satisfy Slater's condition. In our implementation, however, if the solver converges on an input, then the returned solution will have small KKT residuals and therefore be optimal up to numerical error. So, in practice, one can simply run the solver on a general SDP problem to see whether it converges to a solution.
 
 ## Organization
 
@@ -34,7 +34,7 @@ Conceptually, an SDP problem is specified by three pieces of data.
 
 ### 1. Linear matrix inequalities
 
-A sequence of affine linear matrix inequalities is represented by data
+A sequence of affine linear matrix inequalities is represented by the data
 
 ```text
 (H_i, M_i), for i = 1, ..., s.
@@ -160,19 +160,19 @@ is represented as a `MatrixSym`, defined in `src/sdp.rs` as
 type MatrixSym = Vec<Vec<Vector>>;
 ```
 
-This is a list of `m` vectors, each of length `q(q + 1) / 2`. Each vector is input as the columns of an upper symmetric matrix:
+This is a list of `m` vectors, each of length `q(q + 1) / 2`. Each vector represents one packed column of the upper-triangular part of a symmetric matrix:
 
 ```text
 [v(1)_1], [v(2)_1, v(2)_2], ..., [v(q)_1, ..., v(q)_q].
 ```
 
-For example, a symmetric `2 x 2` matrix is represented in packed form as:
+For example, a symmetric `2 x 2` matrix is represented in packed form as
 
 ```text
 [X_11, X_12, X_22]
 ```
 
-and a symmetric `3 x 3` matrix is represented as:
+and a symmetric `3 x 3` matrix is represented as
 
 ```text
 [X_11, X_12, X_22, X_13, X_23, X_33]
@@ -203,15 +203,15 @@ A complete SDP problem is specified by
 
 ```rust
 SDP::new(
-    objective: MatrixSym,
-    constraint: (Vec<MatrixSym>, Vector),
-    lmi: Vec<(Vec<MatrixSym>, Matrix)>
+    objective,   // MatrixSym
+    constraint, // (Vec<MatrixSym>, Vector)
+    lmi,        // Vec<(Vec<MatrixSym>, Matrix)>
 )
 ```
 
 ## Example problems
 
-### Example 1: two decision variables with linear constraints and PSD LMIs
+### Example 1: two decision variables with equality constraints and PSD constraints
 
 This example has two decision variables: `X1`, a `2 x 2` symmetric matrix, and `X2`, a `3 x 3` symmetric matrix.
 
@@ -255,7 +255,7 @@ let sdp_test = SDP::new(
 );
 ```
 
-### Example 2: no linear constraints
+### Example 2: no equality constraints
 
 This example shows that the solver can handle a problem with no linear equality constraints.
 
