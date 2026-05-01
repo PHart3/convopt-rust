@@ -174,7 +174,7 @@ pub fn matrix_subt(mat1 : &Matrix, mat2 : &Matrix) -> Matrix {
 
 // Gaussian elimination via partial pivoting
 // also computes rank and consistency of given augmented matrix
-pub fn gauss_elim<'a>(mat : &'a mut Matrix) -> (&'a mut Matrix, usize, bool) {
+pub fn gauss_elim(mat : &mut Matrix) -> (&mut Matrix, usize, bool) {
     let (col_dim, row_dim) = (mat.len(), mat[0].len());
     let (mut row_search, mut coeff_rank, mut pivot_row);
     (row_search, coeff_rank) = (0, 0);
@@ -217,7 +217,7 @@ pub fn linear_remove_redundant(mut mat : Matrix) -> Matrix {
     if !solvable {
 	panic!("linear_remove_redundant: your system of constraints is inconsistent");
     } else {
-	return rows_submatrix(echelon, rank);
+	rows_submatrix(echelon, rank)
     }
 }
 
@@ -243,7 +243,7 @@ pub fn float_equality(f1: f64, f2: f64, tol: f64) -> bool {
 
 // testing if two vectors are the same
 pub fn vector_equality(vect1 : &Vector, vect2 : &Vector, tol : f64) -> bool {
-    if ! (vect1.len() == vect2.len()) {
+    if vect1.len() != vect2.len() {
 	return false;
     } else {
 	for (v1, v2) in vect1.iter().zip(vect2.iter()) {

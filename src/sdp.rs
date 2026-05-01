@@ -53,7 +53,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
     if sdp.lmi.is_empty() {
 	assert!(sdp.objective.len() == 1,
 		"you must supply exactly one objective map since you have exactly one decision variable");
-	if sdp.constraint.0.len() == 0 {
+	if sdp.constraint.0.is_empty() {
 	    let obj = &sdp.objective[0];
 	    (obj.concat(), (vec![], vec![]), vec![], obj.last().expect("you have not provided an objective function").len(),
 	     vec![], 0)
@@ -67,8 +67,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 
 	    (obj.concat(), (constraints_red, vec![]), point, obj.last().expect("you have not provided an objective function").len(),
 	     vec![], 0)	    
-	} else
-	{
+	} else {
 	    panic!("you have one decision variable but have supplied constraint maps for more than one decision variable");
 	}
     } else {
@@ -141,7 +140,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 		    row += 1;
 		}
 	    }
-	    blocks.push((sum, matrix_to_vector(&mat)));
+	    blocks.push((sum, matrix_to_vector(mat)));
 	    block_offset += block_size;
 	    b += 1;
 	}
@@ -176,7 +175,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 		    &mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset + dim, dim));
 		obj_sum = vect_add(&obj_sum, &obj_diff);
 
-		map_flatten = matrixsym_flatten(&constr);
+		map_flatten = matrixsym_flatten(constr);
 		block_diff = matrix_subt(
 		    &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset, dim),
 		    &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset + dim, dim));

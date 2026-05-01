@@ -103,7 +103,7 @@ pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 		}
 		ind = (m1 * (m1 + 1)) / 2 + *i;
 		if m1 == k || m1 == j {
-		    *i = index_max_in_col(&mut eigenvals_new, m1);
+		    *i = index_max_in_col(eigenvals_new, m1);
 		} else if (*i != k && k < m1) && (*i != j && j < m1) {
 		    let (val_j, val_k) = (eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs(), eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs());
 		    let val_ind = eigenvals_new[ind].abs();
@@ -117,13 +117,11 @@ pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 			*i = k;
 		    }
 		} else if eigenvals_new[ind].abs() < biggest {
-		    *i = index_max_in_col(&mut eigenvals_new, m1);
+		    *i = index_max_in_col(eigenvals_new, m1);
+		} else if eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs() > eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs() {
+		    *i = j;
 		} else {
-		    if eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs() > eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs() {
-			*i = j;
-		    } else {
-			*i = k;
-		    }
+		    *i = k;
 		}
 		m1 += 1;
 	    }

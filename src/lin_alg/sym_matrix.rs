@@ -60,7 +60,7 @@ pub fn ident_sym_mat(dim : usize) -> SymMatrix {
 }
 
 // scaling all off-diagonal elements of symmetric matrix
-pub fn scale_off_diag<'a>(s : f64, dim : usize, mat : &'a mut SymMatrix) -> &'a mut SymMatrix {
+pub fn scale_off_diag(s : f64, dim : usize, mat : &mut SymMatrix) -> &mut SymMatrix {
     let mut idx = 0;
     for c in 0..dim {
 	for _ in 0..c {
@@ -229,9 +229,9 @@ pub fn constraint_lin_comb(dim : usize, (mat, list) : &(&Matrix, &Vec<(usize, us
     for i in 0..dim {
 	diag = (i * i + 3 * i) / 2;
 	for j in start..diag {
-	    result.push(0.5 * dot_prod(&mat[j], &vect));
+	    result.push(0.5 * dot_prod(&mat[j], vect));
 	}
-	result.push(dot_prod(&mat[diag], &vect));
+	result.push(dot_prod(&mat[diag], vect));
 	start += i + 1;
     }
     let k = mat[0].len();
@@ -316,10 +316,7 @@ pub fn pos_def_check(mat : &SymMatrix, dim : usize) -> bool {
 	mat_add_scal.push(mat[idx] + eps);
 	idx += 1;
     }
-    match ldlt_decomp(&mat_add_scal, dim) {
-	Some(_) => true,
-	_ => false
-    }
+    ldlt_decomp(&mat_add_scal, dim).is_some()
 }
 
 // diagonal linear system solver
@@ -371,8 +368,8 @@ pub fn back_subst(mat : &LowTriMatrix, vect : &mut [f64]) -> Vector {
 // substitution solver for symmetric positive definite matrix
 pub fn pos_def_solver(mat : &SymMatrix, vect : &mut [f64]) -> Vector {
     let Some((l, d)) = ldlt_decomp(mat, vect.len()) else { panic!("ldlt_decomp: given matrix is not positive definite"); };
-    let mut sol1 = forw_subst(&l, vect);
-    let mut sol2 = diag_solver(&d, &mut sol1);
+    let sol1 = forw_subst(&l, vect);
+    let mut sol2 = diag_solver(&d, &sol1);
     back_subst(&l, &mut sol2)
 }
 
@@ -439,10 +436,10 @@ pub fn sym_matrix_proj(dim : usize, row : usize, col : usize) -> Vec<Vector> {
     result
 }
 
-pub fn sym_matrix_add(vect1 : &Vec<Vector>, vect2 : &Vec<Vector>) -> Vec<Vector> {
+pub fn sym_matrix_add(vect1 : &[Vector], vect2 : &[Vector]) -> Vec<Vector> {
     let mut result = Vec::new();
     for (v1, v2) in vect1.iter().zip(vect2.iter()) {
-	result.push(vect_add(&v1, &v2));
+	result.push(vect_add(v1, v2));
     }
     result
 }
