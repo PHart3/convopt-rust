@@ -2,7 +2,7 @@
 
 This repository provides a first-order semidefinite programming (SDP) solver with a flexible problem-input format. It is self-contained, implementing its own numerical linear algebra routines. The solver is based on the dual augmented Lagrangian method described in the following paper:
 
-Z. Wen, D. Goldfarb, and W. Yin, “Alternating direction augmented Lagrangian methods for semidefinite programming,” Mathematical Programming Computation, 2, 203–230, 2010. DOI: [10.1007/s12532-010-0017-1](https://doi.org/10.1007/s12532-010-0017-1).
+Z. Wen, D. Goldfarb, and W. Yin, “Alternating direction augmented Lagrangian methods for semidefinite programming,” *Mathematical Programming Computation*, 2, 203–230, 2010. [DOI: 10.1007/s12532-010-0017-1](https://doi.org/10.1007/s12532-010-0017-1).
 
 For the paper's convergence guarantees to hold, the user should ensure that both the primal and the dual satisfy Slater's condition. In our implementation, however, if the solver converges on an input, then the returned solution will have small KKT residuals and therefore be optimal up to numerical error. So, in practice, one can simply run the solver on a general SDP problem to see whether it converges to a solution.
 
