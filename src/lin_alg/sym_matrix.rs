@@ -334,9 +334,10 @@ pub fn forw_subst(mat : &LowTriMatrix, vect : &mut [f64]) -> Vector {
     let dim = vect.len();
     let mut solution = Vec::with_capacity(dim);
     let mut d : f64;
+    let scale = mat.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     for j in 0..dim {
 	d = mat[(j * (2 * dim - j + 1)) / 2];
-	if d.abs() < TOL {
+	if d.abs() < TOL * scale {
 	    panic!("forw_subst: division by zero");
 	}
 	solution.push(vect[j] / d);
@@ -352,9 +353,10 @@ pub fn back_subst(mat : &LowTriMatrix, vect : &mut [f64]) -> Vector {
     let dim = vect.len();
     let mut solution = vec![0.0; dim];
     let mut d : f64;
+    let scale = mat.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     for j in (0..dim).rev() {
 	d = mat[(j * (2 * dim - j + 1)) / 2];
-	if d.abs() < TOL {
+	if d.abs() < TOL * scale {
 	    panic!("back_subst: division by zero");
 	}
 	solution[j] = vect[j] / d;

@@ -178,6 +178,7 @@ pub fn gauss_elim(mat : &mut Matrix) -> (&mut Matrix, usize, bool) {
     let (col_dim, row_dim) = (mat.len(), mat[0].len());
     let (mut row_search, mut coeff_rank, mut pivot_row);
     (row_search, coeff_rank) = (0, 0);
+    let scale = mat.iter().flat_map(|col| col.iter()).map(|x| x.abs()).fold(0.0, f64::max);
     for n in 0..col_dim {
 	if row_search >= row_dim {
 	    break;
@@ -188,7 +189,7 @@ pub fn gauss_elim(mat : &mut Matrix) -> (&mut Matrix, usize, bool) {
 		pivot_row = j;
 	    }
 	}
-	if mat[n][pivot_row].abs() < TOL {
+	if mat[n][pivot_row].abs() < TOL * scale {
 	    continue;
 	}
 	if pivot_row != row_search {
