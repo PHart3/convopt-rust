@@ -45,7 +45,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	diff = vect_subt(obj_frob, &lin_comb);	
 	dual_sfull = vect_subt(&diff, &scal_vect(penalty, &prim_z));
 	dual_sfull_temp = dual_sfull.clone();
-	let (egnvals, egnvects) : (Vector, Matrix) = eigendecomp(&mut dual_sfull_temp, var_dim).0;
+	let (egnvals, egnvects) : (Vector, Matrix) = nonnegeigendecomp(&mut dual_sfull_temp, var_dim);
 	if egnvals.is_empty() {
 	    dual_s = vec![0.0; var_dim_tot];
 	} else {

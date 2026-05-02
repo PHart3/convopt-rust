@@ -149,22 +149,28 @@ pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     }
 }
 
-// partitioning the above spectral decomposition into nonnegative and negative parts
-pub fn eigendecomp(a : &mut SymMatrix, dim : usize) -> ((Vector, Matrix), (Vector, Matrix)) {
-    
+// extracting the nonnegative part of the above spectral decomposition
+pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     let (mut nonneg_eigenvals, mut nonneg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
-    let (mut neg_eigenvals, mut neg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
-    
     let (eigenvals, eigenvects) = jacobi_eigen(a, dim);
-
     for (val, vect) in eigenvals.iter().zip(eigenvects.into_iter()) {
-	if val.is_sign_negative() {
-	    neg_eigenvals.push(*val);
-	    neg_eigenvects.push(vect);
-	} else {
+	if !(*val < -1e-8) {
 	    nonneg_eigenvals.push(*val);
 	    nonneg_eigenvects.push(vect);
 	}
     }
-    ((nonneg_eigenvals, nonneg_eigenvects), (neg_eigenvals, neg_eigenvects))
+    (nonneg_eigenvals, nonneg_eigenvects)
+}
+
+// extracting the negative part of the above spectral decomposition
+pub fn negeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
+    let (mut neg_eigenvals, mut neg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
+    let (eigenvals, eigenvects) = jacobi_eigen(a, dim);
+    for (val, vect) in eigenvals.iter().zip(eigenvects.into_iter()) {
+	if *val < -1e-8 {
+	    neg_eigenvals.push(*val);
+	    neg_eigenvects.push(vect);
+	}
+    }
+    (neg_eigenvals, neg_eigenvects)
 }
