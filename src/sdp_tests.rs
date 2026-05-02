@@ -38,8 +38,7 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 	}
 	// check that each decision variable is psd
 	for (sm1, obj) in sol1.0.iter().zip(sdp.objective().iter()) {
-	    let (_, (neg_evals, _)) = eigendecomp(&mut sm1.clone(), obj.len());
-	    if neg_evals.iter().any(|lam| *lam < -1e-6) {
+	    if !(negeigendecomp(&mut sm1.clone(), obj.len()).0.is_empty()) {
 		println!("sol {} is not psd", count);
 		return false
 	    }
@@ -77,10 +76,9 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 		    lhs_sym.push(lhs[c * block_dim + r] - constant_mat[c][r]);
 		}
 	    }
-	    let (_, (neg_evals, _)) = eigendecomp(&mut lhs_sym, block_dim);
-	    if neg_evals.iter().any(|lam| *lam < -1e-6) {
+	    if !(negeigendecomp(&mut lhs_sym, block_dim).0.is_empty()) {
 		println!("LMI {} is not satisfied", count);
-		return false;
+		return false
 	    }
 	    count += 1;
 	}
