@@ -6,7 +6,8 @@ const TOTAL_STEPS: usize = 5000;
 
 // the alternating direction dual augmented Lagrangian method
 pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
-    let (mut obj, (mat_red, zeros), point, var_dim, symm_dims, block_size_sum) = sdp_to_standard(sdp);
+    let (mut obj, (mat_red, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp);
+    let block_size_sum : usize = block_dims.iter().sum();
     // adjust objective function so that it acts via the Frobenius product instead of packed dot product
     let obj_frob = scale_off_diag(0.5, var_dim, &mut obj);
     let constr_mat = (&mat_red, &zeros);
@@ -60,27 +61,51 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	(prim_val, dual_val) = (frob_prod_sym(obj_frob, &prim_z, var_dim), dot_prod(&point, &dual_y));
 	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
 	delta = pinf.max(dinf).max(gap);
-	if delta < TOL && pos_def_check(&prim_z, var_dim) {
-	    if block_size_sum == 0 {
-		result.push(prim_z);
-	    } else {
-		for d in symm_dims {
-		    result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &prim_z),
-					  &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &prim_z)));
-		    symm_offset += 2 * d
-		}
-	    }
-	    println!("\nsdpad terminated with desired accuracy");
-	    return (result, prim_val);
-	}
-	if delta > best {
-	    it_stag += 1;
+	if delta < TOL &&
+	    pos_def_block_check(&prim_z, &block_dims.iter().copied().
+				scan(0, |start, dim| {
+				    let block = (*start, dim);
+				    *start += dim;
+				    Some(block)
+				}).chain(
+				    symm_dims.iter().copied().
+					scan(0, |start, dim| {
+					    let block =	[(block_size_sum + *start, dim), (block_size_sum + *start + dim, dim)];
+					    *start += 2 * dim;
+					    Some(block)
+					}).flatten()).collect()) {
+	if block_size_sum == 0 {
+	    result.push(prim_z);
 	} else {
-	    best = delta;
-	    it_stag = 0;
+	    for d in symm_dims {
+		result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &prim_z),
+				      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &prim_z)));
+		symm_offset += 2 * d
+	    }
 	}
-	if ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) &&
-	    pos_def_check(&prim_z, var_dim) {
+	println!("\nsdpad terminated with desired accuracy");
+	return (result, prim_val);
+    }
+    if delta > best {
+	it_stag += 1;
+    } else {
+	best = delta;
+	it_stag = 0;
+    }
+    if ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) &&
+	pos_def_block_check(&prim_z,
+			    &block_dims.iter().copied().
+			    scan(0, |start, dim| {
+				let block = (*start, dim);
+				*start += dim;
+				Some(block)
+			    }).chain(
+				symm_dims.iter().copied().
+				    scan(0, |start, dim| {
+					let block = [(block_size_sum + *start, dim), (block_size_sum + *start + dim, dim)];
+					*start += 2 * dim;
+					Some(block)
+				    }).flatten()).collect()) {
 	    if block_size_sum == 0 {
 		result.push(prim_z);
 	    } else {
@@ -93,7 +118,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	    println!("\nsdpad terminated due to stagnation but with reasonable accuracy");
 	    return (result, prim_val);
 	}
-
+    
 	if count == TOTAL_STEPS {
 	    if block_size_sum == 0 {
 		result.push(prim_z);

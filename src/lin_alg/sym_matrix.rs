@@ -303,20 +303,27 @@ pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vecto
     Some((l, d))
 }
 
-// check whether a symmetric matrix S is positive definite by running LDLT on S + eps * I
-pub fn pos_def_check(mat : &SymMatrix, dim : usize) -> bool {
-    let eps = 1e-8 * sym_mat_one_norm(mat, dim).max(1.0);
-    let mut mat_add_scal : SymMatrix = Vec::new();
-    let mut idx = 0;
-    for c in 0..dim {
-	for _ in 0..c {
-	    mat_add_scal.push(mat[idx]);
+// check whether a block-diagonal symmetric matrix S is positive definite by running LDLT on S + eps * I
+pub fn pos_def_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool {
+    let (mut eps, mut idx) : (f64, usize);
+    for (start, dim) in blocks {
+	let block = &sym_matrix_diag_block(*start, *dim, mat);
+	eps = 1e-8 * sym_mat_one_norm(block, *dim).max(1.0);
+	let mut block_add_scal : SymMatrix = Vec::new();
+	idx = 0;
+	for c in 0..*dim {
+	    for _ in 0..c {
+		block_add_scal.push(block[idx]);
+		idx += 1;
+	    }
+	    block_add_scal.push(block[idx] + eps);
 	    idx += 1;
 	}
-	mat_add_scal.push(mat[idx] + eps);
-	idx += 1;
+	if ldlt_decomp(&block_add_scal, *dim).is_none() {
+	    return false
+	}
     }
-    ldlt_decomp(&mat_add_scal, dim).is_some()
+    true
 }
 
 // diagonal linear system solver

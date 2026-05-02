@@ -47,16 +47,17 @@ fn matrixsym_flatten(mat : &MatrixSym) -> Matrix {
 }
 
 // converting a user-given SDP to one in standard form (c, A, b)
-// also stores the dimension of the final decision variable, the dimensions of any smaller input decision variables,
-// and the total size of the block constraints
-pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>), Vector, usize, Vec<usize>, usize) {
+// also stores the dimension of the final decision variable,
+// the dimensions of any smaller input decision variables,
+// and the dimensions of the block constraints
+pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>), Vector, usize, Vec<usize>, Vec<usize>) {
     if sdp.lmi.is_empty() {
 	assert!(sdp.objective.len() == 1,
 		"you must supply exactly one objective map since you have exactly one decision variable");
 	if sdp.constraint.0.is_empty() {
 	    let obj = &sdp.objective[0];
 	    (obj.concat(), (vec![], vec![]), vec![], obj.last().expect("you have not provided an objective function").len(),
-	     vec![], 0)
+	     vec![], vec![])
 	} else if sdp.constraint.0.len() == 1 {
 	    let obj = &sdp.objective[0];
 	    // make augmented constraint matrix full rank
@@ -66,7 +67,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 	    let point = constraints_red.pop().unwrap_or(vec![]);
 
 	    (obj.concat(), (constraints_red, vec![]), point, obj.last().expect("you have not provided an objective function").len(),
-	     vec![], 0)	    
+	     vec![], vec![])	    
 	} else {
 	    panic!("you have one decision variable but have supplied constraint maps for more than one decision variable");
 	}
@@ -225,7 +226,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 	let mut point = constraints_red.pop().unwrap_or(vec![]);
 	point.extend(vec![0.0; zeros.len()]);
 
-	(obj_sum, (constraints_red, zeros), point, total_dim, symm_dims, block_size_sum)
+	(obj_sum, (constraints_red, zeros), point, total_dim, symm_dims, block_dims)
     }
 }
 
