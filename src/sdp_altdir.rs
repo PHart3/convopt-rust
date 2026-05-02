@@ -60,7 +60,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	(prim_val, dual_val) = (frob_prod_sym(obj_frob, &prim_z, var_dim), dot_prod(&point, &dual_y));
 	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
 	delta = pinf.max(dinf).max(gap);
-	if pos_def_check(&prim_z, var_dim) && delta < TOL {
+	if delta < TOL && pos_def_check(&prim_z, var_dim) {
 	    if block_size_sum == 0 {
 		result.push(prim_z);
 	    } else {
@@ -79,8 +79,8 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	    best = delta;
 	    it_stag = 0;
 	}
-	if pos_def_check(&prim_z, var_dim) &&
-	    ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) {
+	if ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) &&
+	    pos_def_check(&prim_z, var_dim) {
 	    if block_size_sum == 0 {
 		result.push(prim_z);
 	    } else {
