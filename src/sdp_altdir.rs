@@ -62,7 +62,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
 	delta = pinf.max(dinf).max(gap);
 	if delta < TOL &&
-	    pos_def_block_check(&prim_z, &block_dims.iter().copied().
+	    psd_block_check(&prim_z, &block_dims.iter().copied().
 				scan(0, |start, dim| {
 				    let block = (*start, dim);
 				    *start += dim;
@@ -93,7 +93,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	it_stag = 0;
     }
     if ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) &&
-	pos_def_block_check(&prim_z,
+	psd_block_check(&prim_z,
 			    &block_dims.iter().copied().
 			    scan(0, |start, dim| {
 				let block = (*start, dim);

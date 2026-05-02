@@ -303,8 +303,8 @@ pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vecto
     Some((l, d))
 }
 
-// check whether a block-diagonal symmetric matrix S is positive definite by running LDLT on S + eps * I
-pub fn pos_def_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool {
+// check whether a block-diagonal symmetric matrix S is positive semidefinite by running LDLT on S + eps * I
+pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool {
     let (mut eps, mut idx) : (f64, usize);
     for (start, dim) in blocks {
 	let block = &sym_matrix_diag_block(*start, *dim, mat);
