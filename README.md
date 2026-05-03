@@ -1,6 +1,6 @@
-# Summary
+# Semidefinite Programming in Rust
 
-This repository provides a first-order semidefinite programming (SDP) solver with a flexible problem-input format. It is self-contained, implementing its own numerical linear algebra routines. The solver is based on the dual augmented Lagrangian method described in the following paper:
+This library provides a first-order semidefinite programming (SDP) solver with a flexible problem-input format. It is self-contained, implementing its own numerical linear algebra routines. The solver is based on the dual augmented Lagrangian method described in the following paper:
 
 Z. Wen, D. Goldfarb, and W. Yin, “Alternating direction augmented Lagrangian methods for semidefinite programming,” *Mathematical Programming Computation*, 2, 203–230, 2010. [DOI: 10.1007/s12532-010-0017-1](https://doi.org/10.1007/s12532-010-0017-1).
 
