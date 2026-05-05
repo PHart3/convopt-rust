@@ -197,6 +197,36 @@ pub fn mat_sym_diagonal_mult_sym(sym_dim : usize, mat : &SymMatrix, start : usiz
     result
 }
 
+// removes redundant constraints from an augmented matrix [A | b] where rows of A represent symmetric matrices
+// also preconditions resulting constraint matrix by normalizing rows
+pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
+    let (echelon, rank, solvable) = gauss_elim(mat);
+    if !solvable {
+        panic!("linear_remove_redundant: your system of constraints is inconsistent");
+    } else {
+	let mut result : Matrix = vec![vec![]; echelon.len()];
+	let (mut diag, mut scale) : (usize, f64);
+	for i in 0..rank {
+	    scale = 0.0;
+	    for k in 0..dim {
+		diag = (k * k + 3 * k) / 2;
+		for col in echelon.iter().take(diag) {
+		    scale += col[i] * col[i] * 0.5;
+		}
+		scale += echelon[diag][i] * echelon[diag][i];
+	    }
+	    if scale == 0.0 {
+		panic!("linear_remove_redundant_sym: gauss_elim has kept a numerically zero row");
+	    }
+	    scale = scale.sqrt();
+	    for (j, col) in echelon.iter().enumerate() {
+		result[j].push(col[i] / scale);
+	    }
+	}
+	result
+    }
+}
+
 // the constraint matrix for block-diagonal decision variable Z is represented implicitly by a matrix M and a vector V
 // each row of M is a symmetric matrix
 // V is a list of pairs (row, column), with column >= row, representing entries of Z that must be zero
@@ -308,7 +338,7 @@ pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool 
     let (mut eps, mut idx) : (f64, usize);
     for (start, dim) in blocks {
 	let block = &sym_matrix_diag_block(*start, *dim, mat);
-	eps = 1e-8 * sym_mat_one_norm(block, *dim).max(1.0);
+	eps = 1e-9 * sym_mat_one_norm(block, *dim).max(1.0);
 	let mut block_add_scal : SymMatrix = Vec::new();
 	idx = 0;
 	for c in 0..*dim {

@@ -130,20 +130,11 @@ pub fn negscal_vect(s : f64, vect : &Vector) -> Vector {
     result
 }
 
-// computing vector of form vect1 + s* vect2
+// computing vector of form vect1 + s * vect2
 pub fn vect_add_scaled(vect1 : &Vector, s : f64, vect2 : &Vector) -> Vector {
     let mut result : Vector = Vec::new(); 
     for (v1, v2) in vect1.iter().zip(vect2.iter()) {
 	result.push(v1 + s * v2);
-    }
-    result
-}
-
-// form submatrix of first n rows
-pub fn rows_submatrix(mat : &Matrix, n : usize) -> Matrix {
-    let mut result : Matrix = Vec::new();
-    for col in mat {
-	result.push(col[0..n].to_vec());
     }
     result
 }
@@ -210,16 +201,6 @@ pub fn gauss_elim(mat : &mut Matrix) -> (&mut Matrix, usize, bool) {
 	}
     }
     (mat, row_search, row_search == coeff_rank)
-}
-
-// remove redundant constraints from an augmented matrix
-pub fn linear_remove_redundant(mut mat : Matrix) -> Matrix {
-    let (echelon, rank, solvable) = gauss_elim(&mut mat);
-    if !solvable {
-	panic!("linear_remove_redundant: your system of constraints is inconsistent");
-    } else {
-	rows_submatrix(echelon, rank)
-    }
 }
 
 // column-major lower triangular matrix stored as a flat vector
