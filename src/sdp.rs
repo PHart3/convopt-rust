@@ -63,11 +63,11 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 	    // make augmented constraint matrix full rank
 	    let mut constraints = matrixsym_flatten(&(sdp.constraint.0)[0]);
 	    constraints.push(sdp.constraint.1.clone());
-	    let mut constraints_red = linear_remove_redundant(constraints);
+	    let total_dim = obj.last().expect("you have not provided an objective function").len();
+	    let mut constraints_red = linear_remove_redundant_sym(&mut constraints, total_dim);
 	    let point = constraints_red.pop().unwrap_or(vec![]);
 
-	    (obj.concat(), (constraints_red, vec![]), point, obj.last().expect("you have not provided an objective function").len(),
-	     vec![], vec![])	    
+	    (obj.concat(), (constraints_red, vec![]), point, total_dim, vec![], vec![])	    
 	} else {
 	    panic!("you have one decision variable but have supplied constraint maps for more than one decision variable");
 	}
@@ -222,7 +222,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 
 	// make augmented constraint matrix full rank
 	constraints.0.push(constraints.1);
-	let mut constraints_red = linear_remove_redundant(constraints.0);
+	let mut constraints_red = linear_remove_redundant_sym(&mut constraints.0, total_dim);
 	let mut point = constraints_red.pop().unwrap_or(vec![]);
 	point.extend(vec![0.0; zeros.len()]);
 
