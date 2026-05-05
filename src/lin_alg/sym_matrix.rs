@@ -6,12 +6,14 @@ pub type SymMatrix = Vector;
 // Frobenius inner product of two symmetric matrices
 pub fn frob_prod_sym(mat1 : &SymMatrix, mat2 : &SymMatrix, dim : usize) -> f64 {
     let (mut sum, mut start) = (0.0, 0);
+    let mut idx;
     for n in 0..dim {
 	start += n;
 	for i in 0..n {
 	    sum += mat1[start + i] * mat2[start + i] * 2.0;
 	}
-	sum += mat1[start + n] * mat2[start + n];
+	idx = start + n;
+	sum = mat1[idx].mul_add(mat2[idx], sum);
     }
     sum
 }
@@ -316,7 +318,7 @@ pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vecto
 	for j in 0..i {
 	    sum = 0.0;
 	    for k in 0..j {
-		sum += l[k * (2 * dim - k + 1) / 2 + (i - k)] * l[k * (2 * dim - k + 1) / 2 + (j - k)] * d[k];
+		sum = (l[k * (2 * dim - k + 1) / 2 + (i - k)] * l[k * (2 * dim - k + 1) / 2 + (j - k)]).mul_add(d[k], sum);
 	    }
 	    l[j * (2 * dim - j + 1) / 2 + (i - j)] = (mat[(i * (i + 1)) / 2 + j] - sum) / d[j]
 	}
@@ -324,7 +326,7 @@ pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vecto
 	sum = 0.0;
 	for k in 0..i {
 	    ind = k * (2 * dim - k + 1) / 2 + (i - k);
-	    sum += l[ind] * l[ind] * d[k];
+	    sum = (l[ind] * l[ind]).mul_add(d[k], sum);
 	}
 	d.push(mat[(i * i + 3 * i) / 2] - sum);
 

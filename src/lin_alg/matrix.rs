@@ -73,7 +73,7 @@ pub fn zero_mat(dim_c : usize, dim_r : usize) -> Matrix {
 pub fn dot_prod(vect1 : &Vector, vect2 : &Vector) -> f64 {
     let mut prod = 0.0;
     for (e1, e2) in vect1.iter().zip(vect2.iter()) {
-	prod += e1 * e2;
+	prod = (*e1).mul_add(*e2, prod);
     }
     prod
 }
@@ -89,7 +89,7 @@ pub fn euclid_distance(vect1 : &Vector, vect2 : &Vector) -> f64 {
     let mut diff;
     for (v1, v2) in vect1.iter().zip(vect2.iter()) {
 	diff = v1 - v2;
-	sum += diff * diff;
+	sum = diff.mul_add(diff, sum);
     }
     sum.sqrt()
 }
@@ -134,7 +134,7 @@ pub fn negscal_vect(s : f64, vect : &Vector) -> Vector {
 pub fn vect_add_scaled(vect1 : &Vector, s : f64, vect2 : &Vector) -> Vector {
     let mut result : Vector = Vec::new(); 
     for (v1, v2) in vect1.iter().zip(vect2.iter()) {
-	result.push(v1 + s * v2);
+	result.push(s.mul_add(*v2, *v1));
     }
     result
 }
