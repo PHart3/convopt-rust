@@ -219,9 +219,6 @@ pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
 		scale += echelon[diag][i] * echelon[diag][i];
 		start += k;
 	    }
-	    if scale == 0.0 {
-		panic!("linear_remove_redundant_sym: gauss_elim has kept a numerically zero row");
-	    }
 	    scale = scale.sqrt();
 	    for (j, col) in echelon.iter().enumerate() {
 		result[j].push(col[i] / scale);
