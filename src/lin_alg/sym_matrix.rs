@@ -204,16 +204,18 @@ pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
     if !solvable {
         panic!("linear_remove_redundant: your system of constraints is inconsistent");
     } else {
-	let mut result : Matrix = vec![vec![]; echelon.len()];
-	let (mut diag, mut scale) : (usize, f64);
+	let mut result : Matrix = vec![Vec::with_capacity(rank); echelon.len()];
+	let (mut diag, mut start, mut scale) : (usize, usize, f64);
 	for i in 0..rank {
-	    scale = 0.0;
-	    for k in 0..dim {
+	    scale = echelon[0][i] * echelon[0][i];
+	    start = 1;
+	    for k in 1..dim {
 		diag = (k * k + 3 * k) / 2;
-		for col in echelon.iter().take(diag) {
+		for col in &echelon[start..diag] {
 		    scale += col[i] * col[i] * 0.5;
 		}
 		scale += echelon[diag][i] * echelon[diag][i];
+		start += k;
 	    }
 	    if scale == 0.0 {
 		panic!("linear_remove_redundant_sym: gauss_elim has kept a numerically zero row");
