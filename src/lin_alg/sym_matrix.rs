@@ -201,32 +201,34 @@ pub fn mat_sym_diagonal_mult_sym(sym_dim : usize, mat : &SymMatrix, start : usiz
 
 // removes redundant constraints from an augmented matrix [A | b] where rows of A represent symmetric matrices
 // also preconditions resulting constraint matrix by normalizing rows
+use std::f64::consts::FRAC_1_SQRT_2;
 pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
     let (echelon, rank, solvable) = gauss_elim(mat);
     if !solvable {
         panic!("linear_remove_redundant: your system of constraints is inconsistent");
-    } else {
-	let mut result : Matrix = vec![Vec::with_capacity(rank); echelon.len()];
-	let (mut diag, mut start, mut scale) : (usize, usize, f64);
-	for i in 0..rank {
-	    scale = echelon[0][i] * echelon[0][i];
-	    start = 1;
-	    for k in 1..dim {
-		diag = (k * k + 3 * k) / 2;
-		for col in &echelon[start..diag] {
-		    scale += col[i] * col[i] * 0.5;
-		}
-		scale += echelon[diag][i] * echelon[diag][i];
-		start += k;
-	    }
-	    scale = scale.sqrt();
-	    for (j, col) in echelon.iter().enumerate() {
-		result[j].push(col[i] / scale);
-	    }
-	}
-	result
     }
+    let mut result : Matrix = vec![Vec::with_capacity(rank); echelon.len()];
+    let (mut start, mut scale) : (usize, f64);
+    for i in 0..rank {
+	scale = 0.0;
+	scale = scale.hypot(echelon[0][i]);
+	start = 1;
+	for k in 1..dim {
+	    let diag = (k * k + 3 * k) / 2;
+	    for col in &echelon[start..diag] {
+		scale = scale.hypot(col[i] * FRAC_1_SQRT_2);
+	    }
+	    scale = scale.hypot(echelon[diag][i]);
+	    start += k;
+	}
+	assert!(scale.is_finite(), "linear_remove_redundant_sym: row has non-finite packed norm");
+	for (j, col) in echelon.iter().enumerate() {
+	    result[j].push(col[i] / scale);
+	}
+    }
+    result
 }
+
 
 // the constraint matrix for block-diagonal decision variable Z is represented implicitly by a matrix M and a vector V
 // each row of M is a symmetric matrix
