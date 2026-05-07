@@ -45,10 +45,13 @@ fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, k : usize, j :
 	mat[ind_mj] = c * val_old_j - s * val_old_k;
     }
     
-    for i in 0..orth[0].len() {
-	let tmp = orth[j][i];
-	orth[j][i] = c * tmp - s * orth[k][i];
-	orth[k][i] = s * tmp + c * orth[k][i];
+    let (left, right) = orth.split_at_mut(k);
+    let col_j = &mut left[j];
+    let col_k = &mut right[0];
+    for (vj, vk) in col_j.iter_mut().zip(col_k.iter_mut()) {
+	let old_j = *vj;
+	*vj = c * old_j - s * *vk;
+	*vk = s * old_j + c * *vk;
     }
     (mat, orth, val_old.abs())
 }
