@@ -139,28 +139,17 @@ pub fn vect_add_scaled(vect1 : &Vector, s : f64, vect2 : &Vector) -> Vector {
     result
 }
 
-// matrix addition
-pub fn matrix_add(mat1 : &Matrix, mat2 : &Matrix) -> Matrix {
+
+// evaluates the matrix expression A + (B - C)
+pub fn matrix_add_diff(mat1 : &Matrix, mat2 : &Matrix, mat3 : &Matrix) -> Matrix {
     let (dim_c, dim_r) = (mat1.len(), mat1[0].len());
     let mut sum : Matrix = zero_mat(dim_c, dim_r);
-    for (n, (col1, col2)) in mat1.iter().zip(mat2.iter()).enumerate() {
-	for (m, (v1, v2)) in col1.iter().zip(col2.iter()).enumerate() {
-            sum[n][m] = v1 + v2;
+    for (n, (col1, (col2, col3))) in mat1.iter().zip(mat2.iter().zip(mat3.iter())).enumerate() {
+	for (m, (v1, (v2, v3))) in col1.iter().zip(col2.iter().zip(col3.iter())).enumerate() {
+            sum[n][m] = v1 + (v2 - v3);
 	}
     }
     sum
-}
-
-// matrix subtraction
-pub fn matrix_subt(mat1 : &Matrix, mat2 : &Matrix) -> Matrix {
-    let (dim_c, dim_r) = (mat1.len(), mat1[0].len());
-    let mut diff : Matrix = zero_mat(dim_c, dim_r);
-    for (n, (col1, col2)) in mat1.iter().zip(mat2.iter()).enumerate() {
-	for (m, (v1, v2)) in col1.iter().zip(col2.iter()).enumerate() {
-            diff[n][m] = v1 - v2;
-	}
-    }
-    diff
 }
 
 // Gaussian elimination via partial pivoting

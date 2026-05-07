@@ -107,7 +107,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 	let mut blocks : Vec<(Matrix, Vector)> = Vec::with_capacity(sequence_len + 1);
 	let mut sum : Matrix;
 	let (mut symm_offset, mut dim);
-	let (mut map_flatten, mut block_diff, mut block_current);
+	let (mut map_flatten, mut block_current);
 	let (mut block_offset, mut b) = (0, 0);
 	let mut row;
 	for (maps, mat) in lmis {
@@ -121,10 +121,9 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 		}
 		dim = symm_dims[n];
 		map_flatten = matrixsym_flatten(map);
-		block_diff = matrix_subt(
-		    &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset, dim),
-		    &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset + dim, dim));
-		sum = matrix_add(&sum, &block_diff);
+		sum = matrix_add_diff(&sum,
+				      &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset, dim),
+				      &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset + dim, dim));
 		symm_offset += 2 * dim;
 	    }
 	    block_current = sym_matrix_diag_block_map(block_offset, block_size);
@@ -149,7 +148,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 	let constr_len = sdp.constraint.1.len();
 	let mut obj_sum : SymMatrix = vec![0.0; total_size];
 	let mut constr_sum : Matrix;
-	let (mut obj_flatten, mut obj_diff) : (SymMatrix, SymMatrix);
+	let mut obj_flatten : SymMatrix;
 	symm_offset = 0;
 	if sdp.constraint.0.is_empty() {
 	    assert!(sdp.constraint.1.is_empty(), "empty constraints but nonempty vector");
@@ -158,11 +157,11 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 		dim = symm_dims[n];
 
 		obj_flatten = obj.concat();
-		obj_diff = vect_subt(
-		    &mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset, dim),
-		    &mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset + dim, dim));
-		obj_sum = vect_add(&obj_sum, &obj_diff);
-
+		let db1 = mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset, dim);
+		let db2 = mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset + dim, dim);
+		for ((s, v1), v2) in obj_sum.iter_mut().zip(db1.iter()).zip(db2.iter()) {
+		    *s += *v1 - *v2;
+		}
 		symm_offset += 2 * dim;
 	    }
 	} else {
@@ -171,16 +170,16 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 		dim = symm_dims[n];
 
 		obj_flatten = obj.concat();
-		obj_diff = vect_subt(
-		    &mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset, dim),
-		    &mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset + dim, dim));
-		obj_sum = vect_add(&obj_sum, &obj_diff);
+		let db1 = mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset, dim);
+		let db2 = mat_sym_diagonal_mult_sym(total_dim, &obj_flatten, block_size_sum + symm_offset + dim, dim);
+		for ((s, v1), v2) in obj_sum.iter_mut().zip(db1.iter()).zip(db2.iter()) {
+		    *s += *v1 - *v2;
+		}
 
 		map_flatten = matrixsym_flatten(constr);
-		block_diff = matrix_subt(
-		    &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset, dim),
-		    &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset + dim, dim));
-		constr_sum = matrix_add(&constr_sum, &block_diff);
+		constr_sum = matrix_add_diff(&constr_sum,
+					     &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset, dim),
+					     &matrix_diagonal_mult_sym(total_dim, &map_flatten, block_size_sum + symm_offset + dim, dim));
 
 		symm_offset += 2 * dim;
 	    }

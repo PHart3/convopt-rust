@@ -242,7 +242,7 @@ pub fn constraint_action((mat, list) : &(&Matrix, &Vec<(usize, usize)>), var : &
     }
     let mut result = scal_vect(var[0], &mat[0]);
     for (n, col) in mat.iter().enumerate().skip(1) {
-	result = vect_add(&result, &scal_vect(var[n], col));
+	result = vect_add_scaled(&result, var[n], col);
     }
     for (r, c) in *list {
 	result.push(var[(c * (c + 1)) / 2 + r]);
@@ -287,20 +287,26 @@ pub fn constraint_gram(dim : usize, mat : &Matrix) -> SymMatrix {
     for i in 0..dim {
 	diag = (i * i + 3 * i) / 2;
 	for j in start..diag {
-	    result = vect_add_scaled(&result, 0.5, &outer_prod_single(&mat[j]));
+	    for (r, p) in result.iter_mut().zip(outer_prod_single(&mat[j]).iter()) {
+		*r += 0.5 * p;
+	    }
 	}
-	result = vect_add(&result, &outer_prod_single(&mat[diag]));
+	for (r, p) in result.iter_mut().zip(outer_prod_single(&mat[diag]).iter()) {
+	    *r += p;
+	}
 	start += i + 1;
     }
     result
 }
 
-// optimized computation of QDQ^T where Q is any matrix and D is diagonal
+// computation of QDQ^T where Q is any matrix and D is diagonal
 pub fn diag_scale_gram(d : &Vector, q : &Matrix) -> SymMatrix {
     let len = q[0].len();
     let mut result = vec![0.0; len * (len + 1) / 2]; 
     for (s, c) in d.iter().zip(q) {
-	result = vect_add(&result, &outer_prod_single_scale(*s, c));
+	for (r, p) in result.iter_mut().zip(outer_prod_single_scale(*s, c).iter()) {
+	   *r += p; 
+	}
     }
     result
 }
