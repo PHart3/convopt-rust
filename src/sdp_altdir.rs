@@ -7,7 +7,7 @@ const TOTAL_STEPS: usize = 5000;
 // the alternating direction dual augmented Lagrangian method
 pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
     let (mut obj, (mat_red, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp);
-    let block_size_sum : usize = block_dims.iter().sum();
+    let (c_len, block_size_sum) : (usize, usize) = (mat_red.first().unwrap_or(&vec![]).len(), block_dims.iter().sum());
     // adjust objective function so that it acts via the Frobenius product instead of packed dot product
     let obj_frob = scale_off_diag(0.5, var_dim, &mut obj);
     let constr_mat = (&mat_red, &zeros);
@@ -24,7 +24,9 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
     let (mut pinf, mut dinf, mut gap) : (f64, f64, f64);
     let mut delta : f64;
     let mut best = f64::INFINITY;
-    let (mut inverse_y, mut dual_sfull, mut dual_sfull_temp, mut diff) : (Vector, SymMatrix, SymMatrix, SymMatrix);
+    let (mut inverse_y, mut dual_sfull, mut dual_sfull_temp) : (Vector, SymMatrix, SymMatrix) =
+	(Vec::with_capacity(c_len), Vec::with_capacity(var_dim), Vec::with_capacity(var_dim));
+    let mut diff : SymMatrix;
     let (mut symm_offset, mut result) : (usize, Vec<SymMatrix>) = (0, Vec::new());
     let (mut action, mut lin_comb) : (Vector, SymMatrix);
     let (mut prim_val, mut dual_val) : (f64, f64);
@@ -35,25 +37,34 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	count += 1;
 
 	action = constraint_action(&constr_mat, &prim_z);
-	inverse_y = vect_add(&scal_vect(penalty, &vect_subt(&point, &action)),
-			     &constraint_action(&constr_mat, &vect_subt(obj_frob, &dual_s)));
+	inverse_y.clear();
+	for (i, a) in constraint_action(&constr_mat, &vect_subt(obj_frob, &dual_s)).iter().enumerate() {
+	    inverse_y.push(penalty * (point[i] - action[i]) + a);
+	}
 	dual_y = if point.is_empty() {
 	    vec![]
 	} else {
 	    pos_def_solver_upperleft(&gram_small, &mut inverse_y, zeros.len())
 	};
 	lin_comb = constraint_lin_comb(var_dim, &constr_mat, &dual_y);
-	diff = vect_subt(obj_frob, &lin_comb);	
-	dual_sfull = vect_subt(&diff, &scal_vect(penalty, &prim_z));
-	dual_sfull_temp = dual_sfull.clone();
+	diff = vect_subt(obj_frob, &lin_comb);
+	dual_sfull.clear();
+	dual_sfull_temp.clear();
+	for i in 0..var_dim_tot {
+	    let val = diff[i] - penalty * prim_z[i];
+	    dual_sfull.push(val);
+	    dual_sfull_temp.push(val);
+	}
 	let (egnvals, egnvects) : (Vector, Matrix) = nonnegeigendecomp(&mut dual_sfull_temp, var_dim);
 	if egnvals.is_empty() {
 	    dual_s = vec![0.0; var_dim_tot];
 	} else {
 	    dual_s = diag_scale_gram(&egnvals, &egnvects)
 	}
-	
-	prim_z = vect_add(&scal_vect(1.0 - step, &prim_z), &scal_vect(step / penalty, &vect_subt(&dual_s, &dual_sfull)));
+
+	for i in 0..var_dim_tot {
+	    prim_z[i] = (1.0 - step) * prim_z[i] + (step / penalty) * (dual_s[i] - dual_sfull[i]);
+	}
 	
 	pinf = euclid_distance(&constraint_action(&constr_mat, &prim_z), &point) / (1.0 + euclid_norm(&point));
 	dinf = frob_dist_sym(&diff, &dual_s, var_dim) / (1.0 + sym_mat_one_norm(obj_frob, var_dim));
