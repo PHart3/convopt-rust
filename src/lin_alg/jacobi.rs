@@ -45,9 +45,11 @@ fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, k : usize, j :
 	mat[ind_mj] = c * val_old_j - s * val_old_k;
     }
     
-    let tmp_col = orth[j].clone();
-    orth[j] = vect_subt(&scal_vect(c, &orth[j]), &scal_vect(s, &orth[k]));
-    orth[k] = vect_add(&scal_vect(s, &tmp_col), &scal_vect(c, &orth[k]));
+    for i in 0..orth[0].len() {
+	let tmp = orth[j][i];
+	orth[j][i] = c * tmp - s * orth[k][i];
+	orth[k][i] = s * tmp + c * orth[k][i];
+    }
     (mat, orth, val_old.abs())
 }
 
