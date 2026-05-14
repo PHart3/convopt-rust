@@ -207,12 +207,13 @@ pub fn ident_mat_low_tri(dim : usize) -> LowTriMatrix {
     result
 }
 
+// testing if two vectors are the same
+
 pub fn float_equality(f1: f64, f2: f64, tol: f64) -> bool {
     let diff = (f1 - f2).abs();
     diff <= tol || diff <= tol * f2.abs().max(f1.abs())
 }
 
-// testing if two vectors are the same
 pub fn vector_equality(vect1 : &Vector, vect2 : &Vector, tol : f64) -> bool {
     if vect1.len() != vect2.len() {
 	return false;
