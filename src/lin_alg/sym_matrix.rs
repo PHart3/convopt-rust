@@ -301,7 +301,7 @@ pub fn constraint_gram(dim : usize, mat : &Matrix) -> SymMatrix {
 
 // computation of QDQ^T where Q is any matrix and D is diagonal
 pub fn diag_scale_gram(d : &Vector, q : &Matrix) -> SymMatrix {
-    let len = q[0].len();
+    let len = q.first().unwrap_or(&vec![]).len();
     let mut result = vec![0.0; len * (len + 1) / 2]; 
     for (s, c) in d.iter().zip(q) {
 	for (r, p) in result.iter_mut().zip(outer_prod_single_scale(*s, c).iter()) {
