@@ -142,8 +142,7 @@ pub fn vect_add_scaled(vect1 : &Vector, s : f64, vect2 : &Vector) -> Vector {
 
 // evaluates the matrix expression A + (B - C)
 pub fn matrix_add_diff(mat1 : &Matrix, mat2 : &Matrix, mat3 : &Matrix) -> Matrix {
-    let (dim_c, dim_r) = (mat1.len(), mat1[0].len());
-    let mut sum : Matrix = zero_mat(dim_c, dim_r);
+    let mut sum : Matrix = zero_mat(mat1.len(), mat1[0].len());
     for (n, (col1, (col2, col3))) in mat1.iter().zip(mat2.iter().zip(mat3.iter())).enumerate() {
 	for (m, (v1, (v2, v3))) in col1.iter().zip(col2.iter().zip(col3.iter())).enumerate() {
             sum[n][m] = v1 + (v2 - v3);
