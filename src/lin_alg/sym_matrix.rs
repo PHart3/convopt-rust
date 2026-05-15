@@ -365,11 +365,15 @@ pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool 
     true
 }
 
-// diagonal linear system solver
+// solver for diagonal linear system Dx = b
 pub fn diag_solver(diag : &Vector, vect : &Vector) -> Vector {
     let mut solution = Vec::new();
+    let scale = diag.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     for (v, d) in vect.iter().zip(diag.iter()) {
-	solution.push(v / d);
+        if d.abs() < TOL * scale {
+            panic!("diag_solver: division by zero");
+        }
+        solution.push(v / d);
     }
     solution
 }
