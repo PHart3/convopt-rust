@@ -175,7 +175,7 @@ For example, a symmetric `2 x 2` matrix is represented in packed form as
 and a symmetric `3 x 3` matrix is represented as
 
 ```text
-[X_11, X_12, X_22, X_13, X_23, X_33]
+[X_11, X_12, X_22, X_13, X_23, X_33].
 ```
 
 The following helper constructors are provided in `src/sdp.rs`:
