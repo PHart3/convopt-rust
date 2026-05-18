@@ -95,7 +95,7 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 		    symm_size_sum += symm_size; 
 		}
 	    } else {
-		assert_eq!(maps.len(), map_len_old.expect("safely initialized"),
+		assert_eq!(maps.len(), map_len_old.expect("never initialized"),
 			   "each LMI must have the same number of decision variables");
 		map_len_old = Some(maps.len());
 	    }
