@@ -346,8 +346,8 @@ pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vecto
 pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool {
     let (mut eps, mut idx) : (f64, usize);
     for (start, dim) in blocks {
-	let block = &sym_matrix_diag_block(*start, *dim, mat);
-	eps = 1e-9 * sym_mat_one_norm(block, *dim).max(1.0);
+	let block = sym_matrix_diag_block(*start, *dim, mat);
+	eps = 1e-9 * sym_mat_one_norm(&block, *dim).max(1.0);
 	let mut block_add_scal : SymMatrix = Vec::new();
 	idx = 0;
 	for c in 0..*dim {

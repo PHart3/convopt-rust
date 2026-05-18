@@ -45,7 +45,7 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 	    count += 1;
 	}
 	// check linear constraints
-	let (maps_by_var, rhs) = &sdp.constraint();
+	let (maps_by_var, rhs) = sdp.constraint();
 	let mut lhs;
 	if !maps_by_var.is_empty() {
             for j in 0..rhs.len() {
