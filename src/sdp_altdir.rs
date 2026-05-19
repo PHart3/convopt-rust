@@ -127,6 +127,7 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 		}
 	    }
 	    println!("\nsdpad terminated due to stagnation but with reasonable accuracy");
+	    println!("solution quality: pinf={:.3e} dinf={:.3e} gap={:.3e}", pinf, dinf, gap);
 	    return (result, prim_val);
 	}
     
