@@ -54,10 +54,10 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
 	    } else if c_len > 0 {
 		// if we did not remove redundant constraints during sdp_to_standard,
 		// we must regularize the Gram matrix so that it can be fed to the solver
-		let reg : f64 = trace_sym(&gram_small, c_len) / (c_len as f64);
+		let reg : f64 = max_diag_sym(&gram_small, c_len);
 		let mut gram_small_reg = gram_small.clone();
 		for i in 0..c_len {
-		    gram_small_reg[(i * i + 3 * i) / 2] += 1e-9 * reg.max(1.0);
+		    gram_small_reg[(i * i + 3 * i) / 2] += TOL * reg.max(1.0);
 		}
 		solved = pos_def_solver_upperleft(&gram_small_reg, &mut inverse_y, zeros.len());
 		// compute the residual of the regularized system

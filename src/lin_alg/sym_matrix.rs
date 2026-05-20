@@ -3,13 +3,16 @@
 pub use crate::lin_alg::matrix::*;
 pub type SymMatrix = Vector;
 
-// trace of a symmetric matrix
-pub fn trace_sym(mat : &SymMatrix, dim : usize) -> f64 {
-    let mut sum = 0.0;
-    for i in 0..dim {
-	sum += mat[(i * i + 3 * i) / 2];
+// max diagonal of a symmetric matrix
+pub fn max_diag_sym(mat : &SymMatrix, dim : usize) -> f64 {
+    let mut max : f64 = mat.first().unwrap_or(&0.0).abs();
+    for i in 1..dim {
+	let diag = mat[(i * i + 3 * i) / 2].abs();
+	if max < diag {
+	    max = diag
+	}
     }
-    sum
+    max
 }
 
 // Frobenius inner product of two symmetric matrices
@@ -361,7 +364,7 @@ pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vecto
 	}
 	d.push(mat[(i * i + 3 * i) / 2] - sum);
 
-	if d[i] < TOL * sym_mat_one_norm(mat, dim).max(1.0) {
+	if d[i] < TOL * max_diag_sym(mat, dim).max(1.0) {
 	    return None;
 	}
     }
@@ -373,7 +376,7 @@ pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool 
     let (mut eps, mut idx) : (f64, usize);
     for (start, dim) in blocks {
 	let block = sym_matrix_diag_block(*start, *dim, mat);
-	eps = 1e-9 * sym_mat_one_norm(&block, *dim).max(1.0);
+	eps = 1e-9 * max_diag_sym(&block, *dim).max(1.0);
 	let mut block_add_scal : SymMatrix = Vec::new();
 	idx = 0;
 	for c in 0..*dim {
