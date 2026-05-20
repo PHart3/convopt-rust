@@ -174,7 +174,7 @@ pub fn negeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     let (eigenvals, eigenvects) = jacobi_eigen(a, dim);
     for (val, vect) in eigenvals.iter().zip(eigenvects.into_iter()) {
-	if *val < -(1e-9 * scale) {
+	if *val < -(1e-8 * scale) {
 	    neg_eigenvals.push(*val);
 	    neg_eigenvects.push(vect);
 	}

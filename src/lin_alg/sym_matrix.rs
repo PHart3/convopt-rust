@@ -71,7 +71,7 @@ pub fn ident_sym_mat(dim : usize) -> SymMatrix {
 }
 
 // action of symmetric matrix on vector
-pub fn sym_mat_act(mat : &SymMatrix, v : &Vector) -> Vector {
+pub fn sym_mat_act(mat : &SymMatrix, v : &[f64]) -> Vector {
     let dim = v.len();
     let mut result = vec![0.0; dim];
     let mut start;
