@@ -50,7 +50,12 @@ fn matrixsym_flatten(mat : &MatrixSym) -> Matrix {
 // also stores the dimension of the final decision variable,
 // the dimensions of any smaller input decision variables,
 // and the dimensions of the block constraints
-pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>), Vector, usize, Vec<usize>, Vec<usize>) {
+
+// takes a boolean flag "check_constraints" to decide whether to
+// run Gaussian elimination on dense constraint matrix
+pub fn sdp_to_standard(sdp : &SDP, check_constraints : bool) ->
+    (SymMatrix, (Matrix, Vec<(usize, usize)>), Vector, usize, Vec<usize>, Vec<usize>)
+{
     if sdp.lmi.is_empty() {
 	assert!(sdp.objective.len() == 1,
 		"you must supply exactly one objective map since you have exactly one decision variable");
@@ -60,14 +65,19 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 	     vec![], vec![])
 	} else if sdp.constraint.0.len() == 1 {
 	    let obj = &sdp.objective[0];
-	    // make augmented constraint matrix full rank
-	    let mut constraints = matrixsym_flatten(&(sdp.constraint.0)[0]);
-	    constraints.push(sdp.constraint.1.clone());
 	    let total_dim = obj.last().expect("you have not provided an objective function").len();
-	    let mut constraints_red = linear_remove_redundant_sym(&mut constraints, total_dim);
-	    let point = constraints_red.pop().unwrap_or(vec![]);
+	    if check_constraints {
+		// make augmented constraint matrix full rank
+		let mut constraints = matrixsym_flatten(&(sdp.constraint.0)[0]);
+		constraints.push(sdp.constraint.1.clone());
+		let mut constraints_red = linear_remove_redundant_sym(&mut constraints, total_dim);
+		let point = constraints_red.pop().unwrap_or(vec![]);
 
-	    (obj.concat(), (constraints_red, vec![]), point, total_dim, vec![], vec![])	    
+		(obj.concat(), (constraints_red, vec![]), point, total_dim, vec![], vec![])
+	    } else {
+		let (constraints, point) = (matrixsym_flatten(&(sdp.constraint.0)[0]), sdp.constraint.1.clone());
+		(obj.concat(), (constraints, vec![]), point, total_dim, vec![], vec![])
+	    }
 	} else {
 	    panic!("you have one decision variable but have supplied constraint maps for more than one decision variable");
 	}
@@ -219,13 +229,19 @@ pub fn sdp_to_standard(sdp : &SDP) -> (SymMatrix, (Matrix, Vec<(usize, usize)>),
 		acc
 	    });
 
-	// make augmented constraint matrix full rank
-	constraints.0.push(constraints.1);
-	let mut constraints_red = linear_remove_redundant_sym(&mut constraints.0, total_dim);
-	let mut point = constraints_red.pop().unwrap_or(vec![]);
-	point.extend(vec![0.0; zeros.len()]);
+	if check_constraints {
+	    // make augmented constraint matrix full rank
+	    constraints.0.push(constraints.1);
+	    let mut constraints_red = linear_remove_redundant_sym(&mut constraints.0, total_dim);
+	    let mut point = constraints_red.pop().unwrap_or(vec![]);
+	    point.append(&mut vec![0.0; zeros.len()]);
 
-	(obj_sum, (constraints_red, zeros), point, total_dim, symm_dims, block_dims)
+	    (obj_sum, (constraints_red, zeros), point, total_dim, symm_dims, block_dims)
+	} else {
+	    constraints.1.append(&mut vec![0.0; zeros.len()]);
+
+	    (obj_sum, (constraints.0, zeros), constraints.1, total_dim, symm_dims, block_dims)
+	}
     }
 }
 
