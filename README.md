@@ -130,7 +130,13 @@ on the upper triangle for each LMI block `i = 1, ..., s`. They also force
 L(B_{s+1} - B_{s+2}, ..., B_{2n+s-1} - B_{2n+s}) = b.
 ```
 
-The implementation checks whether the constraint matrix `A`, excluding the off-block-diagonal zero constraints, has full rank. If it does not, redundant constraints are removed.
+The user passes a boolean flag `check_constraints` to the solver. If true, then 
+the implementation checks whether the constraint matrix `A`, excluding the off-block-diagonal 
+zero constraints, has full rank. If it does not, redundant constraints are removed.
+If the flag is false, then the implementation never runs this check, to save time.
+Instead, it performs a cheap regularization of the gram matrix of `A` so that it is
+positive definite for the `LDL^T` decomposition. If the regularized solution is inaccurate
+relative to the true system, then a panic occurs.
 
 The standard-form objective is
 
