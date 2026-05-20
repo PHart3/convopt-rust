@@ -3,6 +3,15 @@
 pub use crate::lin_alg::matrix::*;
 pub type SymMatrix = Vector;
 
+// trace of a symmetric matrix
+pub fn trace_sym(mat : &SymMatrix, dim : usize) -> f64 {
+    let mut sum = 0.0;
+    for i in 0..dim {
+	sum += mat[(i * i + 3 * i) / 2];
+    }
+    sum
+}
+
 // Frobenius inner product of two symmetric matrices
 pub fn frob_prod_sym(mat1 : &SymMatrix, mat2 : &SymMatrix, dim : usize) -> f64 {
     let (mut sum, mut start) = (0.0, 0);
@@ -57,6 +66,23 @@ pub fn ident_sym_mat(dim : usize) -> SymMatrix {
 		result.push(1.0);
 	    }
 	}
+    }
+    result
+}
+
+// action of symmetric matrix on vector
+pub fn sym_mat_act(mat : &SymMatrix, v : &[f64]) -> Vector {
+    let dim = v.len();
+    let mut result = vec![0.0; dim];
+    let mut start;
+    for j in 0..dim {
+        start = j * (j + 1) / 2;
+        for i in 0..j {
+            let val = mat[start + i];
+            result[i] += val * v[j];
+            result[j] += val * v[i];
+        }
+        result[j] += mat[start + j] * v[j];
     }
     result
 }

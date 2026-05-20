@@ -5,14 +5,14 @@ use crate::sdp::*;
 const TOTAL_STEPS: usize = 5000;
 
 // the alternating direction dual augmented Lagrangian method
-pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
-    let (mut obj, (mat_red, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp);
-    let (c_len, block_size_sum) : (usize, usize) = (mat_red.first().unwrap_or(&vec![]).len(), block_dims.iter().sum());
+pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
+    let (mut obj, (mat_dense, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp, check_constraints);
+    let (c_len, block_size_sum) : (usize, usize) = (mat_dense.first().unwrap_or(&vec![]).len(), block_dims.iter().sum());
     // adjust objective function so that it acts via the Frobenius product instead of packed dot product
     let obj_frob = scale_off_diag(0.5, var_dim, &mut obj);
-    let constr_mat = (&mat_red, &zeros);
+    let constr_mat = (&mat_dense, &zeros);
     // form the Gram matrix for the linear constraints (excluding the zero constraints)
-    let gram_small = constraint_gram(var_dim, &mat_red);
+    let gram_small : SymMatrix = constraint_gram(var_dim, &mat_dense);
     let (mut it_stag, mut it_pinf, mut it_dinf) = (0, 0, 0);
     // tuning parameters
     let (mut penalty, pen_min, pen_max, pen_fact, step) = (5.0, 1e-4, 1e4, 0.5, 1.6);
@@ -41,10 +41,34 @@ pub fn sdpad(sdp : &SDP) -> (Vec<SymMatrix>, f64) {
 	for (i, a) in constraint_action(&constr_mat, &vect_subt(obj_frob, &dual_s)).iter().enumerate() {
 	    inverse_y.push(penalty * (point[i] - action[i]) + a);
 	}
+	let mut inverse_y_old : Vector = Vec::new();
+	if !(check_constraints) {
+	    inverse_y_old = (inverse_y[..c_len]).to_vec();
+	}
 	dual_y = if point.is_empty() {
 	    vec![]
 	} else {
-	    pos_def_solver_upperleft(&gram_small, &mut inverse_y, zeros.len())
+	    let mut solved : Vector = Vec::with_capacity(c_len + zeros.len());
+	    if check_constraints {
+		solved = pos_def_solver_upperleft(&gram_small, &mut inverse_y, zeros.len());
+	    } else if c_len > 0 {
+		// if we did not remove redundant constraints during sdp_to_standard,
+		// we must regularize the Gram matrix so that it can be fed to the solver
+		let reg : f64 = trace_sym(&gram_small, c_len) / (c_len as f64);
+		let mut gram_small_reg = gram_small.clone();
+		for i in 0..c_len {
+		    gram_small_reg[(i * i + 3 * i) / 2] += 1e-9 * reg.max(1.0);
+		}
+		solved = pos_def_solver_upperleft(&gram_small_reg, &mut inverse_y, zeros.len());
+		// compute the residual of the regularized system
+		let solved_pre = &solved[..c_len];
+		let resid_top = euclid_distance(&sym_mat_act(&gram_small, solved_pre), &inverse_y_old);
+		let resid_bottom = frob_norm_sym(&gram_small, c_len) * euclid_norm(solved_pre) + euclid_norm(&inverse_y_old);
+		if !(resid_top / resid_bottom < 1e-9) {
+		    panic!("regularized Gram solve is not an accurate solution to original system");
+		}
+	    };
+	    solved
 	};
 	lin_comb = constraint_lin_comb(var_dim, &constr_mat, &dual_y);
 	diff = vect_subt(obj_frob, &lin_comb);

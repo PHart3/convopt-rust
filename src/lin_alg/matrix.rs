@@ -70,7 +70,7 @@ pub fn zero_mat(dim_c : usize, dim_r : usize) -> Matrix {
 }
 
 // standard inner product
-pub fn dot_prod(vect1 : &Vector, vect2 : &Vector) -> f64 {
+pub fn dot_prod(vect1 : &[f64], vect2 : &[f64]) -> f64 {
     let mut prod = 0.0;
     for (e1, e2) in vect1.iter().zip(vect2.iter()) {
 	prod = (*e1).mul_add(*e2, prod);
@@ -79,12 +79,12 @@ pub fn dot_prod(vect1 : &Vector, vect2 : &Vector) -> f64 {
 }
 
 // Euclidean norm
-pub fn euclid_norm(vect : &Vector) -> f64 {
+pub fn euclid_norm(vect : &[f64]) -> f64 {
     dot_prod(vect, vect).sqrt()
 }
 
 // Euclidean distance
-pub fn euclid_distance(vect1 : &Vector, vect2 : &Vector) -> f64 {
+pub fn euclid_distance(vect1 : &[f64], vect2 : &[f64]) -> f64 {
     let mut sum = 0.0;
     let mut diff;
     for (v1, v2) in vect1.iter().zip(vect2.iter()) {
