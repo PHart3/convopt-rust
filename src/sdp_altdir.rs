@@ -53,17 +53,18 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
 	for (i, a) in constraint_action(&constr_mat, &vect_subt(obj_frob, &dual_s)).iter().enumerate() {
 	    inverse_y.push(penalty * (point[i] - action[i]) + a);
 	}
-	if !(check_contraints) {
-	    let inverse_y_old = inverse_y.clone();
+	let mut inverse_y_old = Vec::new();
+	if !(check_constraints) {
+	    inverse_y_old = inverse_y.clone();
 	}
 	dual_y = if point.is_empty() {
 	    vec![]
 	} else {
 	    pos_def_solver_upperleft(&gram_small, &mut inverse_y, zeros.len())
 	};
-	if !(check_contraints) {
+	if !(check_constraints) {
 	    // compute the residual of the regularized system
-	    let resid_top = euclid_distance(&symmat_vector_mult(&gram_small, &dual_y), &inverse_y_old);
+	    let resid_top = euclid_distance(&sym_mat_act(&gram_small, &dual_y), &inverse_y_old);
 	    let resid_bottom = frob_norm_sym(&gram_small, c_len) * euclid_norm(&dual_y) + euclid_norm(&inverse_y_old) ;
 	    if !(resid_top / resid_bottom < 1e-10) {
 		println!("the solution to the Gram matrix system has high residual");

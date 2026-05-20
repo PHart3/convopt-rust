@@ -70,6 +70,23 @@ pub fn ident_sym_mat(dim : usize) -> SymMatrix {
     result
 }
 
+// action of symmetric matrix on vector
+pub fn sym_mat_act(mat : &SymMatrix, v : &Vector) -> Vector {
+    let dim = v.len();
+    let mut result = vec![0.0; dim];
+    let mut start;
+    for j in 0..dim {
+        start = j * (j + 1) / 2;
+        for i in 0..j {
+            let val = mat[start + i];
+            result[i] += val * v[j];
+            result[j] += val * v[i];
+        }
+        result[j] += mat[start + j] * v[j];
+    }
+    result
+}
+
 // scaling all off-diagonal elements of symmetric matrix
 pub fn scale_off_diag(s : f64, dim : usize, mat : &mut SymMatrix) -> &mut SymMatrix {
     let mut idx = 0;
