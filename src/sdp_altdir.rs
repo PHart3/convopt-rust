@@ -23,13 +23,16 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
     let (mut prim_z, mut dual_s) : (SymMatrix, SymMatrix) = (ident_sym_mat(var_dim), vec![0.0; var_dim_tot]);
     let (mut pinf, mut dinf, mut gap) : (f64, f64, f64);
     let mut delta : f64;
-    let mut best = f64::INFINITY;
+    let mut best_delta = f64::INFINITY;
     let (mut inverse_y, mut dual_sfull, mut dual_sfull_temp) : (Vector, SymMatrix, SymMatrix) =
 	(Vec::with_capacity(c_len), Vec::with_capacity(var_dim), Vec::with_capacity(var_dim));
     let mut diff : SymMatrix;
     let (mut symm_offset, mut result) : (usize, Vec<SymMatrix>) = (0, Vec::new());
     let (mut action, mut lin_comb) : (Vector, SymMatrix);
     let (mut prim_val, mut dual_val) : (f64, f64);
+    let mut best_prim_z : SymMatrix = Vec::with_capacity(var_dim_tot);
+    let (mut best_feas_delta, mut best_pinf, mut best_dinf, mut best_gap, mut best_prim_val) : (f64, f64, f64, f64, Option<f64>) =
+	(f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::INFINITY, None);
 
     // begin main computation
     let mut count = 0;
@@ -96,65 +99,68 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
 	(prim_val, dual_val) = (frob_prod_sym(obj_frob, &prim_z, var_dim), dot_prod(&point, &dual_y));
 	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
 	delta = pinf.max(dinf).max(gap);
+
+	let psd_blocks = block_dims.iter().copied().
+	    scan(0, |start, dim| {
+		let block = (*start, dim);
+		*start += dim;
+		Some(block)
+	    }).chain(
+		symm_dims.iter().copied().
+		    scan(0, |start, dim| {
+			let block = [(block_size_sum + *start, dim), (block_size_sum + *start + dim, dim)];
+			*start += 2 * dim;
+			Some(block)}).flatten()).collect();
+
 	if delta < TOL &&
-	    psd_block_check(&prim_z, &block_dims.iter().copied().
-				scan(0, |start, dim| {
-				    let block = (*start, dim);
-				    *start += dim;
-				    Some(block)
-				}).chain(
-				    symm_dims.iter().copied().
-					scan(0, |start, dim| {
-					    let block =	[(block_size_sum + *start, dim), (block_size_sum + *start + dim, dim)];
-					    *start += 2 * dim;
-					    Some(block)
-					}).flatten()).collect()) {
-	if block_size_sum == 0 {
-	    result.push(prim_z);
-	} else {
-	    for d in symm_dims {
-		result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &prim_z),
-				      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &prim_z)));
-		symm_offset += 2 * d
+	    psd_block_check(&prim_z, &psd_blocks) {
+		if block_size_sum == 0 {
+		    result.push(prim_z);
+		} else {
+		    for d in symm_dims {
+			result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &prim_z),
+					      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &prim_z)));
+			symm_offset += 2 * d
+		    }
+		}
+		println!("\nsdpad terminated with desired accuracy\n");
+		return (result, prim_val);
+	    }
+
+	// record best solution so far
+	if !(delta > best_feas_delta) {
+	    if psd_block_check(&prim_z, &psd_blocks) {
+		best_feas_delta = delta;
+		best_pinf = pinf;
+		best_dinf = dinf;
+		best_gap = gap;
+		best_prim_z.clone_from(&prim_z);
+		best_prim_val = Some(prim_val);
 	    }
 	}
-	println!("\nsdpad terminated with desired accuracy");
-	return (result, prim_val);
-    }
-    if delta > best {
-	it_stag += 1;
-    } else {
-	best = delta;
-	it_stag = 0;
-    }
-    if ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) &&
-	psd_block_check(&prim_z,
-			    &block_dims.iter().copied().
-			    scan(0, |start, dim| {
-				let block = (*start, dim);
-				*start += dim;
-				Some(block)
-			    }).chain(
-				symm_dims.iter().copied().
-				    scan(0, |start, dim| {
-					let block = [(block_size_sum + *start, dim), (block_size_sum + *start + dim, dim)];
-					*start += 2 * dim;
-					Some(block)
-				    }).flatten()).collect()) {
+	
+	// record general stagnation
+	if delta > best_delta {
+	    it_stag += 1;
+	} else {
+	    best_delta = delta;
+	    it_stag = 0;
+	}
+	if best_prim_val.is_some() && ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) {
 	    if block_size_sum == 0 {
-		result.push(prim_z);
+		result.push(best_prim_z);
 	    } else {
 		for d in symm_dims {
-		    result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &prim_z),
-					  &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &prim_z)));
+		    result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &best_prim_z),
+					  &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &best_prim_z)));
 		    symm_offset += 2 * d
 		}
 	    }
 	    println!("\nsdpad terminated due to stagnation but with reasonable accuracy");
-	    println!("solution quality: pinf={:.3e} dinf={:.3e} gap={:.3e}", pinf, dinf, gap);
-	    return (result, prim_val);
+	    println!("solution quality of best solution found: pinf={:.3e} dinf={:.3e} gap={:.3e}", best_pinf, best_dinf, best_gap);
+	    return (result, best_prim_val.expect("best_prim_val was never recorded"));
 	}
-    
+
 	if count == TOTAL_STEPS {
 	    if block_size_sum == 0 {
 		result.push(prim_z);
@@ -166,7 +172,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
 		}
 	    }
 	    println!("\nsdpad terminated after {} iterations", TOTAL_STEPS);
-	    println!("solution quality: pinf={:.3e} dinf={:.3e} gap={:.3e}", pinf, dinf, gap);
+	    println!("solution quality of final iteration: pinf={:.3e} dinf={:.3e} gap={:.3e}", pinf, dinf, gap);
 	    return (result, prim_val);
 	}
 
