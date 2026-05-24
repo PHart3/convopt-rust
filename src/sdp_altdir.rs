@@ -128,15 +128,13 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
 	    }
 
 	// record best solution so far
-	if !(delta > best_feas_delta) {
-	    if psd_block_check(&prim_z, &psd_blocks) {
-		best_feas_delta = delta;
-		best_pinf = pinf;
-		best_dinf = dinf;
-		best_gap = gap;
-		best_prim_z.clone_from(&prim_z);
-		best_prim_val = Some(prim_val);
-	    }
+	if !(delta > best_feas_delta) && psd_block_check(&prim_z, &psd_blocks) {
+	    best_feas_delta = delta;
+	    best_pinf = pinf;
+	    best_dinf = dinf;
+	    best_gap = gap;
+	    best_prim_z.clone_from(&prim_z);
+	    best_prim_val = Some(prim_val);
 	}
 	
 	// record general stagnation
@@ -146,20 +144,21 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
 	    best_delta = delta;
 	    it_stag = 0;
 	}
-	if best_prim_val.is_some() && ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) {
-	    if block_size_sum == 0 {
-		result.push(best_prim_z);
-	    } else {
-		for d in symm_dims {
-		    result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &best_prim_z),
-					  &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &best_prim_z)));
-		    symm_offset += 2 * d
+	if let Some(best_prim_val) = best_prim_val &&
+	    ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) {
+		if block_size_sum == 0 {
+		    result.push(best_prim_z);
+		} else {
+		    for d in symm_dims {
+			result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &best_prim_z),
+					      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &best_prim_z)));
+			symm_offset += 2 * d
+		    }
 		}
+		println!("\nsdpad terminated due to stagnation but with reasonable accuracy");
+		println!("solution quality of best solution found: pinf={:.3e} dinf={:.3e} gap={:.3e}", best_pinf, best_dinf, best_gap);
+		return (result, best_prim_val);
 	    }
-	    println!("\nsdpad terminated due to stagnation but with reasonable accuracy");
-	    println!("solution quality of best solution found: pinf={:.3e} dinf={:.3e} gap={:.3e}", best_pinf, best_dinf, best_gap);
-	    return (result, best_prim_val.expect("best_prim_val was never recorded"));
-	}
 
 	if count == TOTAL_STEPS {
 	    if block_size_sum == 0 {
