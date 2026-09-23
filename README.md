@@ -203,7 +203,7 @@ sym_matrix_scale(scale, matrix)
 mk_symmap_real(dim, entries)
 ```
 
-The helper `mk_sqmatrix`, defined in `src/lin_alg/matrix.rs`, creates the square `Matrix` used as the constant matrix in an LMI.
+In addition, a general matrix `Matrix` is represented as a flat vector in column-major form.
 
 A complete SDP problem is specified by
 
@@ -276,7 +276,7 @@ let sdp_test = SDP::new(
     (vec![], vec![]),
     vec![(
         vec![ident_symmap(2)],
-        mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0]),
+        vec![1.0, 0.0, 0.0, 1.0],
     )],
 );
 ```

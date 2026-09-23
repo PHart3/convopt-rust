@@ -184,7 +184,7 @@ pub fn sym_matrix_diagonal(dim : usize) -> Matrix {
     let size = (dim * (dim + 1)) / 2;
     let mut result = zero_mat(size, dim);
     for i in 0..dim {
-	result[(i * i + 3 * i) / 2][i] = 1.0;
+	result[((i * i + 3 * i) / 2) * dim + i] = 1.0;
     }
     result
 }
@@ -192,19 +192,22 @@ pub fn sym_matrix_diagonal(dim : usize) -> Matrix {
 // composition with diagonal block map
 pub fn matrix_diagonal_mult_sym(sym_dim : usize, mat : &Matrix, start : usize, dim : usize) -> Matrix {
     let mut result : Matrix = Vec::new();
-    let row_dim = mat[0].len();
     let ones = sym_matrix_diag_block_map(start, dim);
+    if ones.is_empty() {
+	return result;
+    }
+    let row_dim = mat.len() / ones.len();
     let (mut offset, mut i) = (0, 0);
     for c in ones {
 	for _ in offset..c {
-	    result.push(vec![0.0; row_dim]);
+	    result.extend(vec![0.0; row_dim]);
 	}
-	result.push(mat[i].clone());
+	result.extend_from_slice(&mat[i * row_dim..(i + 1) * row_dim]);
 	offset = c + 1;
 	i += 1;
     }
     for _ in offset..((sym_dim * (sym_dim + 1)) / 2) {
-	result.push(vec![0.0; row_dim]);
+	result.extend(vec![0.0; row_dim]);
     }
     result
 }
@@ -232,27 +235,29 @@ pub fn mat_sym_diagonal_mult_sym(sym_dim : usize, mat : &SymMatrix, start : usiz
 // also preconditions resulting constraint matrix by normalizing rows
 use std::f64::consts::FRAC_1_SQRT_2;
 pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
-    let (echelon, rank, solvable) = gauss_elim(mat);
+    let col_dim = (dim * (dim + 1)) / 2 + 1;
+    let row_dim = mat.len() / col_dim;
+    let (echelon, rank, solvable) = gauss_elim(mat, col_dim, row_dim);
     if !solvable {
-        panic!("linear_remove_redundant: your system of constraints is inconsistent");
+        panic!("linear_remove_redundant_sym: your system of constraints is inconsistent");
     }
-    let mut result : Matrix = vec![Vec::with_capacity(rank); echelon.len()];
+    let mut result : Matrix = vec![0.0; col_dim * rank];
     let (mut start, mut scale) : (usize, f64);
     for i in 0..rank {
 	scale = 0.0;
-	scale = scale.hypot(echelon[0][i]);
+	scale = scale.hypot(echelon[i]);
 	start = 1;
 	for k in 1..dim {
 	    let diag = (k * k + 3 * k) / 2;
-	    for col in &echelon[start..diag] {
-		scale = scale.hypot(col[i] * FRAC_1_SQRT_2);
+	    for col in start..diag {
+		scale = scale.hypot(echelon[col * row_dim + i] * FRAC_1_SQRT_2);
 	    }
-	    scale = scale.hypot(echelon[diag][i]);
+	    scale = scale.hypot(echelon[diag * row_dim + i]);
 	    start += k;
 	}
 	assert!(scale.is_finite(), "linear_remove_redundant_sym: row has non-finite packed norm");
-	for (j, col) in echelon.iter().enumerate() {
-	    result[j].push(col[i] / scale);
+	for j in 0..col_dim {
+	    result[j * rank + i] = echelon[j * row_dim + i] / scale;
 	}
     }
     result
@@ -269,9 +274,12 @@ pub fn constraint_action((mat, list) : &(&Matrix, &Vec<(usize, usize)>), var : &
     if mat.is_empty() {
 	return vec![]
     }
-    let mut result = scal_vect(var[0], &mat[0]);
-    for (n, col) in mat.iter().enumerate().skip(1) {
-	result = vect_add_scaled(&result, var[n], col);
+    let row_dim = mat.len() / var.len();
+    let mut result = scal_vect(var[0], &mat[..row_dim].to_vec());
+    for (n, col) in mat.chunks_exact(row_dim).enumerate().skip(1) {
+	for i in 0..row_dim {
+	    result[i] += var[n] * col[i];
+	}
     }
     for (r, c) in *list {
 	result.push(var[(c * (c + 1)) / 2 + r]);
@@ -285,20 +293,21 @@ pub fn constraint_lin_comb(dim : usize, (mat, list) : &(&Matrix, &Vec<(usize, us
     if mat.is_empty() {
 	return vec![0.0; dim * (dim + 1) / 2]
     }
+    let col_dim = dim * (dim + 1) / 2;
+    let row_dim = mat.len() / col_dim;
     let mut result = Vec::new();
     let mut start = 0;
     let mut diag;
     for i in 0..dim {
 	diag = (i * i + 3 * i) / 2;
 	for j in start..diag {
-	    result.push(0.5 * dot_prod(&mat[j], vect));
+	    result.push(0.5 * dot_prod(&mat[j * row_dim..(j + 1) * row_dim], vect));
 	}
-	result.push(dot_prod(&mat[diag], vect));
+	result.push(dot_prod(&mat[diag * row_dim..(diag + 1) * row_dim], vect));
 	start += i + 1;
     }
-    let k = mat[0].len();
     for (start, &(r, c)) in list.iter().enumerate() {
-	result[(c * (c + 1)) / 2 + r] += 0.5 * vect[k + start];
+	result[(c * (c + 1)) / 2 + r] += 0.5 * vect[row_dim + start];
     }
     result
 }
@@ -309,18 +318,21 @@ pub fn constraint_gram(dim : usize, mat : &Matrix) -> SymMatrix {
     if mat.is_empty() {
 	return vec![];
     }
-    let gram_dim = mat[0].len();
+    let col_dim = dim * (dim + 1) / 2;
+    let gram_dim = mat.len() / col_dim;
     let mut result : SymMatrix = vec![0.0; gram_dim * (gram_dim + 1) / 2];
     let mut start = 0;
     let mut diag;
     for i in 0..dim {
 	diag = (i * i + 3 * i) / 2;
 	for j in start..diag {
-	    for (r, p) in result.iter_mut().zip(outer_prod_single(&mat[j]).iter()) {
+	    let col = mat[j * gram_dim..(j + 1) * gram_dim].to_vec();
+	    for (r, p) in result.iter_mut().zip(outer_prod_single(&col).iter()) {
 		*r += 0.5 * p;
 	    }
 	}
-	for (r, p) in result.iter_mut().zip(outer_prod_single(&mat[diag]).iter()) {
+	let col = mat[diag * gram_dim..(diag + 1) * gram_dim].to_vec();
+	for (r, p) in result.iter_mut().zip(outer_prod_single(&col).iter()) {
 	    *r += p;
 	}
 	start += i + 1;
@@ -330,10 +342,13 @@ pub fn constraint_gram(dim : usize, mat : &Matrix) -> SymMatrix {
 
 // computation of QDQ^T where Q is any matrix and D is diagonal
 pub fn diag_scale_gram(d : &Vector, q : &Matrix) -> SymMatrix {
-    let len = q.first().unwrap_or(&vec![]).len();
+    if d.is_empty() {
+	return vec![];
+    }
+    let len = q.len() / d.len();
     let mut result = vec![0.0; len * (len + 1) / 2]; 
-    for (s, c) in d.iter().zip(q) {
-	for (r, p) in result.iter_mut().zip(outer_prod_single_scale(*s, c).iter()) {
+    for (s, c) in d.iter().zip(q.chunks_exact(len)) {
+	for (r, p) in result.iter_mut().zip(outer_prod_single_scale(*s, &c.to_vec()).iter()) {
 	   *r += p; 
 	}
     }

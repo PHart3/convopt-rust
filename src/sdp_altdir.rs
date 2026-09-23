@@ -7,7 +7,7 @@ const TOTAL_STEPS: usize = 5000;
 // the alternating direction dual augmented Lagrangian method
 pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
     let (mut obj, (mat_dense, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp, check_constraints);
-    let (c_len, block_size_sum) : (usize, usize) = (mat_dense.first().unwrap_or(&vec![]).len(), block_dims.iter().sum());
+    let (c_len, block_size_sum) : (usize, usize) = (point.len() - zeros.len(), block_dims.iter().sum());
     // adjust objective function so that it acts via the Frobenius product instead of packed dot product
     let obj_frob = scale_off_diag(0.5, var_dim, &mut obj);
     let constr_mat = (&mat_dense, &zeros);

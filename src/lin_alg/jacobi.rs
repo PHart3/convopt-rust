@@ -21,8 +21,7 @@ fn index_max_in_col(a : &SymMatrix, col : usize) -> usize {
 }
 
 // Jacobi rotation subroutine (where orth stores the eventual eigenvectors)
-fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, k : usize, j : usize) -> (&'a mut SymMatrix, &'a mut Matrix, f64) {
-    let dim = orth.len();
+fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, dim : usize, k : usize, j : usize) -> (&'a mut SymMatrix, &'a mut Matrix, f64) {
     let ind = (k * (k + 1)) / 2 + j;
     let val_old = mat[ind];
     let (ind_j, ind_k) = ((j * j + 3 * j) / 2, (k * k + 3 * k) / 2);
@@ -45,9 +44,9 @@ fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, k : usize, j :
 	mat[ind_mj] = c * val_old_j - s * val_old_k;
     }
     
-    let (left, right) = orth.split_at_mut(k);
-    let col_j = &mut left[j];
-    let col_k = &mut right[0];
+    let (left, right) = orth.split_at_mut(k * dim);
+    let col_j = &mut left[j * dim..(j + 1) * dim];
+    let col_k = &mut right[..dim];
     for (vj, vk) in col_j.iter_mut().zip(col_k.iter_mut()) {
 	let old_j = *vj;
 	*vj = c * old_j - s * *vk;
@@ -62,7 +61,7 @@ const MAX_SWEEPS: usize = 50;
 // stores eigenvalues in L and corresponding eigenvectors in Q
 pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     if dim == 1 {
-	return (vec![a[0]], vec![vec![1.0]]);
+	return (vec![a[0]], vec![1.0]);
     }
     let mut maxima = Vec::with_capacity(dim - 1);
     let mut max_diag = a[0].abs();
@@ -149,7 +148,7 @@ pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
 	} else {
 	    (eigenvals, eigenvects, biggest) = (eigenvals_new, eigenvects_new, biggest_new);
-	    (eigenvals_new, eigenvects_new, biggest_new) = jacobi_rot(eigenvals, eigenvects, k, j);
+	    (eigenvals_new, eigenvects_new, biggest_new) = jacobi_rot(eigenvals, eigenvects, dim, k, j);
 	}
     }
 }
@@ -159,10 +158,10 @@ pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     let (mut nonneg_eigenvals, mut nonneg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     let (eigenvals, eigenvects) = jacobi_eigen(a, dim);
-    for (val, vect) in eigenvals.iter().zip(eigenvects.into_iter()) {
+    for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
 	if !(*val < -(1e-9 * scale)) {
 	    nonneg_eigenvals.push(*val);
-	    nonneg_eigenvects.push(vect);
+	    nonneg_eigenvects.extend_from_slice(vect);
 	}
     }
     (nonneg_eigenvals, nonneg_eigenvects)
@@ -173,10 +172,10 @@ pub fn negeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     let (mut neg_eigenvals, mut neg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     let (eigenvals, eigenvects) = jacobi_eigen(a, dim);
-    for (val, vect) in eigenvals.iter().zip(eigenvects.into_iter()) {
+    for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
 	if *val < -(1e-8 * scale) {
 	    neg_eigenvals.push(*val);
-	    neg_eigenvects.push(vect);
+	    neg_eigenvects.extend_from_slice(vect);
 	}
     }
     (neg_eigenvals, neg_eigenvects)
