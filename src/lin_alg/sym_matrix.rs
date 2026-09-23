@@ -277,7 +277,9 @@ pub fn constraint_action((mat, list) : &(&Matrix, &Vec<(usize, usize)>), var : &
     let row_dim = mat.len() / var.len();
     let mut result = scal_vect(var[0], &mat[..row_dim].to_vec());
     for (n, col) in mat.chunks_exact(row_dim).enumerate().skip(1) {
-	result = vect_add_scaled(&result, var[n], &col.to_vec());
+	for i in 0..row_dim {
+	    result[i] += var[n] * col[i];
+	}
     }
     for (r, c) in *list {
 	result.push(var[(c * (c + 1)) / 2 + r]);
