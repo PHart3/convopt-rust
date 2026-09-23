@@ -1,7 +1,5 @@
 // test harness for sdp solver
 
-use crate::sdp::*;
-
 use std::any::Any;
 
 const TOL_TEST : f64 = 1e-5;
