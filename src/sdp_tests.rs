@@ -62,7 +62,7 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 	// check LMI constraints
 	count = 0;
 	for (maps, constant_mat) in sdp.lmi() {
-            let block_dim = constant_mat.len();
+	    let block_dim = constant_mat.len().isqrt();
 	    let total = block_dim * block_dim;
             let mut lhs = vec![0.0; total];
 	    for (sm1, map) in sol1.0.iter().zip(maps.iter()) {
@@ -73,7 +73,7 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 	    let mut lhs_sym : SymMatrix = Vec::new();
 	    for c in 0..block_dim {
 		for r in 0..=c {
-		    lhs_sym.push(lhs[c * block_dim + r] - constant_mat[c][r]);
+		    lhs_sym.push(lhs[c * block_dim + r] - constant_mat[c * block_dim + r]);
 		}
 	    }
 	    if !(negeigendecomp(&mut lhs_sym, block_dim).0.is_empty()) {
@@ -128,13 +128,13 @@ fn test_sdp() {
 					0.0, 1.0, 0.0,
 					0.0, 0.0, 0.0]),
 				zero_symmap(2, 4)],
-			   mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -1.0])),
+			   vec![0.0, 0.0, 0.0, -1.0]),
 			  (vec![zero_symmap(2, 4),
 				mk_symmap(2, 4, vec![1.0, 0.0, 0.0,
 						     0.0, 1.0, 0.0,
 						     0.0, 1.0, 0.0,
 						     0.0, 0.0, 0.0])],
-			   mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -2.0]))]
+			   vec![0.0, 0.0, 0.0, -2.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_1, true) });
     reference = (Some(vec![vec![1.0, 1.0, 1.0], vec![0.0, 0.0, 2.0]]), 4.0);
@@ -163,7 +163,7 @@ fn test_sdp() {
 		    0.0, 1.0, 0.0,
 		    0.0, 0.0, 0.0]),
                 zero_symmap(2, 4)],
-             mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -1.0])),
+             vec![0.0, 0.0, 0.0, -1.0]),
             (vec![
                 zero_symmap(2, 4),
                 mk_symmap(2, 4, vec![
@@ -171,7 +171,7 @@ fn test_sdp() {
 		    0.0, 1.0, 0.0,
 		    0.0, 1.0, 0.0,
 		    0.0, 0.0, 0.0])],
-             mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -2.0]))]
+             vec![0.0, 0.0, 0.0, -2.0])]
     );	
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_2, true) });
     reference = (Some(vec![vec![0.882675711869543, 0.939507164296746, 1.0],
@@ -203,14 +203,14 @@ fn test_sdp() {
 				0.0, 1.0, 0.0,
 				0.0, 0.0, 0.0]),
 		 zero_symmap(2, 4)],
-            mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -1.0])), (
+            vec![0.0, 0.0, 0.0, -1.0]), (
             vec![zero_symmap(2, 4),
 		 mk_symmap(2, 4,
 			   vec![1.0, 0.0, 0.0,
 				0.0, 1.0, 0.0,
 				0.0, 1.0, 0.0,
 				0.0, 0.0, 0.0])],
-            mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -2.0]))]
+            vec![0.0, 0.0, 0.0, -2.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_3, true) });
     reference = (Some(vec![vec![0.94061055454, 0.96985079000, 1.0],
@@ -228,7 +228,7 @@ fn test_sdp() {
 	// no linear constraints
 	vec![sym_matrix_trace(2)],
 	(vec![], vec![]),
-	vec![(vec![ident_symmap(2)], mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0]))]
+	vec![(vec![ident_symmap(2)], vec![1.0, 0.0, 0.0, 1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_4, true) });
     reference = (Some(vec![vec![1.0, 0.0, 1.0]]), 2.0);
@@ -358,7 +358,7 @@ fn test_sdp() {
                                0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
                                // (2,2) = X33
                                0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
-            mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0]))]
+            vec![1.0, 0.0, 0.0, 1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_8, true) });
     reference = (Some(vec![vec![2.0, 0.0, 3.0, 0.0, 0.0, 1.0]]), 9.0);
@@ -519,12 +519,12 @@ fn test_sdp() {
 				       0.0, 1.0, 0.0,
 				       0.0, 1.0, 0.0,
 				       0.0, 0.0, 0.0])],
-	     mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -1.0])),
+	     vec![0.0, 0.0, 0.0, -1.0]),
 	    (vec![mk_symmap(2, 4, vec![0.0, 0.0, 0.0,
 				       0.0, 1.0, 0.0,
 				       0.0, 1.0, 0.0,
 				       0.0, 0.0, 1.0])],
-	     mk_sqmatrix(2, vec![-1.0, 0.0, 0.0, 0.0]))]
+	     vec![-1.0, 0.0, 0.0, 0.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_15, true) });
     reference = (Some(vec![vec![1.0, 1.0, 1.0]]), 1.0);
@@ -580,7 +580,7 @@ fn test_sdp() {
 				0.0, 1.0, 0.0,
 				0.0, 1.0, 0.0,
 				0.0, 0.0, 0.0])],
-	    mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -1.0]))]
+	    vec![0.0, 0.0, 0.0, -1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_18, true) });
     reference = (Some(vec![vec![0.0, -1.0, 1.0]]), 0.0);
@@ -615,7 +615,7 @@ fn test_sdp() {
 				0.0, 1.0, 0.0,
 				0.0, 1.0, 0.0,
 				0.0, 0.0, 0.0])],
-	    mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -2.0]))]
+	    vec![0.0, 0.0, 0.0, -2.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_19, true) });
     reference = (Some(vec![vec![0.25, 0.5, 1.0], vec![0.25, 0.5, 1.0]]), -0.5);
@@ -640,13 +640,13 @@ fn test_sdp() {
 				0.0, 1.0, 0.0, 1.0, 0.0, 0.0,
 				0.0, 1.0, 0.0, 1.0, 0.0, 0.0,
 				0.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
-	    mk_sqmatrix(2, vec![-1.0, 0.0, 0.0, -1.0])),
+	    vec![-1.0, 0.0, 0.0, -1.0]),
 			   (vec![mk_symmap(3, 4, vec![
 			       0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
 			       0.0, 0.0, 0.0, -1.0, 1.0, 0.0,
 			       0.0, 0.0, 0.0, -1.0, 1.0, 0.0,
 			       0.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
-			    mk_sqmatrix(2, vec![-1.0, 0.0, 0.0, -1.0]))]
+			    vec![-1.0, 0.0, 0.0, -1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_20, true) });
     reference = (Some(vec![vec![1.0, 1.0, 1.0, 0.0, 1.0, 1.0]]), 1.0);
@@ -732,7 +732,7 @@ fn test_sdp() {
                     0.0, 1.0, 0.0,
                     0.0, 0.0, 0.0]),
                 zero_symmap(3, 4)],
-             mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -1.0])),
+             vec![0.0, 0.0, 0.0, -1.0]),
             (vec![
                 zero_symmap(2, 4),
                 mk_symmap(3, 4, vec![
@@ -740,7 +740,7 @@ fn test_sdp() {
                     0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
                     0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
                     0.0, 0.0, 1.0, 0.0, 0.0, 0.0])],
-             mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0])),
+             vec![1.0, 0.0, 0.0, 1.0]),
             (vec![
                 zero_symmap(2, 4),
                 mk_symmap(3, 4, vec![
@@ -748,7 +748,7 @@ fn test_sdp() {
                     0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
                     0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
                     0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
-             mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0]))]
+             vec![1.0, 0.0, 0.0, 1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_22, true) });
     reference = (
@@ -801,7 +801,7 @@ fn test_sdp() {
 		    0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
 		    0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
 		    0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
-	     mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0]))]
+	     vec![1.0, 0.0, 0.0, 1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_23, true) });
     reference = (
@@ -866,7 +866,7 @@ fn test_sdp() {
 		    0.0, 0.0, 0.0]),
 		zero_symmap(3, 4),
 		zero_symmap(2, 4)],
-	     mk_sqmatrix(2, vec![0.0, 0.0, 0.0, -1.0]))]
+	     vec![0.0, 0.0, 0.0, -1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_24, true) });
     reference = (
@@ -919,7 +919,7 @@ fn test_sdp() {
 		    0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
 		    0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
 		    0.0, 0.0, 1.0, 0.0, 0.0, 0.0])],
-	     mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0])),
+	     vec![1.0, 0.0, 0.0, 1.0]),
 	    (vec![
 		zero_symmap(2, 4),
 		mk_symmap(3, 4, vec![
@@ -927,7 +927,7 @@ fn test_sdp() {
 		    0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
 		    0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
 		    0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
-	     mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0]))]
+	     vec![1.0, 0.0, 0.0, 1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_25, true) });
     reference = (
@@ -1075,7 +1075,7 @@ fn test_sdp() {
 				0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
 				0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
 				0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
-	    mk_sqmatrix(2, vec![1.0, 0.0, 0.0, 1.0]))]
+	    vec![1.0, 0.0, 0.0, 1.0])]
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_31, true) });
     reference = (
