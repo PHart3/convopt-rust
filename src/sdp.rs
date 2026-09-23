@@ -32,15 +32,12 @@ impl SDP {
 // flatten the rows of a MatrixSym
 fn matrixsym_flatten(mat : &MatrixSym) -> Matrix {
     let dim_c = mat.first().unwrap_or(&vec![]).len();
-    let mut result : Matrix = Vec::with_capacity((dim_c * (dim_c + 1)) / 2);
-    let mut concat : Vector;
+    let mut result : Matrix = Vec::with_capacity(mat.len() * (dim_c * (dim_c + 1)) / 2);
     for i in 0..dim_c {
 	for j in 0..=i {
-	    concat = mat.iter().fold(Vec::new(), |mut acc, row| {
-		acc.push(row[i][j]);
-		acc
-	    });
-	    result.push(concat);
+	    for row in mat {
+		result.push(row[i][j]);
+	    }
 	}
     }
     result
@@ -69,9 +66,10 @@ pub fn sdp_to_standard(sdp : &SDP, check_constraints : bool) ->
 	    if check_constraints {
 		// make augmented constraint matrix full rank
 		let mut constraints = matrixsym_flatten(&(sdp.constraint.0)[0]);
-		constraints.push(sdp.constraint.1.clone());
+		constraints.extend_from_slice(&sdp.constraint.1);
 		let mut constraints_red = linear_remove_redundant_sym(&mut constraints, total_dim);
-		let point = constraints_red.pop().unwrap_or(vec![]);
+		let rank = constraints_red.len() / (((total_dim * (total_dim + 1)) / 2) + 1);
+		let point = constraints_red.split_off(((total_dim * (total_dim + 1)) / 2) * rank);
 
 		(obj.concat(), (constraints_red, vec![]), point, total_dim, vec![], vec![])
 	    } else {
@@ -90,10 +88,10 @@ pub fn sdp_to_standard(sdp : &SDP, check_constraints : bool) ->
 	let (mut block_size_sum, mut symm_size_sum) = (0, 0);
 	let mut map_len_old : Option<usize> = None;
 	for (maps, mat) in lmis {
-	    assert_eq!(mat.len(), mat.last().expect("constant matrix in LMI must be nonempty").len(),
-		       "the constant matrix for each LMI must be square");
+	    block_size = mat.len().isqrt();
+	    assert!(block_size > 0 && block_size * block_size == mat.len(),
+		    "the constant matrix for each LMI must be nonempty and square");
 	    sequence_len += 1;
-	    block_size = mat.len();
 	    block_dims.push(block_size);
 	    block_size_sum += block_size;
 	    if first {
@@ -146,11 +144,11 @@ pub fn sdp_to_standard(sdp : &SDP, check_constraints : bool) ->
 		    } else {
 			block_current[(r * (r + 1)) / 2 + c]
 		    };
-		    sum[packed][row] -= 1.0;
+		    sum[packed * block_size * block_size + row] -= 1.0;
 		    row += 1;
 		}
 	    }
-	    blocks.push((sum, matrix_to_vector(mat)));
+	    blocks.push((sum, mat.clone()));
 	    block_offset += block_size;
 	    b += 1;
 	}
@@ -220,20 +218,25 @@ pub fn sdp_to_standard(sdp : &SDP, check_constraints : bool) ->
 	assert_eq!(zeros.len(), zeros_len);
 
 	// compute augmented constraint matrix by stacking blocks
+	let constraint_rows = blocks.iter().map(|(_, v)| v.len()).sum();
 	let mut constraints : (Matrix, Vector) =
-	    blocks.iter_mut().fold((vec![vec![]; total_size], Vec::new()), |mut acc, (m, v)| {
-		for (c1, c2) in (acc.0.iter_mut()).zip(m.iter_mut()) {
-		    c1.append(c2);
-		}
-		(acc.1).append(v);
-		acc
-	    });
+	    (Vec::with_capacity(total_size * constraint_rows), Vec::with_capacity(constraint_rows));
+	for col in 0..total_size {
+	    for (mat, vect) in &blocks {
+		let row_dim = vect.len();
+		constraints.0.extend_from_slice(&mat[col * row_dim..(col + 1) * row_dim]);
+	    }
+	}
+	for (_, vect) in &blocks {
+	    constraints.1.extend_from_slice(vect);
+	}
 
 	if check_constraints {
 	    // make augmented constraint matrix full rank
-	    constraints.0.push(constraints.1);
+	    constraints.0.extend_from_slice(&constraints.1);
 	    let mut constraints_red = linear_remove_redundant_sym(&mut constraints.0, total_dim);
-	    let mut point = constraints_red.pop().unwrap_or(vec![]);
+	    let rank = constraints_red.len() / (total_size + 1);
+	    let mut point = constraints_red.split_off(total_size * rank);
 	    point.append(&mut vec![0.0; zeros.len()]);
 
 	    (obj_sum, (constraints_red, zeros), point, total_dim, symm_dims, block_dims)
