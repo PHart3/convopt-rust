@@ -1,4 +1,4 @@
-// Jacobi eigenvalue algorithm with each sweep taking cubic time on average
+// Jacobi eigenvalue algorithm with each sweep taking cubic time on average by caching maximal element of each row
 
 use crate::lin_alg::sym_matrix::*;
 
@@ -21,7 +21,8 @@ fn index_max_in_col(a : &SymMatrix, col : usize) -> usize {
 }
 
 // Jacobi rotation subroutine (where orth stores the eventual eigenvectors)
-fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, dim : usize, k : usize, j : usize) -> (&'a mut SymMatrix, &'a mut Matrix, f64) {
+fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, dim : usize, k : usize, j : usize) ->
+    (&'a mut SymMatrix, &'a mut Matrix, f64) {
     let ind = (k * (k + 1)) / 2 + j;
     let val_old = mat[ind];
     let (ind_j, ind_k) = ((j * j + 3 * j) / 2, (k * k + 3 * k) / 2);
@@ -59,7 +60,7 @@ const MAX_SWEEPS: usize = 50;
 
 // Jacobi method computing spectral decomposition (L, Q) of real symmetric matrix via Jacobi rotations
 // stores eigenvalues in L and corresponding eigenvectors in Q
-pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
+pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     if dim == 1 {
 	return (vec![a[0]], vec![1.0]);
     }
@@ -93,7 +94,7 @@ pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     let max_rotations = MAX_SWEEPS * dim * (dim - 1) / 2;
     loop {
 	if count == max_rotations {
-	    panic!("jacobi_eigen failed to converge after {} sweeps", MAX_SWEEPS);
+	    panic!("jacobi_eigen_cach failed to converge after {} sweeps", MAX_SWEEPS);
 	}
 	count += 1;
 	if first1 {
@@ -109,7 +110,8 @@ pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 		if m1 == k || m1 == j {
 		    *i = index_max_in_col(eigenvals_new, m1);
 		} else if (*i != k && k < m1) && (*i != j && j < m1) {
-		    let (val_j, val_k) = (eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs(), eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs());
+		    let (val_j, val_k) =
+			(eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs(), eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs());
 		    let val_ind = eigenvals_new[ind].abs();
 		    if val_j > val_ind {
 			if val_k > val_j {
@@ -157,7 +159,7 @@ pub fn jacobi_eigen(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     let (mut nonneg_eigenvals, mut nonneg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
-    let (eigenvals, eigenvects) = jacobi_eigen(a, dim);
+    let (eigenvals, eigenvects) = jacobi_eigen_cach(a, dim);
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
 	if !(*val < -(1e-9 * scale)) {
 	    nonneg_eigenvals.push(*val);
@@ -171,7 +173,7 @@ pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 pub fn negeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     let (mut neg_eigenvals, mut neg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
-    let (eigenvals, eigenvects) = jacobi_eigen(a, dim);
+    let (eigenvals, eigenvects) = jacobi_eigen_cach(a, dim);
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
 	if *val < -(1e-8 * scale) {
 	    neg_eigenvals.push(*val);
