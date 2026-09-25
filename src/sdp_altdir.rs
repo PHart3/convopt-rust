@@ -5,7 +5,7 @@ use crate::sdp::*;
 const TOTAL_STEPS: usize = 5000;
 
 // the alternating direction dual augmented Lagrangian method
-pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : JacobiVariant) -> (Vec<SymMatrix>, f64) {
+pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant) -> (Vec<SymMatrix>, f64) {
     let (mut obj, (mat_dense, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp, check_constraints);
     let (c_len, block_size_sum) : (usize, usize) = (point.len() - zeros.len(), block_dims.iter().sum());
     // adjust objective function so that it acts via the Frobenius product instead of packed dot product

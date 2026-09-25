@@ -36,7 +36,7 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 	}
 	// check that each decision variable is psd
 	for (sm1, obj) in sol1.0.iter().zip(sdp.objective().iter()) {
-	    if !(negeigendecomp(&mut sm1.clone(), obj.len()).0.is_empty()) {
+	    if !(negeigendecomp(&mut sm1.clone(), obj.len(), &Cached).0.is_empty()) {
 		println!("sol {} is not psd", count);
 		return false
 	    }
@@ -74,7 +74,7 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 		    lhs_sym.push(lhs[c * block_dim + r] - constant_mat[c * block_dim + r]);
 		}
 	    }
-	    if !(negeigendecomp(&mut lhs_sym, block_dim).0.is_empty()) {
+	    if !(negeigendecomp(&mut lhs_sym, block_dim, &Cached).0.is_empty()) {
 		println!("LMI {} is not satisfied", count);
 		return false
 	    }
@@ -100,13 +100,29 @@ fn sdp_equality_err(sdp: &SDP,
 // start of tests
 
 use crate::sdp_altdir::*;
-use crate::jacobi::JacobiVariant::*;
+use crate::lin_alg::jacobi::JacobiVariant::*;
 use std::panic;
+use std::io::Write;
+use std::time::Instant;
 
 #[test]
-
-// we run each test with check_constraints=true and check_constraints=false
+// Run every problem under both Jacobi variants and compare performance.
 fn test_sdp() {
+    let start = Instant::now();
+    run_sdp_tests(&Cached);
+    let cached_time = start.elapsed();
+
+    let start = Instant::now();
+    run_sdp_tests(&Cyclic);
+    let cyclic_time = start.elapsed();
+    // Direct to stderr to always bypass test capture.
+    writeln!(std::io::stderr(),
+             "\nCached: {:.3?}\nCyclic: {:.3?}\nCyclic / Cached elapsed time: {:.3}",
+             cached_time, cyclic_time,
+             cyclic_time.as_secs_f64() / cached_time.as_secs_f64()).unwrap();
+}
+
+fn run_sdp_tests(variant : &JacobiVariant) {
     
     let (mut result_check, mut result_reg, mut reference);
     //let mut result_pr;
@@ -135,12 +151,12 @@ fn test_sdp() {
 						     0.0, 0.0, 0.0])],
 			   vec![0.0, 0.0, 0.0, -2.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_1, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_1, true, variant) });
     reference = (Some(vec![vec![1.0, 1.0, 1.0], vec![0.0, 0.0, 2.0]]), 4.0);
     assert!(sdp_equality_err(&sdp_test_1, &result_check, &reference), "test 1 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 1: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_1, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_1, false, variant) });
     assert!(sdp_equality_err(&sdp_test_1, &result_reg, &reference), "test 1 failed under regularization");
 
     let sdp_test_2 = SDP::new(
@@ -172,14 +188,14 @@ fn test_sdp() {
 		    0.0, 0.0, 0.0])],
              vec![0.0, 0.0, 0.0, -2.0])]
     );	
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_2, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_2, true, variant) });
     reference = (Some(vec![vec![0.882675711869543, 0.939507164296746, 1.0],
 			   vec![0.117324288130457, 0.484405383387852, 2.0]]),
 		 3.75390244643155);
     assert!(sdp_equality_err(&sdp_test_2, &result_check, &reference), "test 2 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 2: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_2, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_2, false, variant) });
     assert!(sdp_equality_err(&sdp_test_2, &result_reg, &reference), "test 2 failed under regularization");
 
     let sdp_test_3 = SDP::new(
@@ -211,14 +227,14 @@ fn test_sdp() {
 				0.0, 0.0, 0.0])],
             vec![0.0, 0.0, 0.0, -2.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_3, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_3, true, variant) });
     reference = (Some(vec![vec![0.94061055454, 0.96985079000, 1.0],
 			   vec![0.05938944546, -0.34464313618, 2.0]]),
 		 3.87843767087);
     assert!(sdp_equality_err(&sdp_test_3, &result_check, &reference), "test 3 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 3: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_3, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_3, false, variant) });
     assert!(sdp_equality_err(&sdp_test_3, &result_reg, &reference), "test 3 failed under regularization");
     
     let sdp_test_4 = SDP::new(
@@ -229,12 +245,12 @@ fn test_sdp() {
 	(vec![], vec![]),
 	vec![(vec![ident_symmap(2)], vec![1.0, 0.0, 0.0, 1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_4, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_4, true, variant) });
     reference = (Some(vec![vec![1.0, 0.0, 1.0]]), 2.0);
     assert!(sdp_equality_err(&sdp_test_4, &result_check, &reference), "test 4 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 4: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_4, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_4, false, variant) });
     assert!(sdp_equality_err(&sdp_test_4, &result_reg, &reference), "test 4 failed under regularization");
 
     let sdp_test_5 = SDP::new(
@@ -246,12 +262,12 @@ fn test_sdp() {
 	(vec![vec![sym_matrix_trace(3), sym_matrix_proj(3, 2, 2)]], vec![4.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_5, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_5, true, variant) });
     reference = (None, 2.267949192431123);
     assert!(sdp_equality_err(&sdp_test_5, &result_check, &reference), "test 5 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 5: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_5, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_5, false, variant) });
     assert!(sdp_equality_err(&sdp_test_5, &result_reg, &reference), "test 5 failed under regularization");
 
     let sdp_test_6 = SDP::new(
@@ -277,12 +293,12 @@ fn test_sdp() {
 	    (vec![ident_symmap(2), zero_symmap(3, 4)], zero_mat(2, 2)),
 	    (vec![zero_symmap(2, 9), ident_symmap(3)], zero_mat(3, 3))]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_6, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_6, true, variant) });
     reference = (None, 4.5);
     assert!(sdp_equality_err(&sdp_test_6, &result_check, &reference), "test 6 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 6: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_6, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_6, false, variant) });
     assert!(sdp_equality_err(&sdp_test_6, &result_reg, &reference), "test 6 failed under regularization");
 
     let sdp_test_7 = SDP::new(
@@ -322,12 +338,12 @@ fn test_sdp() {
             (vec![zero_symmap(2, 4), ident_symmap(2), zero_symmap(3, 4)], zero_mat(2, 2)),
             (vec![zero_symmap(2, 9), zero_symmap(2, 9), ident_symmap(3)], zero_mat(3, 3))]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_7, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_7, true, variant) });
     reference = (None, 7.267949192431123);
     assert!(sdp_equality_err(&sdp_test_7, &result_check, &reference), "test 7 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 7: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_7, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_7, false, variant) });
     assert!(sdp_equality_err(&sdp_test_7, &result_reg, &reference), "test 7 failed under regularization");
 
     let sdp_test_8 = SDP::new(
@@ -359,12 +375,12 @@ fn test_sdp() {
                                0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
             vec![1.0, 0.0, 0.0, 1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_8, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_8, true, variant) });
     reference = (Some(vec![vec![2.0, 0.0, 3.0, 0.0, 0.0, 1.0]]), 9.0);
     assert!(sdp_equality_err(&sdp_test_8, &result_check, &reference), "test 8 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 8: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_8, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_8, false, variant) });
     assert!(sdp_equality_err(&sdp_test_8, &result_reg, &reference), "test 8 failed under regularization");
 
     let sdp_test_9 = SDP::new(
@@ -377,12 +393,12 @@ fn test_sdp() {
 		     vec![4.0, 1.0, 1.0]),
 	vec![],
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_9, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_9, true, variant) });
     reference = (Some(vec![vec![1.0, 1.4142135623730951, 2.0, 0.0, 0.0, 1.0]]), 2.585786437626905);
     assert!(sdp_equality_err(&sdp_test_9, &result_check, &reference), "test 9 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 9: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_9, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_9, false, variant) });
     assert!(sdp_equality_err(&sdp_test_9, &result_reg, &reference), "test 9 failed under regularization");
 
     let sdp_test_10 = SDP::new(
@@ -394,12 +410,12 @@ fn test_sdp() {
 	(vec![vec![sym_matrix_trace(2), sym_matrix_proj(2, 1, 1)]], vec![3.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_10, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_10, true, variant) });
     reference = (Some(vec![vec![2.0, 1.4142135623730951, 1.0]]), 1.585786437626905);
     assert!(sdp_equality_err(&sdp_test_10, &result_check, &reference), "test 10 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 10: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_10, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_10, false, variant) });
     assert!(sdp_equality_err(&sdp_test_10, &result_reg, &reference), "test 10 failed under regularization");
 
     let sdp_test_11 = SDP::new(
@@ -411,7 +427,7 @@ fn test_sdp() {
 		     vec![1.0, 1.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_11, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_11, true, variant) });
     assert!(result_check.is_err(), "test 11 failed");
     //n.b.: the regularization scheme does not check for inconsistency
 
@@ -425,12 +441,12 @@ fn test_sdp() {
 	(vec![vec![sym_matrix_proj(3, 0, 0), sym_matrix_proj(3, 2, 2)]], vec![1.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_12, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_12, true, variant) });
     reference = (Some(vec![vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0]]), 1.0);
     assert!(sdp_equality_err(&sdp_test_12, &result_check, &reference), "test 12 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 12: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_12, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_12, false, variant) });
     assert!(sdp_equality_err(&sdp_test_12, &result_reg, &reference), "test 12 failed under regularization");
 
     let sdp_test_13 = SDP::new(
@@ -476,7 +492,7 @@ fn test_sdp() {
             (vec![zero_symmap(2, 4), zero_symmap(2, 4), zero_symmap(2, 4), ident_symmap(2)],
              zero_mat(2, 2))],
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_13, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_13, true, variant) });
     reference = (Some(
 	vec![vec![0.0, 0.0, 1.0],
              vec![0.0, 0.0, 2.0],
@@ -486,7 +502,7 @@ fn test_sdp() {
     assert!(sdp_equality_err(&sdp_test_13, &result_check, &reference), "test 13 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 13: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_13, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_13, false, variant) });
     assert!(sdp_equality_err(&sdp_test_13, &result_reg, &reference), "test 13 failed under regularization");
 
     let sdp_test_14 = SDP::new(
@@ -498,12 +514,12 @@ fn test_sdp() {
 		     vec![1.0, 1.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_14, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_14, true, variant) });
     reference = (Some(vec![vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0]]), 0.0);
     assert!(sdp_equality_err(&sdp_test_14, &result_check, &reference), "test 14 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 14: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_14, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_14, false, variant) });
     assert!(sdp_equality_err(&sdp_test_14, &result_reg, &reference), "test 14 failed under regularization");
 
     let sdp_test_15 = SDP::new(
@@ -525,12 +541,12 @@ fn test_sdp() {
 				       0.0, 0.0, 1.0])],
 	     vec![-1.0, 0.0, 0.0, 0.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_15, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_15, true, variant) });
     reference = (Some(vec![vec![1.0, 1.0, 1.0]]), 1.0);
     assert!(sdp_equality_err(&sdp_test_15, &result_check, &reference), "test 15 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 15: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_15, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_15, false, variant) });
     assert!(sdp_equality_err(&sdp_test_15, &result_reg, &reference), "test 15 failed under regularization");
 
     let sdp_test_16 = SDP::new(
@@ -540,12 +556,12 @@ fn test_sdp() {
 		     vec![3.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_16, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_16, true, variant) });
     reference = (Some(vec![vec![2.0, 1.4142135623730951, 1.0]]), 1.585786437626905);
     assert!(sdp_equality_err(&sdp_test_16, &result_check, &reference), "test 16 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 16: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_16, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_16, false, variant) });
     assert!(sdp_equality_err(&sdp_test_16, &result_reg, &reference), "test 16 failed under regularization");
 
     let sdp_test_17 = SDP::new(
@@ -558,12 +574,12 @@ fn test_sdp() {
 	    vec![4.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_17, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_17, true, variant) });
     reference = (Some(vec![vec![3.0, 0.0, 0.0, 1.7320508075688772, 0.0, 1.0]]), 2.267949192431123);
     assert!(sdp_equality_err(&sdp_test_17, &result_check, &reference), "test 17 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 17: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_17, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_17, false, variant) });
     assert!(sdp_equality_err(&sdp_test_17, &result_reg, &reference), "test 17 failed under regularization");
 
     let sdp_test_18 = SDP::new(
@@ -581,12 +597,12 @@ fn test_sdp() {
 				0.0, 0.0, 0.0])],
 	    vec![0.0, 0.0, 0.0, -1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_18, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_18, true, variant) });
     reference = (Some(vec![vec![0.0, -1.0, 1.0]]), 0.0);
     assert!(sdp_equality_err(&sdp_test_18, &result_check, &reference), "test 18 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 18: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_18, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_18, false, variant) });
     assert!(sdp_equality_err(&sdp_test_18, &result_reg, &reference), "test 18 failed under regularization");
 
     let sdp_test_19 = SDP::new(
@@ -616,12 +632,12 @@ fn test_sdp() {
 				0.0, 0.0, 0.0])],
 	    vec![0.0, 0.0, 0.0, -2.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_19, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_19, true, variant) });
     reference = (Some(vec![vec![0.25, 0.5, 1.0], vec![0.25, 0.5, 1.0]]), -0.5);
     assert!(sdp_equality_err(&sdp_test_19, &result_check, &reference), "test 19 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 19: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_19, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_19, false, variant) });
     assert!(sdp_equality_err(&sdp_test_19, &result_reg, &reference), "test 19 failed under regularization");
     
     let sdp_test_20 = SDP::new(
@@ -647,12 +663,12 @@ fn test_sdp() {
 			       0.0, 0.0, 0.0, 0.0, 0.0, 0.0])],
 			    vec![-1.0, 0.0, 0.0, -1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_20, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_20, true, variant) });
     reference = (Some(vec![vec![1.0, 1.0, 1.0, 0.0, 1.0, 1.0]]), 1.0);
     assert!(sdp_equality_err(&sdp_test_20, &result_check, &reference), "test 20 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 20: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_20, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_20, false, variant) });
     assert!(sdp_equality_err(&sdp_test_20, &result_reg, &reference), "test 20 failed under regularization");
 
     let sdp_test_21 = SDP::new(
@@ -680,7 +696,7 @@ fn test_sdp() {
             (vec![ident_symmap(2), zero_symmap(3, 4)], zero_mat(2, 2)),
             (vec![zero_symmap(2, 9), ident_symmap(3)], zero_mat(3, 3))]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_21, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_21, true, variant) });
     reference = (
         Some(vec![
             vec![2.0, 1.4142135623730951, 1.0],
@@ -689,7 +705,7 @@ fn test_sdp() {
     assert!(sdp_equality_err(&sdp_test_21, &result_check, &reference), "test 21 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 21: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_21, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_21, false, variant) });
     assert!(sdp_equality_err(&sdp_test_21, &result_reg, &reference), "test 21 failed under regularization");
 
     let sdp_test_22 = SDP::new(
@@ -749,7 +765,7 @@ fn test_sdp() {
                     0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
              vec![1.0, 0.0, 0.0, 1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_22, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_22, true, variant) });
     reference = (
         Some(vec![
             vec![0.3819660111005423, -0.6180339888994575, 1.0000000000000002],
@@ -758,7 +774,7 @@ fn test_sdp() {
     assert!(sdp_equality_err(&sdp_test_22, &result_check, &reference), "test 22 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 22: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_22, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_22, false, variant) });
     assert!(sdp_equality_err(&sdp_test_22, &result_reg, &reference), "test 22 failed under regularization");
     
     let sdp_test_23 = SDP::new(
@@ -802,7 +818,7 @@ fn test_sdp() {
 		    0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
 	     vec![1.0, 0.0, 0.0, 1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_23, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_23, true, variant) });
     reference = (
         Some(vec![
             vec![2.0, 1.4142135623730951, 1.0],
@@ -811,7 +827,7 @@ fn test_sdp() {
     assert!(sdp_equality_err(&sdp_test_23, &result_check, &reference), "test 23 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 23: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_23, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_23, false, variant) });
     assert!(sdp_equality_err(&sdp_test_23, &result_reg, &reference), "test 23 failed under regularization");
 
     let sdp_test_24 = SDP::new(
@@ -867,7 +883,7 @@ fn test_sdp() {
 		zero_symmap(2, 4)],
 	     vec![0.0, 0.0, 0.0, -1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_24, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_24, true, variant) });
     reference = (
         Some(vec![
             vec![0.3819660112502016, -0.618033988749799, 1.0000000000000002],
@@ -877,7 +893,7 @@ fn test_sdp() {
     assert!(sdp_equality_err(&sdp_test_24, &result_check, &reference), "test 24 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 24: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_24, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_24, false, variant) });
     assert!(sdp_equality_err(&sdp_test_24, &result_reg, &reference), "test 24 failed under regularization");
 
     let sdp_test_25 = SDP::new(
@@ -928,7 +944,7 @@ fn test_sdp() {
 		    0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
 	     vec![1.0, 0.0, 0.0, 1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_25, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_25, true, variant) });
     reference = (
         Some(vec![
             vec![1.9999999999999998, 1.414213562577729, 1.0000000000000002],
@@ -937,7 +953,7 @@ fn test_sdp() {
     assert!(sdp_equality_err(&sdp_test_25, &result_check, &reference), "test 25 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 25: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_25, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_25, false, variant) });
     assert!(sdp_equality_err(&sdp_test_25, &result_reg, &reference), "test 25 failed under regularization");
     
     // some simple matrix completion problems (via nuclear norm minimization)
@@ -955,13 +971,13 @@ fn test_sdp() {
 	),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_26, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_26, true, variant) });
     reference = (None, 10.0 / 3.0);
     assert!(sdp_equality_err(&sdp_test_26, &result_check, &reference), "test 26 failed");
     let (sol, _sol_obj) = result_check.as_ref().expect("test 26 failed");
     assert!(float_equality(sol[0][7], 1.0 / 3.0, TOL_TEST), "test 26: matrix completion failed with {}", sol[0][7]);
     //println!("\ntest 26: decision variable solutions= {:#?} with objective value= {}", sol, sol_obj);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_26, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_26, false, variant) });
     assert!(sdp_equality_err(&sdp_test_26, &result_reg, &reference), "test 26 failed under regularization");
 
     let sdp_test_27 = SDP::new(
@@ -978,13 +994,13 @@ fn test_sdp() {
 	    vec![1.0, 2.0, 2.0, 4.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_27, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_27, true, variant) });
     reference = (None, 0.5 * 105.0_f64.sqrt());
     assert!(sdp_equality_err(&sdp_test_27, &result_check, &reference), "test 27 failed");
     let (sol, _sol_obj) = result_check.as_ref().expect("test 27 failed");
     assert!(float_equality(sol[0][10], 0.5, TOL_TEST), "test 27: matrix completion failed with {}", sol[0][10]);
     //println!("\ntest 27: decision variable solutions= {:#?} with objective value= {}", sol, sol_obj);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_27, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_27, false, variant) });
     assert!(sdp_equality_err(&sdp_test_27, &result_reg, &reference), "test 27 failed under regularization");
 
     let eps = 1e-4;
@@ -1000,13 +1016,13 @@ fn test_sdp() {
 	    vec![1.0, eps, eps]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_28, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_28, true, variant) });
     reference = (None, 1.0 + eps * eps);
     assert!(sdp_equality_err(&sdp_test_28, &result_check, &reference), "test 28 failed");
     let (sol, _sol_obj) = result_check.as_ref().expect("test 28 failed");
     assert!(float_equality(sol[0][7], eps * eps, TOL_TEST), "test 28: matrix completion failed with {}", sol[0][7]);
     //println!("\ntest 28: decision variable solutions= {:#?} with objective value= {}", sol, sol_obj);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_28, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_28, false, variant) });
     assert!(sdp_equality_err(&sdp_test_28, &result_reg, &reference), "test 28 failed under regularization");
 
     let sdp_test_29 = SDP::new(
@@ -1016,12 +1032,12 @@ fn test_sdp() {
 	(vec![vec![sym_matrix_add(&sym_matrix_proj(4, 0, 2), &sym_matrix_proj(4, 1, 3))]], vec![1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_29, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_29, true, variant) });
     reference = (None, 1.0);
     assert!(sdp_equality_err(&sdp_test_29, &result_check, &reference), "test 29 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 29: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_29, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_29, false, variant) });
     assert!(sdp_equality_err(&sdp_test_29, &result_reg, &reference), "test 29 failed under regularization");
 
     let eps = 1e-3;
@@ -1037,13 +1053,13 @@ fn test_sdp() {
 	    vec![1.0, 1.0, 1.0 + eps]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_30, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_30, true, variant) });
     reference = (None, 2.0 + eps);
     assert!(sdp_equality_err(&sdp_test_30, &result_check, &reference), "test 30 failed");
     let (sol, _sol_obj) = result_check.as_ref().expect("test 30 failed");
     assert!(float_equality(sol[0][7], 1.0, TOL_TEST), "test 30: matrix completion failed with {}", sol[0][7]);
     //println!("\ntest 30: decision variable solutions= {:#?} with objective value= {}", sol, sol_obj);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_30, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_30, false, variant) });
     assert!(sdp_equality_err(&sdp_test_30, &result_reg, &reference), "test 30 failed under regularization");
 
     // a few higher-dimensional problems
@@ -1076,14 +1092,14 @@ fn test_sdp() {
 				0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])],
 	    vec![1.0, 0.0, 0.0, 1.0])]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_31, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_31, true, variant) });
     reference = (
 	Some(vec![vec![2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 2.0]]),
 	5.0);
     assert!(sdp_equality_err(&sdp_test_31, &result_check, &reference), "test 31 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 31: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_31, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_31, false, variant) });
     assert!(sdp_equality_err(&sdp_test_31, &result_reg, &reference), "test 31 failed under regularization");
 
     let sdp_test_32 = SDP::new(
@@ -1111,7 +1127,7 @@ fn test_sdp() {
 	    (vec![ident_symmap(4), zero_symmap(4, 16)], zero_mat(4, 4)),
 	    (vec![zero_symmap(4, 16), ident_symmap(4)], zero_mat(4, 4))]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_32, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_32, true, variant) });
     reference = (
 	Some(vec![
 	    vec![4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0],
@@ -1120,7 +1136,7 @@ fn test_sdp() {
     assert!(sdp_equality_err(&sdp_test_32, &result_check, &reference), "test 32 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 32: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_32, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_32, false, variant) });
     assert!(sdp_equality_err(&sdp_test_32, &result_reg, &reference), "test 32 failed under regularization");
 
     let sdp_test_33 = SDP::new(
@@ -1136,14 +1152,14 @@ fn test_sdp() {
 	    vec![5.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_33, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_33, true, variant) });
     reference = (
 	Some(vec![vec![4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0]]),
 	3.0);
     assert!(sdp_equality_err(&sdp_test_33, &result_check, &reference), "test 33 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 33: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_33, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_33, false, variant) });
     assert!(sdp_equality_err(&sdp_test_33, &result_reg, &reference), "test 33 failed under regularization");
 
     // a couple of problems with redundant constraints
@@ -1163,12 +1179,12 @@ fn test_sdp() {
 	    vec![3.0, 1.0, 2.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_34, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_34, true, variant) });
     reference = (Some(vec![vec![2.0, 1.4142135623730951, 1.0]]), 1.585786437626905);
     assert!(sdp_equality_err(&sdp_test_34, &result_check, &reference), "test 34 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 34: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_34, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_34, false, variant) });
     assert!(sdp_equality_err(&sdp_test_34, &result_reg, &reference), "test 34 failed under regularization");
 
     let sdp_test_35 = SDP::new(
@@ -1186,12 +1202,12 @@ fn test_sdp() {
 	    vec![4.0, 1.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_35, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_35, true, variant) });
     reference = (Some(vec![vec![3.0, 0.0, 0.0, 1.7320508075688772, 0.0, 1.0]]), 2.267949192431123);
     assert!(sdp_equality_err(&sdp_test_35, &result_check, &reference), "test 35 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 35: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_35, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_35, false, variant) });
     assert!(sdp_equality_err(&sdp_test_35, &result_reg, &reference), "test 35 failed under regularization");
 
     // a couple of single-variable problems with no given linear constraints
@@ -1206,11 +1222,11 @@ fn test_sdp() {
 	(vec![], vec![]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_36, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_36, true, variant) });
     reference = (Some(vec![vec![0.0, 0.0, 0.0]]), 0.0);
     assert!(sdp_equality_err(&sdp_test_36, &result_check, &reference), "test 36 failed");
     //result_check_pr = result_check.as_ref().unwrap();
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_36, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_36, false, variant) });
     assert!(sdp_equality_err(&sdp_test_36, &result_reg, &reference), "test 36 failed under regularization");
 
     let sdp_test_37 = SDP::new(
@@ -1222,12 +1238,12 @@ fn test_sdp() {
 	(vec![], vec![]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_37, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_37, true, variant) });
     reference = (Some(vec![vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]), 0.0);
     assert!(sdp_equality_err(&sdp_test_37, &result_check, &reference), "test 37 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 37: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_37, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_37, false, variant) });
     assert!(sdp_equality_err(&sdp_test_37, &result_reg, &reference), "test 35 failed under regularization");
 
     // a few simple problems for which the Slater conditions may fail
@@ -1242,12 +1258,12 @@ fn test_sdp() {
 	 vec![0.0, 1.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_38, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_38, true, variant) });
     reference = (Some(vec![vec![0.0, 0.0, 1.0]]), 1.0);
     assert!(sdp_equality_err(&sdp_test_38, &result_check, &reference), "test 38 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 38: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_38, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_38, false, variant) });
     assert!(sdp_equality_err(&sdp_test_38, &result_reg, &reference), "test 38 failed under regularization");
     
     let sdp_test_39 = SDP::new(
@@ -1259,12 +1275,12 @@ fn test_sdp() {
 	(vec![], vec![]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_39, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_39, true, variant) });
     reference = (None, 0.0);
     assert!(sdp_equality_err(&sdp_test_39, &result_check, &reference), "test 39 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 39: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_39, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_39, false, variant) });
     assert!(sdp_equality_err(&sdp_test_39, &result_reg, &reference), "test 35 failed under regularization");
 
     let sdp_test_40 = SDP::new(
@@ -1276,11 +1292,11 @@ fn test_sdp() {
 	(vec![vec![sym_matrix_proj(2, 0, 0)]], vec![0.0]),
 	vec![]
     );
-    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_40, true) });
+    result_check = panic::catch_unwind(|| { sdpad(&sdp_test_40, true, variant) });
     reference = (None, 0.0);
     assert!(sdp_equality_err(&sdp_test_40, &result_check, &reference), "test 40 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 40: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
-    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_40, false) });
+    result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_40, false, variant) });
     assert!(sdp_equality_err(&sdp_test_40, &result_reg, &reference), "test 40 failed under regularization");
 }
