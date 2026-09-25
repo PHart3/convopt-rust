@@ -8,7 +8,7 @@ For the paper's convergence guarantees to hold, the user should ensure that both
 
 ## Organization
 
-- `src/lin_alg/`: matrix operations, including Gaussian elimination, `LDL^T` decomposition, and spectral decomposition.
+- `src/lin_alg/`: matrix operations, including Gaussian elimination, `LDL^T` decomposition, and spectral decomposition (via the Jacobi method).
 - `src/sdp.rs`: the user-facing SDP struct, helper constructors, and conversion from the user formulation to standard form.
 - `src/sdp_altdir.rs`: the SDP solver.
 - `src/sdp_tests.rs`: the test harness and example SDP instances.
@@ -22,7 +22,12 @@ Edit `src/main.rs` by replacing the toy SDP problem with your desired instance. 
 cargo run
 ```
 
-The test harness can be run with
+Here, the solver also requires one of two Jacobi variant arguments:
+
+- `Cached`, which chooses pivots using cached maxima 
+- `Cyclic`, which chooses pivots under a column-cyclic ordering.
+
+The test harness runs both variants and prints their elapsed times. Run it with
 
 ```bash
 cargo test
