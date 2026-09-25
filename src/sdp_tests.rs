@@ -100,6 +100,7 @@ fn sdp_equality_err(sdp: &SDP,
 // start of tests
 
 use crate::sdp_altdir::*;
+use crate::jacobi::JacobiVariant::*;
 use std::panic;
 
 #[test]

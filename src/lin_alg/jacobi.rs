@@ -1,24 +1,6 @@
-// Jacobi eigenvalue algorithm with each sweep taking cubic time on average by caching maximal element of each row
-
-use crate::lin_alg::sym_matrix::*;
-
-// given a column in a symmetric matrix, find index of offdiagonal element with largest magnitude
-fn index_max_in_col(a : &SymMatrix, col : usize) -> usize {
-    if col == 0 {
-	panic!("index_max_in_col : column position must be positive");
-    }
-    let mut max = a[(col * (col + 1)) / 2];
-    let mut index : usize;
-    let mut index_max = 0;
-    for i in 0..col {
-	index = (col * (col + 1)) / 2 + i;
-	if a[index].abs() > max.abs() {
-	    index_max = i;
-	    max = a[index]; 
-	}
-    }
-    index_max
-}
+// Two variants of Jacobi eigenvalue algorithm, one using a cache to find new pivot, the other using column-cyclic ordering
+// Boths Jacobi methods compute spectral decomposition (L, Q) of real symmetric matrix via Jacobi rotations
+// and store eigenvalues in L and corresponding eigenvectors in Q.
 
 // Jacobi rotation subroutine (where orth stores the eventual eigenvectors)
 fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, dim : usize, k : usize, j : usize) ->
@@ -56,10 +38,30 @@ fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, dim : usize, k
     (mat, orth, val_old.abs())
 }
 
+use crate::lin_alg::sym_matrix::*;
+
+// first Jacobi variant, with each sweep taking cubic time on average by caching maximal element of each row
+
+// given a column in a symmetric matrix, find index of offdiagonal element with largest magnitude
+fn index_max_in_col(a : &SymMatrix, col : usize) -> usize {
+    if col == 0 {
+	panic!("index_max_in_col : column position must be positive");
+    }
+    let mut max = a[(col * (col + 1)) / 2];
+    let mut index : usize;
+    let mut index_max = 0;
+    for i in 0..col {
+	index = (col * (col + 1)) / 2 + i;
+	if a[index].abs() > max.abs() {
+	    index_max = i;
+	    max = a[index]; 
+	}
+    }
+    index_max
+}
+
 const MAX_SWEEPS: usize = 50;
 
-// Jacobi method computing spectral decomposition (L, Q) of real symmetric matrix via Jacobi rotations
-// stores eigenvalues in L and corresponding eigenvectors in Q
 pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     if dim == 1 {
 	return (vec![a[0]], vec![1.0]);
@@ -86,6 +88,7 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 	}
 	m2 += 1;
     }
+    // compute new pivot position (j, k)
     let mut k = max.0;
     let mut j = maxima[k - 1];
     ind = (k * (k + 1)) / 2 + j;
@@ -155,11 +158,42 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     }
 }
 
+// second Jacobi variant, with each sweep taking cubic worst-case time by cyclically moving through columns
+pub fn jacobi_eigen_cyc(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
+    if dim == 1 {
+	return (vec![a[0]], vec![1.0]);
+    }
+    let (mut eigenvals_new, mut eigenvects_new) = (a, &mut ident_mat(dim));
+    let (mut eigenvals, mut eigenvects) : (&mut SymMatrix, &mut Matrix);
+    let mut count = 0;
+    let max_rotations = MAX_SWEEPS * dim * (dim - 1) / 2;
+    loop {
+	if count == max_rotations {
+	    panic!("jacobi_eigen_cach failed to converge after {} sweeps", MAX_SWEEPS);
+	}
+	count += 1;
+	let (j, k) = ; // new pivot position
+	if eigenvals_new[(k * (k + 1)) / 2 + j].abs() < 1e-12 * 1.0_f64.max(max_diag) {
+	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
+	} else {
+	    (eigenvals, eigenvects, biggest) = (eigenvals_new, eigenvects_new, biggest_new);
+	    (eigenvals_new, eigenvects_new, biggest_new) = jacobi_rot(eigenvals, eigenvects, dim, k, j);
+	}
+    }
+}
+
+pub enum JacobiVariant {
+    Cached,
+    Cyclic,
+}
+use JacobiVariant::*;
+
 // extracting the nonnegative part of the above spectral decomposition
-pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
+pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize, var : JacobiVariant) -> (Vector, Matrix) {
     let (mut nonneg_eigenvals, mut nonneg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
-    let (eigenvals, eigenvects) = jacobi_eigen_cach(a, dim);
+    let (eigenvals, eigenvects) =
+	match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
 	if !(*val < -(1e-9 * scale)) {
 	    nonneg_eigenvals.push(*val);
@@ -170,10 +204,11 @@ pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 }
 
 // extracting the negative part of the above spectral decomposition
-pub fn negeigendecomp(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
+pub fn negeigendecomp(a : &mut SymMatrix, dim : usize, var : JacobiVariant) -> (Vector, Matrix) {
     let (mut neg_eigenvals, mut neg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
-    let (eigenvals, eigenvects) = jacobi_eigen_cach(a, dim);
+    let (eigenvals, eigenvects) =
+	match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
 	if *val < -(1e-8 * scale) {
 	    neg_eigenvals.push(*val);

@@ -1,11 +1,11 @@
-use crate::lin_alg::jacobi::*;
+pub use crate::lin_alg::jacobi::*;
 use crate::sdp::*;
 
 // maximum number of iterations to run
 const TOTAL_STEPS: usize = 5000;
 
 // the alternating direction dual augmented Lagrangian method
-pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
+pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : JacobiVariant) -> (Vec<SymMatrix>, f64) {
     let (mut obj, (mat_dense, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp, check_constraints);
     let (c_len, block_size_sum) : (usize, usize) = (point.len() - zeros.len(), block_dims.iter().sum());
     // adjust objective function so that it acts via the Frobenius product instead of packed dot product
@@ -82,7 +82,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool) -> (Vec<SymMatrix>, f64) {
 	    dual_sfull.push(val);
 	    dual_sfull_temp.push(val);
 	}
-	let (egnvals, egnvects) : (Vector, Matrix) = nonnegeigendecomp(&mut dual_sfull_temp, var_dim);
+	let (egnvals, egnvects) : (Vector, Matrix) = nonnegeigendecomp(&mut dual_sfull_temp, var_dim, jac_variant);
 	if egnvals.is_empty() {
 	    dual_s = vec![0.0; var_dim_tot];
 	} else {
