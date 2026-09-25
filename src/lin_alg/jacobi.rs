@@ -88,7 +88,7 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 	}
 	m2 += 1;
     }
-    // compute new pivot position (j, k)
+    // pivot position (j, k)
     let mut k = max.0;
     let mut j = maxima[k - 1];
     ind = (k * (k + 1)) / 2 + j;
@@ -166,18 +166,34 @@ pub fn jacobi_eigen_cyc(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     let (mut eigenvals_new, mut eigenvects_new) = (a, &mut ident_mat(dim));
     let (mut eigenvals, mut eigenvects) : (&mut SymMatrix, &mut Matrix);
     let mut count = 0;
-    let max_rotations = MAX_SWEEPS * dim * (dim - 1) / 2;
     loop {
-	if count == max_rotations {
-	    panic!("jacobi_eigen_cach failed to converge after {} sweeps", MAX_SWEEPS);
+	if count == MAX_SWEEPS {
+	    panic!("jacobi_eigen_cyc failed to converge after {} sweeps", MAX_SWEEPS);
 	}
 	count += 1;
-	let (j, k) = ; // new pivot position
-	if eigenvals_new[(k * (k + 1)) / 2 + j].abs() < 1e-12 * 1.0_f64.max(max_diag) {
+	// column-cyclic ordering of pivot positions
+	for k in 1..dim {
+	    for j in 0..k {
+		if eigenvals_new[(k * (k + 1)) / 2 + j] == 0.0 {
+		    continue;
+		}
+		(eigenvals, eigenvects) = (eigenvals_new, eigenvects_new);
+		(eigenvals_new, eigenvects_new, _) = jacobi_rot(eigenvals, eigenvects, dim, k, j)
+	    }
+	}
+	let (mut max_diag, mut max_offdiag) = (eigenvals_new[0].abs(), 0.0);
+	for n in 0..dim {
+	    for m in 0..n {
+		if eigenvals_new[(n * (n + 1)) / 2 + m].abs() > max_offdiag {
+		    max_offdiag = eigenvals_new[(n * (n + 1)) / 2 + m].abs();
+		}
+	    }
+	    if eigenvals_new[(n * n + 3 * n) / 2].abs() > max_diag {
+		max_diag = eigenvals_new[(n * n + 3 * n) / 2].abs();
+	    }
+	} 
+	if max_offdiag < 1e-12 * 1.0_f64.max(max_diag) {
 	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
-	} else {
-	    (eigenvals, eigenvects, biggest) = (eigenvals_new, eigenvects_new, biggest_new);
-	    (eigenvals_new, eigenvects_new, biggest_new) = jacobi_rot(eigenvals, eigenvects, dim, k, j);
 	}
     }
 }
@@ -189,7 +205,7 @@ pub enum JacobiVariant {
 use JacobiVariant::*;
 
 // extracting the nonnegative part of the above spectral decomposition
-pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize, var : JacobiVariant) -> (Vector, Matrix) {
+pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> (Vector, Matrix) {
     let (mut nonneg_eigenvals, mut nonneg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     let (eigenvals, eigenvects) =
@@ -204,7 +220,7 @@ pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize, var : JacobiVariant) -
 }
 
 // extracting the negative part of the above spectral decomposition
-pub fn negeigendecomp(a : &mut SymMatrix, dim : usize, var : JacobiVariant) -> (Vector, Matrix) {
+pub fn negeigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> (Vector, Matrix) {
     let (mut neg_eigenvals, mut neg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     let (eigenvals, eigenvects) =

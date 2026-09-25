@@ -82,7 +82,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : JacobiVariant) 
 	    dual_sfull.push(val);
 	    dual_sfull_temp.push(val);
 	}
-	let (egnvals, egnvects) : (Vector, Matrix) = nonnegeigendecomp(&mut dual_sfull_temp, var_dim, jac_variant);
+	let (egnvals, egnvects) : (Vector, Matrix) = nonnegeigendecomp(&mut dual_sfull_temp, var_dim, &jac_variant);
 	if egnvals.is_empty() {
 	    dual_s = vec![0.0; var_dim_tot];
 	} else {
