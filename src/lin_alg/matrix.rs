@@ -35,6 +35,7 @@ pub fn zero_mat(dim_c: usize, dim_r: usize) -> Matrix {
 }
 
 // standard inner product
+#[inline]
 pub fn dot_prod(vect1: &[f64], vect2: &[f64]) -> f64 {
     let mut prod = 0.0;
     for (e1, e2) in vect1.iter().zip(vect2.iter()) {
@@ -44,6 +45,7 @@ pub fn dot_prod(vect1: &[f64], vect2: &[f64]) -> f64 {
 }
 
 // Euclidean norm
+#[inline]
 pub fn euclid_norm(vect: &[f64]) -> f64 {
     dot_prod(vect, vect).sqrt()
 }
@@ -169,6 +171,7 @@ pub fn ident_mat_low_tri(dim: usize) -> LowTriMatrix {
 
 // testing if two vectors are the same
 
+#[inline]
 pub fn float_equality(f1: f64, f2: f64, tol: f64) -> bool {
     let diff = (f1 - f2).abs();
     diff <= tol || diff <= tol * f2.abs().max(f1.abs())

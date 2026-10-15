@@ -31,6 +31,7 @@ pub fn frob_prod_sym(mat1 : &SymMatrix, mat2 : &SymMatrix, dim : usize) -> f64 {
 }
 
 // Frobenius norm of a symmetric matrix
+#[inline]
 pub fn frob_norm_sym(mat : &SymMatrix, dim : usize) -> f64 {
     frob_prod_sym(mat, mat, dim).sqrt()
 }
