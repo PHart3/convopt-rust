@@ -290,6 +290,8 @@ for verification.
 - `use vstd::prelude::*` at top of `src/lib.rs` is required.
 - The `vstd` source folder is available as a read-only library 
   in `~/verus/source/target-verus/release`.
+- Beyond `vstd::prelude::*`, import in each file the specific 
+  `vstd` modules you want to use for that file.
 - Run all Verus commands from the project root.
 - During iteration, use module/function filters (`--verify-module`,
   `--verify-function`; see `verus --help`). Expand scope when changing
