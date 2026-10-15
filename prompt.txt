@@ -1,0 +1,15 @@
+Read CLAUDE.md, DAG.md (if it exists), VERIFICATION_PROGRESS.md, and TRUSTED_BASE.md (if it exists).
+
+DAG.md format: one line per layer, exactly:
+<id> | <goal> | deps: <ids or none> | targets: <functions> | status: <not started | in progress | done>
+
+If DAG.md does not exist: create it with a DAG of proof layers covering the specification in CLAUDE.md,
+with every status "not started". Then stop for human review.
+
+Otherwise, on each run:
+1. Pick the first "in progress" layer; if none, the first "not started" layer whose dependencies are
+all "done". Set it to "in progress" in DAG.md.
+2. Complete only that layer. Run the Verus command and cargo build, stage changes with git add,
+and update VERIFICATION_PROGRESS.md and TRUSTED_BASE.md.
+3. When finished, set the layer to "done" and stop. Do not start another layer.
+4. If stuck, leave the layer "in progress", record the issue in VERIFICATION_PROGRESS.md, and stop.
