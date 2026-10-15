@@ -1,7 +1,10 @@
-Read CLAUDE.md, DAG.md (if it exists), VERIFICATION_PROGRESS.md, and TRUSTED_BASE.md (if it exists).
+Read CLAUDE.md, DAG.md (if it exists), VERIFICATION_PROGRESS.md (if it exists), and TRUSTED_BASE.md (if it exists).
 
-DAG.md format: one line per layer, exactly:
-<id> | <goal> | deps: <ids or none> | targets: <functions> | status: <not started | in progress | done>
+DAG.md format: for each layer, give:
+<id> | <goal> |
+deps: <ids or none> |
+targets: <functions> |
+status: <not started | in progress | done>
 
 If DAG.md does not exist: create it with a DAG of proof layers covering the specification in CLAUDE.md,
 with every status "not started". Then stop for human review.
