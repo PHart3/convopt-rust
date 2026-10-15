@@ -2,3 +2,6 @@
 name = "convopt-rust"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+vstd = "=0.0.0-2026-08-23-0033"
