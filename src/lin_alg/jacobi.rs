@@ -204,19 +204,18 @@ pub enum JacobiVariant {
 }
 use JacobiVariant::*;
 
-// extracting the nonnegative part of the above spectral decomposition
-pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> (Vector, Matrix) {
-    let (mut nonneg_eigenvals, mut nonneg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
-    let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
+// extracting the positive part of the above spectral decomposition
+pub fn poseigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> (Vector, Matrix) {
+    let (mut pos_eigenvals, mut pos_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let (eigenvals, eigenvects) =
 	match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
-	if !(*val < -(1e-9 * scale)) {
-	    nonneg_eigenvals.push(*val);
-	    nonneg_eigenvects.extend_from_slice(vect);
+	if *val > 0.0 {
+	    pos_eigenvals.push(*val);
+	    pos_eigenvects.extend_from_slice(vect);
 	}
     }
-    (nonneg_eigenvals, nonneg_eigenvects)
+    (pos_eigenvals, pos_eigenvects)
 }
 
 // extracting the negative part of the above spectral decomposition
@@ -224,7 +223,7 @@ pub fn negeigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> 
     let (mut neg_eigenvals, mut neg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
     let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     let (eigenvals, eigenvects) =
-	match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
+        match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
 	if *val < -(1e-8 * scale) {
 	    neg_eigenvals.push(*val);
