@@ -1,4 +1,6 @@
 // various basic matrix operations
+pub use crate::lin_alg::comparison::float_equality;
+use crate::lin_alg::comparison::scaled_near_zero;
 
 // column vector
 pub type Vector = Vec<f64>;
@@ -131,7 +133,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (&mut Mat
                 pivot_row = j;
             }
         }
-        if mat[n * row_dim + pivot_row].abs() < TOL * scale {
+        if scaled_near_zero(mat[n * row_dim + pivot_row], scale, TOL) {
             continue;
         }
         if pivot_row != row_search {
@@ -170,12 +172,6 @@ pub fn ident_mat_low_tri(dim: usize) -> LowTriMatrix {
 }
 
 // testing if two vectors are the same
-
-#[inline]
-pub fn float_equality(f1: f64, f2: f64, tol: f64) -> bool {
-    let diff = (f1 - f2).abs();
-    diff <= tol || diff <= tol * f2.abs().max(f1.abs())
-}
 
 pub fn vector_equality(vect1: &Vector, vect2: &Vector, tol: f64) -> bool {
     if vect1.len() != vect2.len() {

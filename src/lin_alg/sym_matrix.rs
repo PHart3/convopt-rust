@@ -1,6 +1,7 @@
 // operations on symmetric matrices
 // a symmetric matrix is represented by a flat vector containing its upper triangular part in column-major style
 pub use crate::lin_alg::matrix::*;
+use crate::lin_alg::comparison::{pivot_below_positive_threshold, scaled_near_zero};
 pub type SymMatrix = Vector;
 
 // max diagonal of a symmetric matrix
@@ -380,7 +381,7 @@ pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vecto
 	}
 	d.push(mat[(i * i + 3 * i) / 2] - sum);
 
-	if d[i] < TOL * max_diag_sym(mat, dim).max(1.0) {
+	if pivot_below_positive_threshold(d[i], max_diag_sym(mat, dim).max(1.0), TOL) {
 	    return None;
 	}
     }
@@ -415,7 +416,7 @@ pub fn diag_solver(diag : &Vector, vect : &Vector) -> Vector {
     let mut solution = Vec::new();
     let scale = diag.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     for (v, d) in vect.iter().zip(diag.iter()) {
-        if d.abs() < TOL * scale {
+        if scaled_near_zero(*d, scale, TOL) {
             panic!("diag_solver: division by zero");
         }
         solution.push(v / d);
@@ -432,7 +433,7 @@ pub fn forw_subst(mat : &LowTriMatrix, vect : &mut [f64]) -> Vector {
     let scale = mat.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     for j in 0..dim {
 	d = mat[(j * (2 * dim - j + 1)) / 2];
-	if d.abs() < TOL * scale {
+	if scaled_near_zero(d, scale, TOL) {
 	    panic!("forw_subst: division by zero");
 	}
 	solution.push(vect[j] / d);
@@ -451,7 +452,7 @@ pub fn back_subst(mat : &LowTriMatrix, vect : &mut [f64]) -> Vector {
     let scale = mat.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
     for j in (0..dim).rev() {
 	d = mat[(j * (2 * dim - j + 1)) / 2];
-	if d.abs() < TOL * scale {
+	if scaled_near_zero(d, scale, TOL) {
 	    panic!("back_subst: division by zero");
 	}
 	solution[j] = vect[j] / d;

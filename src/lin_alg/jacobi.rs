@@ -39,6 +39,7 @@ fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, dim : usize, k
 }
 
 use crate::lin_alg::sym_matrix::*;
+use crate::lin_alg::comparison::{is_significantly_negative, scaled_near_zero};
 
 // first Jacobi variant, with each sweep taking cubic time on average by caching maximal element of each row
 
@@ -149,7 +150,7 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 	    k = max.0;
 	    j = maxima[k - 1];
 	}
-	if eigenvals_new[(k * (k + 1)) / 2 + j].abs() < 1e-12 * 1.0_f64.max(max_diag) {
+	if scaled_near_zero(eigenvals_new[(k * (k + 1)) / 2 + j], 1.0_f64.max(max_diag), 1e-12) {
 	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
 	} else {
 	    (eigenvals, eigenvects, biggest) = (eigenvals_new, eigenvects_new, biggest_new);
@@ -192,7 +193,7 @@ pub fn jacobi_eigen_cyc(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 		max_diag = eigenvals_new[(n * n + 3 * n) / 2].abs();
 	    }
 	} 
-	if max_offdiag < 1e-12 * 1.0_f64.max(max_diag) {
+	if scaled_near_zero(max_offdiag, 1.0_f64.max(max_diag), 1e-12) {
 	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
 	}
     }
@@ -225,7 +226,7 @@ pub fn negeigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> 
     let (eigenvals, eigenvects) =
         match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
-	if *val < -(1e-8 * scale) {
+	if is_significantly_negative(*val, scale, 1e-8) {
 	    neg_eigenvals.push(*val);
 	    neg_eigenvects.extend_from_slice(vect);
 	}

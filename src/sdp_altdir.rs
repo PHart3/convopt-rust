@@ -1,5 +1,6 @@
 pub use crate::lin_alg::jacobi::*;
 use crate::sdp::*;
+use crate::lin_alg::comparison::{relative_residual_is_small, residual_is_small};
 
 // maximum number of iterations to run
 const TOTAL_STEPS: usize = 5000;
@@ -67,7 +68,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 		let solved_pre = &solved[..c_len];
 		let resid_top = euclid_distance(&sym_mat_act(&gram_small, solved_pre), &inverse_y_old);
 		let resid_bottom = frob_norm_sym(&gram_small, c_len) * euclid_norm(solved_pre) + euclid_norm(&inverse_y_old);
-		if !(resid_top / resid_bottom < 1e-9) {
+		if !relative_residual_is_small(resid_top, resid_bottom, 1e-9) {
 		    panic!("regularized Gram solve is not an accurate solution to original system");
 		}
 	    };
@@ -112,7 +113,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 			*start += 2 * dim;
 			Some(block)}).flatten()).collect();
 
-	if delta < TOL &&
+	if residual_is_small(delta, TOL) &&
 	    psd_block_check(&prim_z, &psd_blocks) {
 		if block_size_sum == 0 {
 		    result.push(prim_z);
@@ -145,7 +146,9 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	    it_stag = 0;
 	}
 	if let Some(best_prim_val) = best_prim_val &&
-	    ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) {
+	    ((it_stag > stag1 && residual_is_small(delta, 1e-5)) ||
+	     (it_stag > stag2 && residual_is_small(delta, 1e-4)) ||
+	     (it_stag > stag3 && residual_is_small(delta, 1e-3))) {
 		if block_size_sum == 0 {
 		    result.push(best_prim_z);
 		} else {
