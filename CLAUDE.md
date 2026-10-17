@@ -287,6 +287,7 @@ for verification.
 
 ### Workflow
 
+- Always include `-V no-solver-version-check` when invoking Verus.
 - `use vstd::prelude::*` at top of `src/lib.rs` is required.
 - The `vstd` source folder is available as a read-only library 
   in `~/verus/source/target-verus/release`.
@@ -326,8 +327,8 @@ during this verification project. Don’t break `cargo test`.
 
 Verus is already installed locally.
 
-Use network access as needed to obtain dependencies and
-consult high-quality documentation.
+Use network access as needed to obtain dependencies and to
+consult high-quality documentation or academic references.
 
 Do not download or execute untrusted scripts.
 
