@@ -285,6 +285,19 @@ Keep implementation-specific reasoning localized.
 Follow existing code architecture unless a change is necessary
 for verification.
 
+### Verus Compatibility
+
+- Treat the installed Verus version as authoritative, rather 
+  than relying on potentially outdated knowledge or documentation.
+- Before declaring a feature unsupported, consult the documentation 
+  and test a minimal example against the installed version.
+- Do not infer unsupported functionality from a failed verification 
+  attempt; first rule out incorrect syntax, missing specifications, 
+  and proof failures.
+- If a limitation is confirmed, find a reasonable workaround to the 
+  Rust code. Otherwise, retain the original Rust code as much as
+  possible.
+
 ### Workflow
 
 - Always include `-V no-solver-version-check` when invoking Verus.
@@ -309,8 +322,8 @@ for verification.
 
 ### Proof Clarity
 
-Keep Verus specifications and proofs transparent, concise, and
-conceptually instructive. Prefer clear invariants and reusable lemmas
+Keep Verus specifications and proofs idomatic, transparent, concise, and 
+conceptually instructive. Prefer clear invariants and reusable lemmas 
 over opaque, oversized proofs or unnecessary verification machinery.
 
 ### Scope
