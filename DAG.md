@@ -1,7 +1,7 @@
-L00 | Verus scaffolding and trusted exact-real model: wrap crate in verus!, define abstract Real spec type (ordered field + sqrt axioms), external_body wrappers for primitive f64 ops (+ - * / abs sqrt recip signum max min mul_add hypot comparisons) with exact-real specs, tolerance-comparison contracts; create TRUSTED_BASE.md |
+L00 | Verus scaffolding and trusted exact-real model: spec view rv: f64 -> real over Verus's native SMT reals, sqrt_r axiom, trusted axioms giving vstd's f64 operator/comparison hooks exact-real meaning, literal axioms, assume_specification contracts for std f64 methods (abs sqrt recip signum max min mul_add hypot is_finite), inline wrappers for unsupported primitives (neg, infinities, FRAC_1_SQRT_2, abort); verified comparison functions; create TRUSTED_BASE.md |
 deps: none |
 targets: float_equality, scaled_near_zero, pivot_below_positive_threshold, is_significantly_negative, residual_is_small, relative_residual_is_small |
-status: not started
+status: done
 
 L01 | Vector views (Seq<Real>) and basic vector/matrix constructors and operations |
 deps: L00 |

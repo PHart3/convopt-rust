@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 vstd = "=0.0.0-2026-08-23-0033"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_keep_ghost)'] }
