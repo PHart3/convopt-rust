@@ -21,12 +21,25 @@ Runtime checks: `cargo build`, `cargo test`.
 | L01 vector views and basic vector/matrix operations | done | `src/lin_alg/vec_spec.rs` (new spec module), 14 functions of `src/lin_alg/matrix.rs` in `verus!`; `gauss_elim` stays outside (L13). |
 | L02 packed symmetric view and basic symmetric-matrix operations | done | `src/lin_alg/sym_spec.rs` (new spec module), 15 functions of `src/lin_alg/sym_matrix.rs` in `verus!`; the rest of that file stays outside (L04-L07, L14, L15). |
 | L03 spec-level matrix algebra | done | `src/lin_alg/mat_spec.rs` (new spec/proof module: 21 spec functions, 54 lemmas) plus 7 generic sum lemmas in `sym_spec.rs`; no executable code touched. |
-| L04 .. L20 | not started | |
+| L04 constraint operator and adjoint | done | `src/lin_alg/constr_spec.rs` (new spec/proof module: operator `A`, adjoint `A*`, Gram matrix, triangle sums, adjoint identity, Gram-action lemma); `constraint_action`, `constraint_lin_comb`, `constraint_gram`, `diag_scale_gram` in a second `verus!` block of `src/lin_alg/sym_matrix.rs`. |
+| L05 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **211 verified, 0 errors** (Verus `--time`: 2.6 s verify time; no slow
-proofs; the whole run takes 4 s).
+Last full run: **277 verified, 0 errors** (Verus `--time`: 4.1 s SMT time; no slow
+proofs; the whole run takes 9 s).
+
+- 4 executable constraint-operator functions (`src/lin_alg/sym_matrix.rs`, second `verus!`
+  block) with exact-real postconditions (L04): `constraint_action` returns `A(X)`,
+  `constraint_lin_comb` returns the packed adjoint `A*(y)` (entrywise, with the off-diagonal
+  factors 1/2), `constraint_gram` returns the packed Gram matrix of the dense rows (entrywise
+  triangle sums), `diag_scale_gram` returns `Q D Q^T` as a block equality of views.
+- 14 proved lemmas (and 19 spec functions) in `src/lin_alg/constr_spec.rs` (L04): sum splitting, triangle sums
+  (extensionality, additivity, scaling, single term, exchange with an outer sum, decoding of
+  flat packed sums), the Frobenius product as a weighted triangle sum, packed-index
+  injectivity, column-slice dot products, the adjoint identity
+  `<A(X), y> = <X, A*(y)>_F`, symmetry of the Gram entries, and `G y = A(A*(y))` (no
+  zero-pattern rows).
 
 - 54 proved lemmas in `src/lin_alg/mat_spec.rs` (L03; Verus reports 66 verified items for the
   module): product algebra (associativity,
@@ -139,6 +152,35 @@ proofs; the whole run takes 4 s).
 - The Frobenius product `frob_f` over index functions agrees with the packed `frob_r`
   (`lemma_frob_sym_view`); linearity lemmas serve the adjoint identity of L04.
 
+## Architecture decisions (L04)
+
+- Constraint representation (`src/lin_alg/constr_spec.rs`): the dense constraint matrix is
+  column-major with `row_dim` rows and `pk_len(dim)` columns (`constr_entry(m, row_dim, i, n)`
+  is entry `n` of the packed matrix `M_i`); the zero-pattern list holds pairs `(r, c)` with
+  `r < c < dim` (`valid_zero_list`), as built by `sdp_to_standard`. `row_dim` is recovered
+  from the lengths (`rows_of(len, col_dim) = len / col_dim`), with `len % col_dim == 0` as a
+  precondition; `constraint_action` has no `dim` parameter, so it takes the existential
+  `zero_list_fits(list, var.len())`.
+- Operator specs: `constraint_action_r` (dense rows are packed dot products `row_dot_r`, then
+  the listed entries of `X`), `adjoint_entry_r(r, c) = adj_wt(r, c) * col_comb_r(.., pk_idx(r, c))
+  + 1/2 * zero_comb_r(r, c)` with `adj_wt = 1` on the diagonal and `1/2` off it, stated as the
+  entrywise predicate `is_constraint_adjoint`; `gram_entry_r(a, b)` is the triangle sum of
+  `adj_wt * M_a[n] * M_b[n]` (`is_constraint_gram`). The adjoint identity
+  `lemma_constraint_adjoint` needs the strict `r < c` of the list: a diagonal pair would get
+  weight 1/2 instead of 1.
+- Empty dense matrix: both `constraint_action` and `constraint_lin_comb` return early (`[]`,
+  resp. zeros) and ignore the zero-pattern list, as the original code does; the postconditions
+  state exactly this (see open issues).
+- Triangle sums `tri_sum_r(f, dim) = sum_{c < dim} sum_{r <= c} f(r, c)` are the bridge between
+  packed loops (which visit the triangle column by column) and the flat sums over packed
+  indices (`lemma_tri_sum_packed`) and the Frobenius product (`lemma_frob_tri`, weights
+  `pk_wt`). Reuse them for every packed accumulation loop.
+- Accumulation loops that add a whole packed matrix (`result[t] += op[t]` for all `t`) are
+  verified with a ghost snapshot `prev` and the two-part invariant "updated below `t`,
+  unchanged from `t` on"; the per-entry spec is recovered afterwards with `lemma_pk_idx_bound`.
+- `lemma_gram_action` (`G y = A(A*(y))` for the dense rows) is the hook for the regularized
+  Gram solve of L17.
+
 ## Constructs rewritten for Verus compatibility
 
 | Construct | Replacement | Where |
@@ -149,6 +191,10 @@ proofs; the whole run takes 4 s).
 | imports of spec-only items / `vstd::std_specs` (erased under `cargo`) | gated with `#[cfg(verus_keep_ghost)]` | `trusted.rs`, `real_spec.rs`, `comparison.rs`, `matrix.rs`, `sym_matrix.rs` |
 | `x += y`, `v[i] += y`, `v[i] *= y` on `f64` (compiler crash) | `x = x + y`, `v[i] = v[i] + y`, `v[i] = v[i] * y` | `frob_prod_sym`, `sym_mat_one_norm`, `sym_mat_act`, `scale_off_diag` |
 | `iter().fold(0.0, max)` | index loop | `sym_mat_one_norm` |
+| tuple pattern in a parameter `(mat, list): &(&Matrix, &Vec<..>)` (rejected by the `verus!` macro) | `constr: &(..)` plus `let (mat, list) = constr;` (call sites unchanged) | `constraint_action`, `constraint_lin_comb` |
+| `slice.to_vec()` (no vstd spec) | `vstd::slice::slice_to_vec(slice)` (vstd's wrapper around `to_vec`) | `constraint_action`, `constraint_gram`, `diag_scale_gram` |
+| `chunks_exact(..).enumerate().skip(1)`, `iter_mut().zip(..)`, `d.iter().zip(q.chunks_exact(len))`, `for (r, c) in *list` | index loops over the same slices (same cost) | `constraint_action`, `constraint_lin_comb`, `constraint_gram`, `diag_scale_gram` |
+| `dot_prod(col, vect)` with `vect` longer than `col` (silent `zip` truncation) | `dot_prod(col, &vect[..row_dim])` (free slice) | `constraint_lin_comb` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
 
@@ -166,6 +212,28 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Before rewriting a construct, probe it in a scratch file: every entry in the table above
   was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
   `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L04, closure matching; probed 2026-10-17):
+
+- A closure literal written in a proof matches the closure inside a spec function's body
+  only if the bodies are built from applications of named spec functions, sequence indexing
+  and closure applications. A body that compares or combines the bound variable with a
+  *captured* scalar (`if k == r {..}`, `if i < row_dim {..}`) does not match across the
+  spec/proof boundary (it does match between two closures of the same proof). Hence the
+  per-term spec functions `action_entry_r`, `zero_term_r` in `constr_spec.rs`.
+- `let`-bound closures are opaque constants: `F(r, c)` inside another closure is not reduced
+  to `F`'s body. Unfold a `tri_sum_r(F, n + 1)` as `tri_sum_r(F, n) + sum_fn_r(|r| F(r, n), n + 1)`
+  (closure applied to the let-bound name), not with the body written out; bridge to the body
+  with `lemma_sum_fn_ext` and the apply fact.
+- When instantiating a lemma whose conclusion contains nested closures
+  (`lemma_sum_fn_swap`, `lemma_tri_sum_swap`), write the local closures with the same bound
+  variable names and the same nesting as the lemma's statement.
+- Prove exchange-of-summation lemmas by induction on the outer count with the additivity
+  lemmas, not by instantiating an existing swap lemma with a lambda (the instantiated nested
+  closures do not match).
+- Slices: `&v[lo..lo + n]` with `lo` an executable variable is simpler to verify than
+  `&v[j * n..(j + 1) * n]` (one nonlinear fact `j * n + n == (j + 1) * n` suffices, and the
+  `subrange` indices are linear).
 
 Proof-engineering notes (L03):
 
@@ -207,6 +275,11 @@ Proof-engineering notes (L01):
   `nonlinear_arith` before loops whose invariant has such products.
 
 ## Open issues
+
+- `constraint_action` and `constraint_lin_comb` ignore the zero-pattern list when the dense
+  constraint matrix is empty (early return in the original code). The verified
+  postconditions state this behaviour; whether `sdpad` can reach it with a nonempty list
+  (an SDP with LMI blocks but no linear constraints) must be settled in L17/L18.
 
 - The full-verification command in CLAUDE.md needs `-V no-solver-version-check` on
   this machine (Z3 4.16.0 with build hashcode); without it Verus panics as soon as any

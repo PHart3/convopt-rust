@@ -21,7 +21,7 @@ status: done
 L04 | Constraint operator and adjoint: constraint_action spec, constraint_lin_comb adjoint identity <constraint_action(X), y> = <X, constraint_lin_comb(y)>_F with off-diagonal 1/2 factors, Gram matrix, Q D Q^T reconstruction |
 deps: L03 |
 targets: constraint_action, constraint_lin_comb, constraint_gram, diag_scale_gram |
-status: not started
+status: done
 
 L05 | Triangular and diagonal solvers: packed lower-triangular view, forward/back substitution solve L x = b and L^T x = b, diagonal solve, with division-safety contracts |
 deps: L02 |

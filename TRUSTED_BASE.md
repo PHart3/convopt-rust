@@ -36,3 +36,8 @@ Layer history: L01 added no trusted items. It uses only `neg` (T7, in
 `0.0`, `1.0`, `2.0` (T5) and the `abs`, `mul_add`, `sqrt` contracts (T6).
 L03 (`src/lin_alg/mat_spec.rs`) is spec- and proof-only over Verus reals and
 added no trusted items; it uses no `f64` literal or contract.
+L04 added no trusted items; it uses the literals `0.0`, `0.5` (T5) and no
+method contract. Its executable code calls vstd's `slice_to_vec` wrapper
+(vstd's own `external_body` specification of `<[T]>::to_vec`, `out@ == slice@`)
+in place of the unsupported method call; vstd is used as a library and is not
+part of this project's trusted base.

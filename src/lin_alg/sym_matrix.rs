@@ -16,6 +16,13 @@ use crate::real_spec::{abs_r, max_r};
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::sym_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::mat_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::constr_spec::*;
+#[cfg(verus_keep_ghost)]
+use vstd::arithmetic::div_mod::lemma_fundamental_div_mod;
+use vstd::slice::slice_to_vec;
 
 pub type SymMatrix = Vector;
 
@@ -880,94 +887,606 @@ pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
 
 // the constraint matrix for block-diagonal decision variable Z is represented implicitly by a matrix M and a vector V
 // each row of M is a symmetric matrix
-// V is a list of pairs (row, column), with column >= row, representing entries of Z that must be zero
+// V is a list of pairs (row, column), with column > row, representing entries of Z that must be zero
 // the full constraint matrix is formed by stacking M on top of V
+//
+// The four functions below are verified against the operator specifications in
+// src/lin_alg/constr_spec.rs.  When M is empty both constraint_action and constraint_lin_comb
+// ignore V (as the original code does); the specifications state exactly that.
+
+verus! {
 
 // action of constraint matrix on decision variable
-pub fn constraint_action((mat, list) : &(&Matrix, &Vec<(usize, usize)>), var : &SymMatrix) -> Vector {
+pub fn constraint_action(constr: &(&Matrix, &Vec<(usize, usize)>), var: &SymMatrix) -> (result: Vector)
+    requires
+        constr.0@.len() > 0 ==> var@.len() > 0 && constr.0@.len() as int % var@.len() as int == 0,
+        zero_list_fits(constr.1@, var@.len() as int),
+    ensures
+        constr.0@.len() == 0 ==> result@.len() == 0,
+        constr.0@.len() > 0 ==> {
+            let row_dim = rows_of(constr.0@.len() as int, var@.len() as int);
+            &&& result@.len() == row_dim + constr.1@.len()
+            &&& rvs(result@) == constraint_action_r(rvs(constr.0@), row_dim, constr.1@, rvs(var@))
+        },
+{
+    let (mat, list) = constr;
     if mat.is_empty() {
-	return vec![]
+        return vec![]
     }
-    let row_dim = mat.len() / var.len();
-    let mut result = scal_vect(var[0], &mat[..row_dim].to_vec());
-    for (n, col) in mat.chunks_exact(row_dim).enumerate().skip(1) {
-	for i in 0..row_dim {
-	    result[i] += var[n] * col[i];
-	}
+    let ghost m = rvs(mat@);
+    let ghost x = rvs(var@);
+    let col_dim = var.len();
+    let mat_len = mat.len();
+    let row_dim = mat_len / col_dim;
+    proof {
+        lemma_fundamental_div_mod(mat@.len() as int, col_dim as int);
+        assert(row_dim * col_dim == mat@.len()) by (nonlinear_arith)
+            requires mat@.len() as int == col_dim as int * (mat@.len() as int / col_dim as int), row_dim as int == mat@.len() as int / col_dim as int;
     }
-    for (r, c) in *list {
-	result.push(var[(c * (c + 1)) / 2 + r]);
+    let col0 = slice_to_vec(&mat[..row_dim]);
+    let mut result = scal_vect(var[0], &col0);
+    proof {
+        assert forall|i: int| 0 <= i < row_dim
+            implies rv(#[trigger] result@[i]) == sum_fn_r(|n: int| constr_entry(m, row_dim as int, i, n) * x[n], 1) by {
+            let f = |n: int| constr_entry(m, row_dim as int, i, n) * x[n];
+            assert(sum_fn_r(f, 1) == sum_fn_r(f, 0) + f(0));
+            assert(cm_idx(row_dim as int, i, 0) == i) by (nonlinear_arith);
+            assert(rvs(result@)[i] == rv(var@[0]) * rvs(col0@)[i]);
+            assert(rvs(col0@)[i] == rv(mat@[i]));
+            assert(x[0] * m[i] == m[i] * x[0]) by (nonlinear_arith);
+        }
+    }
+    for n in 1..col_dim
+        invariant
+            m == rvs(mat@),
+            x == rvs(var@),
+            col_dim == var@.len(),
+            mat_len == mat@.len() == row_dim * col_dim,
+            result@.len() == row_dim,
+            forall|i: int| 0 <= i < row_dim
+                ==> rv(#[trigger] result@[i]) == sum_fn_r(|t: int| constr_entry(m, row_dim as int, i, t) * x[t], n as nat),
+    {
+        for i in 0..row_dim
+            invariant
+                m == rvs(mat@),
+                x == rvs(var@),
+                col_dim == var@.len(),
+                n < col_dim,
+                mat_len == mat@.len() == row_dim * col_dim,
+                result@.len() == row_dim,
+                forall|i2: int| 0 <= i2 < i
+                    ==> rv(#[trigger] result@[i2]) == sum_fn_r(|t: int| constr_entry(m, row_dim as int, i2, t) * x[t], (n + 1) as nat),
+                forall|i2: int| i <= i2 < row_dim
+                    ==> rv(#[trigger] result@[i2]) == sum_fn_r(|t: int| constr_entry(m, row_dim as int, i2, t) * x[t], n as nat),
+        {
+            proof {
+                assert(n * row_dim + i < mat_len) by (nonlinear_arith)
+                    requires n < col_dim, i < row_dim, mat_len == row_dim * col_dim;
+            }
+            result[i] = result[i] + var[n] * mat[n * row_dim + i];
+            proof {
+                let f = |t: int| constr_entry(m, row_dim as int, i as int, t) * x[t];
+                assert(sum_fn_r(f, (n + 1) as nat) == sum_fn_r(f, n as nat) + f(n as int));
+                assert(cm_idx(row_dim as int, i as int, n as int) == n * row_dim + i);
+                let (u, v) = (m[n * row_dim + i], x[n as int]);
+                assert(v * u == u * v) by (nonlinear_arith);
+            }
+        }
+    }
+    let ghost dim = choose|dim: int| dim_fits(dim) && #[trigger] pk_len(dim) == var@.len() && valid_zero_list(list@, dim);
+    for k in 0..list.len()
+        invariant
+            m == rvs(mat@),
+            x == rvs(var@),
+            col_dim == var@.len(),
+            mat@.len() == row_dim * col_dim,
+            dim_fits(dim) && pk_len(dim) == var@.len() && valid_zero_list(list@, dim),
+            result@.len() == row_dim + k,
+            forall|i: int| 0 <= i < row_dim
+                ==> rv(#[trigger] result@[i]) == sum_fn_r(|t: int| constr_entry(m, row_dim as int, i, t) * x[t], col_dim as nat),
+            forall|t: int| 0 <= t < k ==> rv(#[trigger] result@[row_dim + t]) == x[zero_idx(list@, t)],
+    {
+        let (r, c) = list[k];
+        proof {
+            assert(list@[k as int].0 < list@[k as int].1 < dim);
+            lemma_dim_fits_idx(dim, c as int);
+            lemma_pk_idx_bound(r as int, c as int, dim);
+        }
+        result.push(var[(c * (c + 1)) / 2 + r]);
+    }
+    proof {
+        assert forall|i: int| 0 <= i < row_dim + list@.len()
+            implies rv(#[trigger] result@[i]) == action_entry_r(m, row_dim as int, list@, x, i) by {
+            if i < row_dim {
+                assert(rv(result@[i]) == sum_fn_r(|t: int| constr_entry(m, row_dim as int, i, t) * x[t], col_dim as nat));
+            } else {
+                assert(rv(result@[row_dim + (i - row_dim)]) == x[zero_idx(list@, i - row_dim)]);
+            }
+        }
+        assert(rvs(result@) =~= constraint_action_r(m, row_dim as int, list@, x));
     }
     result
 }
 
 // linear combination of the symmetric matrices making up the constraint matrix
 // forms the adjoint operator to constraint_action (above) under the Frobenius inner product
-pub fn constraint_lin_comb(dim : usize, (mat, list) : &(&Matrix, &Vec<(usize, usize)>), vect : &Vector) -> SymMatrix {
-    if mat.is_empty() {
-	return vec![0.0; dim * (dim + 1) / 2]
+#[allow(unused_variables)]  // vect_len is only used in the loop invariants
+pub fn constraint_lin_comb(dim: usize, constr: &(&Matrix, &Vec<(usize, usize)>), vect: &Vector) -> (result: SymMatrix)
+    requires
+        dim_fits(dim as int),
+        valid_zero_list(constr.1@, dim as int),
+        constr.0@.len() > 0 ==> dim >= 1 && constr.0@.len() as int % pk_len(dim as int) == 0
+            && vect@.len() >= rows_of(constr.0@.len() as int, pk_len(dim as int)) + constr.1@.len(),
+    ensures
+        result@.len() == pk_len(dim as int),
+        constr.0@.len() == 0 ==> forall|n: int| 0 <= n < result@.len() ==> rv(#[trigger] result@[n]) == 0.0real,
+        constr.0@.len() > 0 ==> is_constraint_adjoint(rvs(result@), dim as int, rvs(constr.0@),
+            rows_of(constr.0@.len() as int, pk_len(dim as int)), constr.1@, rvs(vect@)),
+{
+    let (mat, list) = constr;
+    proof {
+        lemma_dim_fits_idx(dim as int, dim as int);
     }
+    if mat.is_empty() {
+        return vec![0.0; dim * (dim + 1) / 2]
+    }
+    let ghost m = rvs(mat@);
+    let ghost y = rvs(vect@);
     let col_dim = dim * (dim + 1) / 2;
-    let row_dim = mat.len() / col_dim;
+    let mat_len = mat.len();
+    let vect_len = vect.len();
+    proof {
+        lemma_pk_col_start_monotone(1, dim as int);
+        assert(pk_col_start(1) == 1);
+    }
+    let row_dim = mat_len / col_dim;
+    proof {
+        lemma_fundamental_div_mod(mat@.len() as int, col_dim as int);
+        assert(row_dim * col_dim == mat@.len()) by (nonlinear_arith)
+            requires mat@.len() as int == col_dim as int * (mat@.len() as int / col_dim as int), row_dim as int == mat@.len() as int / col_dim as int;
+        lemma_pk_col_start_zero();
+    }
     let mut result = Vec::new();
     let mut start = 0;
     let mut diag;
-    for i in 0..dim {
-	diag = (i * i + 3 * i) / 2;
-	for j in start..diag {
-	    result.push(0.5 * dot_prod(&mat[j * row_dim..(j + 1) * row_dim], vect));
-	}
-	result.push(dot_prod(&mat[diag * row_dim..(diag + 1) * row_dim], vect));
-	start += i + 1;
+    for i in 0..dim
+        invariant
+            m == rvs(mat@),
+            y == rvs(vect@),
+            dim_fits(dim as int),
+            col_dim == pk_len(dim as int),
+            mat_len == mat@.len() == row_dim * col_dim,
+            vect_len == vect@.len() >= row_dim,
+            start == pk_col_start(i as int),
+            result@.len() == start,
+            forall|r: int, c: int| 0 <= r <= c < i
+                ==> rv(#[trigger] result@[pk_idx(r, c)]) == adj_wt(r, c) * col_comb_r(m, row_dim as int, y, pk_idx(r, c)),
+    {
+        proof {
+            lemma_dim_fits_idx(dim as int, i as int);
+            lemma_pk_diag_idx(i as int);
+            lemma_pk_idx_bound(i as int, i as int, dim as int);
+        }
+        diag = (i * i + 3 * i) / 2;
+        for j in start..diag
+            invariant
+                m == rvs(mat@),
+                y == rvs(vect@),
+                i < dim,
+                dim_fits(dim as int),
+                col_dim == pk_len(dim as int),
+                mat_len == mat@.len() == row_dim * col_dim,
+                vect_len == vect@.len() >= row_dim,
+                start == pk_col_start(i as int),
+                diag == pk_idx(i as int, i as int) < col_dim,
+                result@.len() == j,
+                forall|r: int, c: int| 0 <= r <= c < i
+                    ==> rv(#[trigger] result@[pk_idx(r, c)]) == adj_wt(r, c) * col_comb_r(m, row_dim as int, y, pk_idx(r, c)),
+                forall|r: int| 0 <= r < j - start
+                    ==> rv(#[trigger] result@[pk_idx(r, i as int)]) == adj_wt(r, i as int) * col_comb_r(m, row_dim as int, y, pk_idx(r, i as int)),
+        {
+            proof {
+                assert(j * row_dim + row_dim == (j + 1) * row_dim) by (nonlinear_arith);
+                assert((j + 1) * row_dim <= col_dim * row_dim) by (nonlinear_arith) requires j + 1 <= col_dim;
+                assert(row_dim * col_dim == col_dim * row_dim) by (nonlinear_arith);
+            }
+            let lo = j * row_dim;
+            proof {
+                lemma_col_slice_dot(mat@, row_dim as int, vect@, j as int, lo as int);
+            }
+            result.push(0.5 * dot_prod(&mat[lo..lo + row_dim], &vect[..row_dim]));
+            proof {
+                assert forall|r: int, c: int| 0 <= r <= c < i
+                    implies rv(#[trigger] result@[pk_idx(r, c)]) == adj_wt(r, c) * col_comb_r(m, row_dim as int, y, pk_idx(r, c)) by {
+                    lemma_pk_idx_bound(r, c, i as int);
+                }
+                assert forall|r: int| 0 <= r < j + 1 - start
+                    implies rv(#[trigger] result@[pk_idx(r, i as int)]) == adj_wt(r, i as int) * col_comb_r(m, row_dim as int, y, pk_idx(r, i as int)) by {
+                    if r == j - start {
+                        assert(pk_idx(r, i as int) == j);
+                    }
+                }
+            }
+        }
+        proof {
+            assert(diag * row_dim + row_dim == (diag + 1) * row_dim) by (nonlinear_arith);
+            assert((diag + 1) * row_dim <= col_dim * row_dim) by (nonlinear_arith) requires diag + 1 <= col_dim;
+            assert(row_dim * col_dim == col_dim * row_dim) by (nonlinear_arith);
+        }
+        let lo = diag * row_dim;
+        proof {
+            lemma_col_slice_dot(mat@, row_dim as int, vect@, diag as int, lo as int);
+        }
+        result.push(dot_prod(&mat[lo..lo + row_dim], &vect[..row_dim]));
+        proof {
+            lemma_pk_col_start_step(i as int);
+            assert forall|r: int, c: int| 0 <= r <= c < i + 1
+                implies rv(#[trigger] result@[pk_idx(r, c)]) == adj_wt(r, c) * col_comb_r(m, row_dim as int, y, pk_idx(r, c)) by {
+                if c < i {
+                    lemma_pk_idx_bound(r, c, i as int);
+                } else if r < i {
+                    lemma_pk_idx_bound(r, c, dim as int);
+                } else {
+                    assert(pk_idx(r, c) == diag);
+                    assert(1.0real * col_comb_r(m, row_dim as int, y, pk_idx(r, c)) == col_comb_r(m, row_dim as int, y, pk_idx(r, c)));
+                }
+            }
+        }
+        start += i + 1;
     }
-    for (start, &(r, c)) in list.iter().enumerate() {
-	result[(c * (c + 1)) / 2 + r] += 0.5 * vect[row_dim + start];
+    for k in 0..list.len()
+        invariant
+            m == rvs(mat@),
+            y == rvs(vect@),
+            dim_fits(dim as int),
+            valid_zero_list(list@, dim as int),
+            vect_len == vect@.len() >= row_dim + list@.len(),
+            result@.len() == pk_len(dim as int),
+            forall|r: int, c: int| 0 <= r <= c < dim
+                ==> rv(#[trigger] result@[pk_idx(r, c)]) == adj_wt(r, c) * col_comb_r(m, row_dim as int, y, pk_idx(r, c))
+                    + 0.5real * zero_comb_upto(list@, row_dim as int, y, r, c, k as nat),
+    {
+        let (r, c) = list[k];
+        proof {
+            assert(list@[k as int].0 < list@[k as int].1 < dim);
+            lemma_dim_fits_idx(dim as int, c as int);
+            lemma_pk_idx_bound(r as int, c as int, dim as int);
+        }
+        let idx = (c * (c + 1)) / 2 + r;
+        result[idx] = result[idx] + 0.5 * vect[row_dim + k];
+        proof {
+            assert forall|r2: int, c2: int| 0 <= r2 <= c2 < dim
+                implies rv(#[trigger] result@[pk_idx(r2, c2)]) == adj_wt(r2, c2) * col_comb_r(m, row_dim as int, y, pk_idx(r2, c2))
+                    + 0.5real * zero_comb_upto(list@, row_dim as int, y, r2, c2, (k + 1) as nat) by {
+                lemma_pk_idx_bound(r2, c2, dim as int);
+                let f = |t: int| zero_term_r(list@, row_dim as int, y, r2, c2, t);
+                assert(zero_comb_upto(list@, row_dim as int, y, r2, c2, (k + 1) as nat)
+                    == zero_comb_upto(list@, row_dim as int, y, r2, c2, k as nat) + f(k as int));
+                lemma_pk_idx_injective(r2, c2, r as int, c as int);
+            }
+        }
+    }
+    proof {
+        assert forall|r: int, c: int| 0 <= r <= c < dim
+            implies #[trigger] rvs(result@)[pk_idx(r, c)] == adjoint_entry_r(m, row_dim as int, list@, y, r, c) by {
+            lemma_pk_idx_bound(r, c, dim as int);
+        }
     }
     result
 }
 
 // computation of Gram matrix of a constraint matrix (i.e., its composite with its adjoint)
 // we ignore the off-diagonal zero constraints because we only need the upper left block of the Gram matrix
-pub fn constraint_gram(dim : usize, mat : &Matrix) -> SymMatrix {
+pub fn constraint_gram(dim: usize, mat: &Matrix) -> (result: SymMatrix)
+    requires
+        dim_fits(dim as int),
+        mat@.len() > 0 ==> dim >= 1 && mat@.len() as int % pk_len(dim as int) == 0
+            && dim_fits(rows_of(mat@.len() as int, pk_len(dim as int))),
+    ensures
+        mat@.len() == 0 ==> result@.len() == 0,
+        mat@.len() > 0 ==> is_constraint_gram(rvs(result@), rvs(mat@), rows_of(mat@.len() as int, pk_len(dim as int)), dim as int),
+{
     if mat.is_empty() {
-	return vec![];
+        return vec![];
+    }
+    let ghost m = rvs(mat@);
+    proof {
+        lemma_dim_fits_idx(dim as int, dim as int);
+        lemma_pk_col_start_monotone(1, dim as int);
+        assert(pk_col_start(1) == 1);
     }
     let col_dim = dim * (dim + 1) / 2;
-    let gram_dim = mat.len() / col_dim;
-    let mut result : SymMatrix = vec![0.0; gram_dim * (gram_dim + 1) / 2];
+    let mat_len = mat.len();
+    let gram_dim = mat_len / col_dim;
+    proof {
+        lemma_fundamental_div_mod(mat@.len() as int, col_dim as int);
+        assert(gram_dim * col_dim == mat@.len()) by (nonlinear_arith)
+            requires mat@.len() as int == col_dim as int * (mat@.len() as int / col_dim as int), gram_dim as int == mat@.len() as int / col_dim as int;
+        lemma_dim_fits_idx(gram_dim as int, gram_dim as int);
+        lemma_pk_col_start_zero();
+    }
+    // term (r, c) of the triangle sum defining entry (a, b) of the Gram matrix
+    let ghost term = |a: int, b: int, r: int, c: int|
+        adj_wt(r, c) * (constr_entry(m, gram_dim as int, a, pk_idx(r, c)) * constr_entry(m, gram_dim as int, b, pk_idx(r, c)));
+    let gram_len = gram_dim * (gram_dim + 1) / 2;
+    let mut result: SymMatrix = vec![0.0; gram_len];
+    proof {
+        assert forall|a: int, b: int| 0 <= a <= b < gram_dim
+            implies rv(#[trigger] result@[pk_idx(a, b)]) == tri_sum_r(|r: int, c: int| term(a, b, r, c), 0) by {
+            lemma_pk_idx_bound(a, b, gram_dim as int);
+        }
+    }
     let mut start = 0;
     let mut diag;
-    for i in 0..dim {
-	diag = (i * i + 3 * i) / 2;
-	for j in start..diag {
-	    let col = mat[j * gram_dim..(j + 1) * gram_dim].to_vec();
-	    for (r, p) in result.iter_mut().zip(outer_prod_single(&col).iter()) {
-		*r += 0.5 * p;
-	    }
-	}
-	let col = mat[diag * gram_dim..(diag + 1) * gram_dim].to_vec();
-	for (r, p) in result.iter_mut().zip(outer_prod_single(&col).iter()) {
-	    *r += p;
-	}
-	start += i + 1;
+    for i in 0..dim
+        invariant
+            m == rvs(mat@),
+            term == (|a: int, b: int, r: int, c: int|
+                adj_wt(r, c) * (constr_entry(m, gram_dim as int, a, pk_idx(r, c)) * constr_entry(m, gram_dim as int, b, pk_idx(r, c)))),
+            dim_fits(dim as int),
+            dim_fits(gram_dim as int),
+            col_dim == pk_len(dim as int),
+            mat_len == mat@.len() == gram_dim * col_dim,
+            gram_len == pk_len(gram_dim as int),
+            start == pk_col_start(i as int),
+            result@.len() == gram_len,
+            forall|a: int, b: int| 0 <= a <= b < gram_dim
+                ==> rv(#[trigger] result@[pk_idx(a, b)]) == tri_sum_r(|r: int, c: int| term(a, b, r, c), i as nat),
+    {
+        proof {
+            lemma_dim_fits_idx(dim as int, i as int);
+            lemma_pk_diag_idx(i as int);
+            lemma_pk_idx_bound(i as int, i as int, dim as int);
+        }
+        diag = (i * i + 3 * i) / 2;
+        for j in start..diag
+            invariant
+                m == rvs(mat@),
+                term == (|a: int, b: int, r: int, c: int|
+                    adj_wt(r, c) * (constr_entry(m, gram_dim as int, a, pk_idx(r, c)) * constr_entry(m, gram_dim as int, b, pk_idx(r, c)))),
+                i < dim,
+                dim_fits(dim as int),
+                dim_fits(gram_dim as int),
+                col_dim == pk_len(dim as int),
+                mat_len == mat@.len() == gram_dim * col_dim,
+                gram_len == pk_len(gram_dim as int),
+                start == pk_col_start(i as int),
+                diag == pk_idx(i as int, i as int) < col_dim,
+                result@.len() == gram_len,
+                forall|a: int, b: int| 0 <= a <= b < gram_dim
+                    ==> rv(#[trigger] result@[pk_idx(a, b)]) == tri_sum_r(|r: int, c: int| term(a, b, r, c), i as nat)
+                        + sum_fn_r(|r: int| term(a, b, r, i as int), (j - start) as nat),
+        {
+            proof {
+                assert(j * gram_dim + gram_dim == (j + 1) * gram_dim) by (nonlinear_arith);
+                assert((j + 1) * gram_dim <= col_dim * gram_dim) by (nonlinear_arith) requires j + 1 <= col_dim;
+                assert(gram_dim * col_dim == col_dim * gram_dim) by (nonlinear_arith);
+            }
+            let lo = j * gram_dim;
+            let col = slice_to_vec(&mat[lo..lo + gram_dim]);
+            let op = outer_prod_single(&col);
+            let ghost prev = result@;
+            proof {
+                assert(col@ == mat@.subrange(lo as int, lo + gram_dim));
+                assert(col@.len() == gram_dim);
+            }
+            for t in 0..gram_len
+                invariant
+                    gram_len == pk_len(gram_dim as int),
+                    result@.len() == gram_len,
+                    prev.len() == gram_len,
+                    op@.len() == gram_len,
+                    forall|t2: int| 0 <= t2 < t ==> rv(#[trigger] result@[t2]) == rv(prev[t2]) + 0.5real * rv(op@[t2]),
+                    forall|t2: int| t <= t2 < gram_len ==> #[trigger] result@[t2] == prev[t2],
+            {
+                result[t] = result[t] + 0.5 * op[t];
+            }
+            proof {
+                assert forall|a: int, b: int| 0 <= a <= b < gram_dim
+                    implies rv(#[trigger] result@[pk_idx(a, b)]) == tri_sum_r(|r: int, c: int| term(a, b, r, c), i as nat)
+                        + sum_fn_r(|r: int| term(a, b, r, i as int), (j + 1 - start) as nat) by {
+                    lemma_pk_idx_bound(a, b, gram_dim as int);
+                    let r0 = (j - start) as int;
+                    let f = |r: int| term(a, b, r, i as int);
+                    assert(sum_fn_r(f, (j + 1 - start) as nat) == sum_fn_r(f, (j - start) as nat) + f(r0));
+                    assert(pk_idx(r0, i as int) == j);
+                    assert(col@[a] == mat@[lo + a]);
+                    assert(col@[b] == mat@[lo + b]);
+                    assert(cm_idx(gram_dim as int, a, j as int) == lo + a);
+                    assert(cm_idx(gram_dim as int, b, j as int) == lo + b);
+                    assert(constr_entry(m, gram_dim as int, a, j as int) == m[lo + a]);
+                    assert(constr_entry(m, gram_dim as int, b, j as int) == m[lo + b]);
+                    assert(rv(op@[pk_idx(a, b)]) == rv(col@[a]) * rv(col@[b]));
+                    assert(rv(result@[pk_idx(a, b)]) == rv(prev[pk_idx(a, b)]) + 0.5real * rv(op@[pk_idx(a, b)]));
+                    assert(f(r0) == 0.5real * (m[lo + a] * m[lo + b]));
+                }
+            }
+        }
+        proof {
+            assert(diag * gram_dim + gram_dim == (diag + 1) * gram_dim) by (nonlinear_arith);
+            assert((diag + 1) * gram_dim <= col_dim * gram_dim) by (nonlinear_arith) requires diag + 1 <= col_dim;
+            assert(gram_dim * col_dim == col_dim * gram_dim) by (nonlinear_arith);
+        }
+        let lo = diag * gram_dim;
+        let col = slice_to_vec(&mat[lo..lo + gram_dim]);
+        let op = outer_prod_single(&col);
+        let ghost prev = result@;
+        proof {
+            assert(col@ == mat@.subrange(lo as int, lo + gram_dim));
+            assert(col@.len() == gram_dim);
+        }
+        for t in 0..gram_len
+            invariant
+                gram_len == pk_len(gram_dim as int),
+                result@.len() == gram_len,
+                prev.len() == gram_len,
+                op@.len() == gram_len,
+                forall|t2: int| 0 <= t2 < t ==> rv(#[trigger] result@[t2]) == rv(prev[t2]) + rv(op@[t2]),
+                forall|t2: int| t <= t2 < gram_len ==> #[trigger] result@[t2] == prev[t2],
+        {
+            result[t] = result[t] + op[t];
+        }
+        proof {
+            lemma_pk_col_start_step(i as int);
+            assert forall|a: int, b: int| 0 <= a <= b < gram_dim
+                implies rv(#[trigger] result@[pk_idx(a, b)]) == tri_sum_r(|r: int, c: int| term(a, b, r, c), (i + 1) as nat) by {
+                lemma_pk_idx_bound(a, b, gram_dim as int);
+                let tri = |r: int, c: int| term(a, b, r, c);
+                let f = |r: int| tri(r, i as int);
+                let g = |r: int| term(a, b, r, i as int);
+                assert(tri_sum_r(tri, (i + 1) as nat) == tri_sum_r(tri, i as nat) + sum_fn_r(f, (i + 1) as nat));
+                assert(sum_fn_r(f, (i + 1) as nat) == sum_fn_r(f, i as nat) + f(i as int));
+                assert forall|r: int| 0 <= r < i implies #[trigger] g(r) == f(r) by {}
+                lemma_sum_fn_ext(g, f, i as nat);
+                assert(col@[a] == mat@[lo + a]);
+                assert(col@[b] == mat@[lo + b]);
+                assert(cm_idx(gram_dim as int, a, diag as int) == lo + a);
+                assert(cm_idx(gram_dim as int, b, diag as int) == lo + b);
+                assert(constr_entry(m, gram_dim as int, a, diag as int) == m[lo + a]);
+                assert(constr_entry(m, gram_dim as int, b, diag as int) == m[lo + b]);
+                assert(rv(op@[pk_idx(a, b)]) == rv(col@[a]) * rv(col@[b]));
+                assert(rv(result@[pk_idx(a, b)]) == rv(prev[pk_idx(a, b)]) + rv(op@[pk_idx(a, b)]));
+                assert(f(i as int) == 1.0real * (m[lo + a] * m[lo + b]));
+            }
+        }
+        start += i + 1;
+    }
+    proof {
+        assert forall|a: int, b: int| 0 <= a <= b < gram_dim
+            implies #[trigger] rvs(result@)[pk_idx(a, b)] == gram_entry_r(m, gram_dim as int, dim as int, a, b) by {
+            lemma_pk_idx_bound(a, b, gram_dim as int);
+            let tri = |r: int, c: int| term(a, b, r, c);
+            let g = |r: int, c: int| adj_wt(r, c) * (constr_entry(m, gram_dim as int, a, pk_idx(r, c)) * constr_entry(m, gram_dim as int, b, pk_idx(r, c)));
+            assert forall|r: int, c: int| 0 <= r <= c < dim implies #[trigger] tri(r, c) == g(r, c) by {}
+            lemma_tri_sum_ext(tri, g, dim as nat);
+        }
     }
     result
 }
 
 // computation of QDQ^T where Q is any matrix and D is diagonal
-pub fn diag_scale_gram(d : &Vector, q : &Matrix) -> SymMatrix {
+pub fn diag_scale_gram(d: &Vector, q: &Matrix) -> (result: SymMatrix)
+    requires
+        d@.len() > 0 ==> q@.len() as int % d@.len() as int == 0 && dim_fits(rows_of(q@.len() as int, d@.len() as int)),
+    ensures
+        d@.len() == 0 ==> result@.len() == 0,
+        d@.len() > 0 ==> {
+            let len = rows_of(q@.len() as int, d@.len() as int);
+            let qv = cm_view(rvs(q@), len);
+            &&& result@.len() == pk_len(len)
+            &&& meq(sym_view(rvs(result@)), mmul(mmul(qv, diag_view(rvs(d@)), d@.len() as int), mtr(qv), d@.len() as int), len, len)
+        },
+{
     if d.is_empty() {
-	return vec![];
+        return vec![];
     }
-    let len = q.len() / d.len();
-    let mut result = vec![0.0; len * (len + 1) / 2]; 
-    for (s, c) in d.iter().zip(q.chunks_exact(len)) {
-	for (r, p) in result.iter_mut().zip(outer_prod_single_scale(*s, &c.to_vec()).iter()) {
-	   *r += p; 
-	}
+    let ghost dv = rvs(d@);
+    let ghost qs = rvs(q@);
+    let m = d.len();
+    let q_len = q.len();
+    let len = q_len / m;
+    proof {
+        lemma_fundamental_div_mod(q@.len() as int, m as int);
+        assert(len * m == q@.len()) by (nonlinear_arith)
+            requires q@.len() as int == m as int * (q@.len() as int / m as int), len as int == q@.len() as int / m as int;
+        lemma_dim_fits_idx(len as int, len as int);
+    }
+    let ghost qv = cm_view(qs, len as int);
+    let ghost term = |a: int, b: int, k: int| dv[k] * qv(a, k) * qv(b, k);
+    let pk = len * (len + 1) / 2;
+    let mut result = vec![0.0; pk];
+    proof {
+        assert forall|a: int, b: int| 0 <= a <= b < len
+            implies rv(#[trigger] result@[pk_idx(a, b)]) == sum_fn_r(|k: int| term(a, b, k), 0) by {
+            lemma_pk_idx_bound(a, b, len as int);
+        }
+    }
+    for k in 0..m
+        invariant
+            dv == rvs(d@),
+            qs == rvs(q@),
+            qv == cm_view(qs, len as int),
+            term == (|a: int, b: int, k: int| dv[k] * qv(a, k) * qv(b, k)),
+            m == d@.len(),
+            q_len == q@.len() == len * m,
+            dim_fits(len as int),
+            pk == pk_len(len as int),
+            result@.len() == pk,
+            forall|a: int, b: int| 0 <= a <= b < len
+                ==> rv(#[trigger] result@[pk_idx(a, b)]) == sum_fn_r(|k: int| term(a, b, k), k as nat),
+    {
+        proof {
+            assert(k * len + len == (k + 1) * len) by (nonlinear_arith);
+            assert((k + 1) * len <= m * len) by (nonlinear_arith) requires k + 1 <= m;
+            assert(m * len == len * m) by (nonlinear_arith);
+        }
+        let lo = k * len;
+        let col = slice_to_vec(&q[lo..lo + len]);
+        let op = outer_prod_single_scale(d[k], &col);
+        let ghost prev = result@;
+        proof {
+            assert(col@ == q@.subrange(lo as int, lo + len));
+            assert(col@.len() == len);
+        }
+        for t in 0..pk
+            invariant
+                pk == pk_len(len as int),
+                result@.len() == pk,
+                prev.len() == pk,
+                op@.len() == pk,
+                forall|t2: int| 0 <= t2 < t ==> rv(#[trigger] result@[t2]) == rv(prev[t2]) + rv(op@[t2]),
+                forall|t2: int| t <= t2 < pk ==> #[trigger] result@[t2] == prev[t2],
+        {
+            result[t] = result[t] + op[t];
+        }
+        proof {
+            assert forall|a: int, b: int| 0 <= a <= b < len
+                implies rv(#[trigger] result@[pk_idx(a, b)]) == sum_fn_r(|k2: int| term(a, b, k2), (k + 1) as nat) by {
+                lemma_pk_idx_bound(a, b, len as int);
+                let f = |k2: int| term(a, b, k2);
+                assert(sum_fn_r(f, (k + 1) as nat) == sum_fn_r(f, k as nat) + f(k as int));
+                assert(col@[a] == q@[lo + a]);
+                assert(col@[b] == q@[lo + b]);
+                assert(cm_idx(len as int, a, k as int) == lo + a);
+                assert(cm_idx(len as int, b, k as int) == lo + b);
+                assert(qv(a, k as int) == qs[lo + a]);
+                assert(qv(b, k as int) == qs[lo + b]);
+                assert(rv(op@[pk_idx(a, b)]) == rv(d@[k as int]) * rv(col@[a]) * rv(col@[b]));
+                assert(rv(result@[pk_idx(a, b)]) == rv(prev[pk_idx(a, b)]) + rv(op@[pk_idx(a, b)]));
+            }
+        }
+    }
+    proof {
+        let prod = mmul(mmul(qv, diag_view(dv), m as int), mtr(qv), m as int);
+        assert forall|a: int, b: int| 0 <= a < len && 0 <= b < len
+            implies #[trigger] sym_view(rvs(result@))(a, b) == prod(a, b) by {
+            lemma_mul_diag_transpose(qv, dv, m as int, a, b);
+            let f = |k: int| dv[k] * qv(a, k) * qv(b, k);
+            if a <= b {
+                lemma_pk_idx_bound(a, b, len as int);
+                assert(sym_view(rvs(result@))(a, b) == rv(result@[pk_idx(a, b)]));
+                let g = |k: int| term(a, b, k);
+                assert(rv(result@[pk_idx(a, b)]) == sum_fn_r(g, m as nat));
+                assert forall|k: int| 0 <= k < m implies #[trigger] g(k) == f(k) by {}
+                lemma_sum_fn_ext(g, f, m as nat);
+            } else {
+                lemma_pk_idx_bound(b, a, len as int);
+                assert(sym_view(rvs(result@))(a, b) == rv(result@[pk_idx(b, a)]));
+                let g = |k: int| term(b, a, k);
+                assert(rv(result@[pk_idx(b, a)]) == sum_fn_r(g, m as nat));
+                assert forall|k: int| 0 <= k < m implies #[trigger] g(k) == f(k) by {
+                    let (u, v, w) = (dv[k], qv(a, k), qv(b, k));
+                    assert(g(k) == u * w * v);
+                    assert(u * w * v == u * v * w) by (nonlinear_arith);
+                }
+                lemma_sum_fn_ext(g, f, m as nat);
+            }
+        }
     }
     result
 }
+
+} // verus!
 
 // LDLT decomposition of a symmetric positive definite matrix
 pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vector)> {

@@ -253,13 +253,11 @@ Keep the project compiling and existing tests passing.
 
 Prefer small, independently verifiable changes.
 
-Do not treat this specification as a single implementation task.
-
 Track progress in `VERIFICATION_PROGRESS.md`: layer status (not started / in progress / done),
 verified-function count, constructs rewritten for Verus compatibility, and open issues.
 Update it at the end of each session, replacing stale content and maintaining a clear 
 and concise writing style. Read this file at session start, creating it if it does not
-exist yet.
+exist yet. At the end of each session, remove stale/obsolete content from the file.
 
 ### Performance Preservation
 
