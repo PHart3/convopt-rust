@@ -203,6 +203,24 @@ pub proof fn lemma_lt_idx_bound(dim: int, r: int, c: int, c2: int)
     lemma_lt_col_start_monotone(dim, c + 1, c2);
 }
 
+/// Distinct entries of the triangle have distinct flat indices.
+pub proof fn lemma_lt_idx_injective(dim: int, r1: int, c1: int, r2: int, c2: int)
+    requires
+        0 <= c1 <= r1 < dim,
+        0 <= c2 <= r2 < dim,
+        lt_idx(dim, r1, c1) == lt_idx(dim, r2, c2),
+    ensures
+        r1 == r2 && c1 == c2,
+{
+    if c1 < c2 {
+        lemma_lt_idx_bound(dim, r1, c1, c2);
+        lemma_lt_idx_bound(dim, r2, c2, dim);
+    } else if c2 < c1 {
+        lemma_lt_idx_bound(dim, r2, c2, c1);
+        lemma_lt_idx_bound(dim, r1, c1, dim);
+    }
+}
+
 /* ---------- lemmas about sums ---------- */
 
 /// sum over a prefix extended by one element.

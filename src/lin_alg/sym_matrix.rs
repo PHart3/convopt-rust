@@ -22,6 +22,8 @@ use crate::lin_alg::mat_spec::*;
 use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::solve_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::ldlt_spec::*;
 use crate::trusted::abort;
 #[cfg(verus_keep_ghost)]
 use vstd::arithmetic::div_mod::lemma_fundamental_div_mod;
@@ -1491,37 +1493,6 @@ pub fn diag_scale_gram(d: &Vector, q: &Matrix) -> (result: SymMatrix)
 
 } // verus!
 
-// LDLT decomposition of a symmetric positive definite matrix
-pub fn ldlt_decomp(mat : &SymMatrix, dim : usize) -> Option<(LowTriMatrix, Vector)> {
-    let (mut l, mut d) : (LowTriMatrix, Vector) = (ident_mat_low_tri(dim), Vec::with_capacity(dim));
-    let mut sum;
-    for i in 0..dim {
-	l[(i * (2 * dim - i + 1)) / 2] = 1.0;
-    }
-    let mut ind;
-    for i in 0..dim {
-	for j in 0..i {
-	    sum = 0.0;
-	    for k in 0..j {
-		sum = (l[k * (2 * dim - k + 1) / 2 + (i - k)] * l[k * (2 * dim - k + 1) / 2 + (j - k)]).mul_add(d[k], sum);
-	    }
-	    l[j * (2 * dim - j + 1) / 2 + (i - j)] = (mat[(i * (i + 1)) / 2 + j] - sum) / d[j]
-	}
-	
-	sum = 0.0;
-	for k in 0..i {
-	    ind = k * (2 * dim - k + 1) / 2 + (i - k);
-	    sum = (l[ind] * l[ind]).mul_add(d[k], sum);
-	}
-	d.push(mat[(i * i + 3 * i) / 2] - sum);
-
-	if pivot_below_positive_threshold(d[i], max_diag_sym(mat, dim).max(1.0), TOL) {
-	    return None;
-	}
-    }
-    Some((l, d))
-}
-
 // check whether a block-diagonal symmetric matrix S is positive semidefinite by running LDLT on S + eps * I
 pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool {
     let (mut eps, mut idx) : (f64, usize);
@@ -1818,25 +1789,256 @@ pub fn back_subst(mat: &LowTriMatrix, vect: &mut [f64]) -> (solution: Vector)
     solution
 }
 
-} // verus!
+// LDLT decomposition of a symmetric positive definite matrix
+// (returns None when a pivot falls below TOL times max(max |A_ii|, 1); on Some((l, d)),
+// l is unit lower-triangular, every pivot is at least that threshold, and L D L^T = A)
+pub fn ldlt_decomp(mat: &SymMatrix, dim: usize) -> (result: Option<(LowTriMatrix, Vector)>)
+    requires
+        dim_fits(dim as int),
+        mat@.len() >= pk_len(dim as int),
+    ensures
+        result matches Some((l, d)) ==> {
+            &&& l@.len() == dim * (dim + 1) / 2
+            &&& d@.len() == dim
+            &&& ldlt_ok(rvs(mat@), rvs(l@), rvs(d@), dim as int)
+            &&& forall|k: int| 0 <= k < dim
+                    ==> rv(#[trigger] d@[k]) >= rv(TOL) * max_r(max_abs_diag_r(rvs(mat@), dim as int), 1.0real)
+            &&& meq(mmul(mmul(lt_view(rvs(l@), dim as int), diag_view(rvs(d@)), dim as int), mtr(lt_view(rvs(l@), dim as int)), dim as int),
+                    sym_view(rvs(mat@)), dim as int, dim as int)
+        },
+{
+    let ghost a = rvs(mat@);
+    let ghost scale = max_r(max_abs_diag_r(a, dim as int), 1.0real);
+    let (mut l, mut d) : (LowTriMatrix, Vector) = (ident_mat_low_tri(dim), Vec::with_capacity(dim));
+    let mut sum;
+    proof {
+        lemma_lt_col_start_end(dim as int);
+    }
+    for i in 0..dim
+        invariant
+            dim_fits(dim as int),
+            l@.len() == lt_col_start(dim as int, dim as int),
+            is_lt_ident_r(rvs(l@), dim as int),
+    {
+        proof {
+            lemma_lt_idx_fits(dim as int, i as int);
+            lemma_lt_idx_bound(dim as int, i as int, i as int, dim as int);
+        }
+        let ghost prev = rvs(l@);
+        l[(i * (2 * dim - i + 1)) / 2] = 1.0;
+        proof {
+            // the diagonal entry was already 1, so the real view is unchanged
+            assert(lt_entry(prev, dim as int, i as int, i as int) == 1.0real);
+            assert(lt_idx(dim as int, i as int, i as int) == lt_col_start(dim as int, i as int));
+            assert(rvs(l@) =~= prev);
+        }
+    }
+    let mut ind;
+    for i in 0..dim
+        invariant
+            dim_fits(dim as int),
+            a == rvs(mat@),
+            mat@.len() >= pk_len(dim as int),
+            scale == max_r(max_abs_diag_r(a, dim as int), 1.0real),
+            l@.len() == lt_col_start(dim as int, dim as int),
+            d@.len() == i,
+            forall|r: int| 0 <= r < dim ==> #[trigger] lt_entry(rvs(l@), dim as int, r, r) == 1.0real,
+            forall|r: int, c: int| 0 <= c <= r < i ==> #[trigger] ldlt_entry_ok(a, rvs(l@), rvs(d@), dim as int, r, c),
+            forall|k: int| 0 <= k < i ==> rv(#[trigger] d@[k]) >= rv(TOL) * scale,
+    {
+        // row i of L: L_ij = (A_ij - sum_{k < j} d_k L_ik L_jk) / d_j for j < i
+        for j in 0..i
+            invariant
+                i < dim,
+                dim_fits(dim as int),
+                a == rvs(mat@),
+                mat@.len() >= pk_len(dim as int),
+                scale == max_r(max_abs_diag_r(a, dim as int), 1.0real),
+                l@.len() == lt_col_start(dim as int, dim as int),
+                d@.len() == i,
+                forall|r: int| 0 <= r < dim ==> #[trigger] lt_entry(rvs(l@), dim as int, r, r) == 1.0real,
+                forall|r: int, c: int| 0 <= c <= r < i ==> #[trigger] ldlt_entry_ok(a, rvs(l@), rvs(d@), dim as int, r, c),
+                forall|c: int| 0 <= c < j ==> #[trigger] ldlt_entry_ok(a, rvs(l@), rvs(d@), dim as int, i as int, c),
+                forall|k: int| 0 <= k < i ==> rv(#[trigger] d@[k]) >= rv(TOL) * scale,
+        {
+            sum = 0.0;
+            for k in 0..j
+                invariant
+                    j < i < dim,
+                    dim_fits(dim as int),
+                    l@.len() == lt_col_start(dim as int, dim as int),
+                    d@.len() == i,
+                    rv(sum) == ldlt_sum_r(rvs(l@), rvs(d@), dim as int, i as int, j as int, k as nat),
+            {
+                proof {
+                    lemma_lt_idx_fits(dim as int, k as int);
+                    lemma_lt_idx_bound(dim as int, i as int, k as int, dim as int);
+                    lemma_lt_idx_bound(dim as int, j as int, k as int, dim as int);
+                    lemma_ldlt_sum_step(rvs(l@), rvs(d@), dim as int, i as int, j as int, k as nat);
+                }
+                sum = (l[k * (2 * dim - k + 1) / 2 + (i - k)] * l[k * (2 * dim - k + 1) / 2 + (j - k)]).mul_add(d[k], sum);
+                proof {
+                    let (u, v, w) = (lt_entry(rvs(l@), dim as int, i as int, k as int), lt_entry(rvs(l@), dim as int, j as int, k as int), rv(d@[k as int]));
+                    assert(u * v * w == w * u * v) by (nonlinear_arith);
+                }
+            }
+            proof {
+                lemma_lt_idx_fits(dim as int, j as int);
+                lemma_lt_idx_bound(dim as int, i as int, j as int, dim as int);
+                lemma_dim_fits_idx(dim as int, i as int);
+                lemma_pk_idx_bound(j as int, i as int, dim as int);
+                assert(rv(TOL) * scale >= rv(TOL)) by (nonlinear_arith)
+                    requires scale >= 1.0real, rv(TOL) > 0.0real;
+            }
+            let ghost prev = rvs(l@);
+            l[j * (2 * dim - j + 1) / 2 + (i - j)] = (mat[(i * (i + 1)) / 2 + j] - sum) / d[j];
+            proof {
+                let (cur, dv) = (rvs(l@), rvs(d@));
+                assert(forall|t: int| 0 <= t < prev.len() && t != lt_idx(dim as int, i as int, j as int) ==> cur[t] == prev[t]);
+                // entries other than (i, j) keep their values and their recurrences
+                assert forall|r: int| 0 <= r < dim implies #[trigger] lt_entry(cur, dim as int, r, r) == 1.0real by {
+                    lemma_lt_entry_write_other(prev, cur, dim as int, i as int, j as int, r, r);
+                }
+                assert forall|r: int, c: int| 0 <= c <= r < i implies #[trigger] ldlt_entry_ok(a, cur, dv, dim as int, r, c) by {
+                    lemma_ldlt_entry_ok_write(a, prev, cur, dv, dim as int, i as int, j as int, r, c);
+                }
+                assert forall|c: int| 0 <= c < j implies #[trigger] ldlt_entry_ok(a, cur, dv, dim as int, i as int, c) by {
+                    lemma_ldlt_entry_ok_write(a, prev, cur, dv, dim as int, i as int, j as int, i as int, c);
+                }
+                // the new entry satisfies its recurrence: d_j L_ij = A_ij - sum
+                assert forall|k: int| 0 <= k < j implies #[trigger] lt_entry(prev, dim as int, i as int, k) == lt_entry(cur, dim as int, i as int, k) by {
+                    lemma_lt_entry_write_other(prev, cur, dim as int, i as int, j as int, i as int, k);
+                }
+                assert forall|k: int| 0 <= k < j implies #[trigger] lt_entry(prev, dim as int, j as int, k) == lt_entry(cur, dim as int, j as int, k) by {
+                    lemma_lt_entry_write_other(prev, cur, dim as int, i as int, j as int, j as int, k);
+                }
+                lemma_ldlt_sum_ext(prev, cur, dv, dv, dim as int, i as int, j as int, j as nat);
+                let (p, q, s) = (dv[j as int], sym_entry(a, i as int, j as int), rv(sum));
+                assert(lt_entry(cur, dim as int, i as int, j as int) == (q - s) / p);
+                assert(p * ((q - s) / p) == q - s) by (nonlinear_arith)
+                    requires p != 0.0real;
+            }
+        }
+        // pivot d_i = A_ii - sum_{k < i} d_k L_ik L_ik
+        sum = 0.0;
+        for k in 0..i
+            invariant
+                i < dim,
+                dim_fits(dim as int),
+                l@.len() == lt_col_start(dim as int, dim as int),
+                d@.len() == i,
+                rv(sum) == ldlt_sum_r(rvs(l@), rvs(d@), dim as int, i as int, i as int, k as nat),
+        {
+            proof {
+                lemma_lt_idx_fits(dim as int, k as int);
+                lemma_lt_idx_bound(dim as int, i as int, k as int, dim as int);
+                lemma_ldlt_sum_step(rvs(l@), rvs(d@), dim as int, i as int, i as int, k as nat);
+            }
+            ind = k * (2 * dim - k + 1) / 2 + (i - k);
+            sum = (l[ind] * l[ind]).mul_add(d[k], sum);
+            proof {
+                let (u, w) = (lt_entry(rvs(l@), dim as int, i as int, k as int), rv(d@[k as int]));
+                assert(u * u * w == w * u * u) by (nonlinear_arith);
+            }
+        }
+        proof {
+            lemma_dim_fits_idx(dim as int, i as int);
+            lemma_pk_diag_idx(i as int);
+            lemma_pk_idx_bound(i as int, i as int, dim as int);
+        }
+        let ghost prev_d = rvs(d@);
+        d.push(mat[(i * i + 3 * i) / 2] - sum);
+        proof {
+            let (lv, dv) = (rvs(l@), rvs(d@));
+            // rows 0..i and the off-diagonal part of row i only read the previous pivots
+            assert forall|r: int, c: int| 0 <= c <= r <= i && c < i implies #[trigger] ldlt_entry_ok(a, lv, dv, dim as int, r, c) by {
+                lemma_ldlt_entry_ok_push(a, lv, prev_d, dv, dim as int, r, c);
+            }
+            lemma_ldlt_sum_ext(lv, lv, prev_d, dv, dim as int, i as int, i as int, i as nat);
+            let (u, v) = (dv[i as int], lt_entry(lv, dim as int, i as int, i as int));
+            assert(u * v == u) by (nonlinear_arith)
+                requires v == 1.0real;
+            assert(ldlt_entry_ok(a, lv, dv, dim as int, i as int, i as int));
+        }
+
+        if pivot_below_positive_threshold(d[i], max_diag_sym(mat, dim).max(1.0), TOL) {
+            return None;
+        }
+    }
+    proof {
+        lemma_ldlt_product(a, rvs(l@), rvs(d@), dim as int);
+    }
+    Some((l, d))
+}
 
 // substitution solver for symmetric positive definite matrix
-pub fn pos_def_solver(mat : &SymMatrix, vect : &mut [f64]) -> Vector {
-    let Some((l, d)) = ldlt_decomp(mat, vect.len()) else { panic!("ldlt_decomp: given matrix is not positive definite"); };
+// (aborts when the LDLT factorization fails; on return A x = b exactly in the real model)
+pub fn pos_def_solver(mat: &SymMatrix, vect: &mut [f64]) -> (solution: Vector)
+    requires
+        dim_fits(old(vect)@.len() as int),
+        mat@.len() >= pk_len(old(vect)@.len() as int),
+    ensures
+        solution@.len() == old(vect)@.len(),
+        final(vect)@.len() == old(vect)@.len(),
+        mat_vec(sym_view(rvs(mat@)), old(vect)@.len() as int, rvs(solution@)) == rvs(old(vect)@),
+{
+    let dim = vect.len();
+    let Some((l, d)) = ldlt_decomp(mat, dim) else { abort("ldlt_decomp: given matrix is not positive definite") };
     let sol1 = forw_subst(&l, vect);
     let mut sol2 = diag_solver(&d, &sol1);
-    back_subst(&l, &mut sol2)
+    let solution = back_subst(&l, &mut sol2);
+    proof {
+        // A x = (L D L^T) x = L (D (L^T x)) = L (D sol2) = L sol1 = b
+        let n = dim as int;
+        let (lv, dv, x) = (lt_view(rvs(l@), n), diag_view(rvs(d@)), rvs(solution@));
+        let ldlt = mmul(mmul(lv, dv, n), mtr(lv), n);
+        lemma_mat_vec_meq(sym_view(rvs(mat@)), ldlt, n, x);
+        lemma_mul_assoc_meq(lv, dv, mtr(lv), n, n, n, n);
+        lemma_mat_vec_meq(ldlt, mmul(lv, mmul(dv, mtr(lv), n), n), n, x);
+        lemma_mat_vec_mul(lv, mmul(dv, mtr(lv), n), n, x);
+        lemma_mat_vec_mul(dv, mtr(lv), n, x);
+    }
+    solution
 }
 
 // solver for block-diagonal symmetric positive definite matrix (A, I)
-pub fn pos_def_solver_upperleft(mat : &SymMatrix, vect : &mut Vector, id_len : usize) -> Vector {
+pub fn pos_def_solver_upperleft(mat: &SymMatrix, vect: &mut Vector, id_len: usize) -> (result: Vector)
+    requires
+        id_len <= old(vect)@.len(),
+        dim_fits((old(vect)@.len() - id_len) as int),
+        mat@.len() >= pk_len((old(vect)@.len() - id_len) as int),
+    ensures
+        result@.len() == old(vect)@.len(),
+        final(vect)@.len() == old(vect)@.len(),
+        mat_vec(block_ident_view(sym_view(rvs(mat@)), (old(vect)@.len() - id_len) as int), old(vect)@.len() as int, rvs(result@))
+            == rvs(old(vect)@),
+{
+    let ghost b = rvs(old(vect)@);
     let ul_len = vect.len() - id_len;
-    let mut result = pos_def_solver(mat, &mut vect[..ul_len]);
-    for v in &vect[ul_len..] {
-	result.push(*v);
+    let mut result = pos_def_solver(mat, &mut vect.as_mut_slice()[..ul_len]);
+    let ghost head = rvs(result@);
+    for t in ul_len..vect.len()
+        invariant
+            ul_len <= vect@.len(),
+            vect@.len() == b.len(),
+            result@.len() == t,
+            head.len() == ul_len,
+            forall|s: int| 0 <= s < ul_len ==> rv(#[trigger] result@[s]) == head[s],
+            forall|s: int| ul_len <= s < t ==> rv(#[trigger] result@[s]) == b[s],
+            forall|s: int| ul_len <= s < vect@.len() ==> rv(#[trigger] vect@[s]) == b[s],
+    {
+        result.push(vect[t]);
+    }
+    proof {
+        let x = rvs(result@);
+        assert(x.subrange(0, ul_len as int) =~= head);
+        assert(b.subrange(0, ul_len as int) =~= rvs(old(vect)@.subrange(0, ul_len as int)));
+        lemma_block_ident_solve(sym_view(rvs(mat@)), ul_len as int, b.len() as int, x, b);
     }
     result
 }
+
+} // verus!
 
 /* some functions producing real-valued linear maps represented as partitioned vectors that act on n-dimensional symmetric matrices */
 

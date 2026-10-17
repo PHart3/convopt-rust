@@ -300,7 +300,6 @@ for verification.
 ### Workflow
 
 - Always include `-V no-solver-version-check` when invoking Verus.
-- `use vstd::prelude::*` at top of `src/lib.rs` is required.
 - The `vstd` source folder is available as a read-only library 
   in `~/verus/source/target-verus/release`.
 - Beyond `vstd::prelude::*`, import in each file the specific 

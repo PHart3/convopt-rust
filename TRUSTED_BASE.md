@@ -48,3 +48,8 @@ T5), the `abs` and `max` contracts (T6), and `abort` (T8) for the three
 data-dependent "division by zero" exits that were `panic!` calls. The
 division `vect[j] / d` in each solver is covered by T3 because the preceding
 tolerance check establishes `|rv(d)| >= TOL * scale >= 1e-10 > 0`.
+L06 added no trusted items. `ldlt_decomp` uses the literals `0.0`, `1.0`, `TOL`
+(T5) and the `max`, `mul_add` contracts (T6); its division by `d[j]` is covered
+by T3 because the pivot check of the earlier row established
+`rv(d[j]) >= TOL * max(max_i |A_ii|, 1) >= 1e-10 > 0`. `pos_def_solver` replaces
+its data-dependent `panic!` on a failed factorization by `abort` (T8).

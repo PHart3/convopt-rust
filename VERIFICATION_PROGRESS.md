@@ -23,12 +23,26 @@ Runtime checks: `cargo build`, `cargo test`.
 | L03 spec-level matrix algebra | done | `src/lin_alg/mat_spec.rs` (new spec/proof module: 21 spec functions, 54 lemmas) plus 7 generic sum lemmas in `sym_spec.rs`; no executable code touched. |
 | L04 constraint operator and adjoint | done | `src/lin_alg/constr_spec.rs` (new spec/proof module: operator `A`, adjoint `A*`, Gram matrix, triangle sums, adjoint identity, Gram-action lemma); `constraint_action`, `constraint_lin_comb`, `constraint_gram`, `diag_scale_gram` in a second `verus!` block of `src/lin_alg/sym_matrix.rs`. |
 | L05 triangular and diagonal solvers | done | `src/lin_alg/solve_spec.rs` (new spec/proof module: partial row sums, pivot scale, `mat_vec` of the triangular and diagonal views); `diag_solver`, `forw_subst`, `back_subst` plus the helper `pivot_scale` in a third `verus!` block of `src/lin_alg/sym_matrix.rs`; `TOL` moved into the `verus!` block of `src/lin_alg/matrix.rs`. |
-| L06 .. L20 | not started | |
+| L06 LDLT factorization and positive-definite solvers | done | `src/lin_alg/ldlt_spec.rs` (new spec/proof module: LDLT recurrence, locality and preservation lemmas, `L D L^T = A`, block-diagonal solve); `ldlt_decomp`, `pos_def_solver`, `pos_def_solver_upperleft` in the third `verus!` block of `src/lin_alg/sym_matrix.rs`; `psd_block_check` stays outside (L07). |
+| L07 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **306 verified, 0 errors** (Verus `--time`: 5.1 s SMT time; no slow
-proofs; the whole run takes 11 s).
+Last full run: **335 verified, 0 errors** (Verus `--time`: 6.3 s SMT time; no slow
+proofs; the whole run takes 14 s).
+
+- 3 executable LDLT functions (`src/lin_alg/sym_matrix.rs`, third `verus!` block) (L06):
+  `ldlt_decomp` returns `None` or `Some((l, d))` with `l` unit lower-triangular, every pivot
+  `d_k >= TOL * max(max_i |A_ii|, 1)`, the entrywise recurrence predicate `ldlt_ok`, and
+  `L D L^T = A` as a block equality of views; `pos_def_solver` returns `x` with
+  `mat_vec(sym_view(A), dim, x) == b` (aborts when the factorization fails);
+  `pos_def_solver_upperleft` returns `x` with `(A, I) x = b` over `block_ident_view`.
+- 10 proved lemmas (and 3 spec functions) in `src/lin_alg/ldlt_spec.rs` (L06): step,
+  locality and symmetry of the weighted row product `ldlt_sum_r`, preservation of the
+  recurrence under a write to `L` and under a pivot push, entry (r, c) of `L D L^T` for unit
+  lower-triangular `L`, `L D L^T = A` from the recurrences, and the block-diagonal solve.
+  Plus `lemma_lt_idx_injective` in `vec_spec.rs` and `lemma_mul_diag_transpose_symmetric`
+  (`Q D Q^T` is symmetric) and the view `block_ident_view` in `mat_spec.rs`.
 
 - 3 executable solvers and 1 helper (`src/lin_alg/sym_matrix.rs`, third `verus!` block) (L05):
   `diag_solver` returns `x` with `x_i = b_i / d_i` and `D x = b` (`mat_vec(diag_view(d))`),
@@ -217,6 +231,32 @@ proofs; the whole run takes 11 s).
   `k * (2 * dim - k + 1) / 2`, see `lemma_lt_idx_fits`) and `mat.len() >= dim * (dim + 1) / 2`,
   the length `ident_mat_low_tri`/`ldlt_decomp` produce.
 
+## Architecture decisions (L06)
+
+- `ldlt_decomp` is specified by one entry predicate, `ldlt_entry_ok(a, l, d, dim, r, c)`
+  (`src/lin_alg/ldlt_spec.rs`): `d_c L_rc + sum_{k < c} d_k L_rk L_ck == A_rc` for `c <= r`.
+  Off the diagonal it is the division step of the algorithm (`d_c != 0` from the pivot
+  condition), on the diagonal (with `L_rr = 1`) it is the pivot formula, and with `L_cc = 1`
+  it is entry (r, c) of `L D L^T` (`lemma_ldlt_product_entry`). The executable loops carry
+  `rv(sum) == ldlt_sum_r(.., k)` and the set of pairs whose recurrence already holds.
+- Writes to `L` are handled by locality: `lemma_lt_entry_write_other` (distinct packed
+  indices, via `lemma_lt_idx_injective`) and `lemma_ldlt_entry_ok_write` (an entry whose
+  recurrence does not read position `(i, j)` keeps it); pushes to `d` by
+  `lemma_ldlt_entry_ok_push`. The "sequence agrees except at one index" hypothesis is stated
+  directly on `Seq<real>`, so no `update`-based reasoning about `rvs` is needed at call sites.
+- The first loop of `ldlt_decomp` rewrites the diagonal ones that `ident_mat_low_tri` already
+  produced; its invariant is `is_lt_ident_r` and the write is a no-op on the real view
+  (`rvs(l@) =~= prev`).
+- `ldlt_decomp` returns `Option`; the postcondition is stated with
+  `result matches Some((l, d)) ==> {..}`, so nothing is claimed for `None`. The pivot
+  threshold `TOL * max(max_i |A_ii|, 1)` reuses `max_abs_diag_r` (`max_diag_sym` is exact for
+  `dim >= 1`, and the loop only checks pivots when `dim >= 1`).
+- `pos_def_solver` composes the L05 solver contracts with `lemma_mat_vec_mul` and
+  `lemma_mul_assoc_meq`: `A x = L (D (L^T x)) = b`. The block-diagonal solver is specified with
+  `block_ident_view(A, n)` (`mat_spec.rs`) and `lemma_block_ident_solve`; the head of `vect`
+  is passed as `&mut vect.as_mut_slice()[..ul_len]` (vstd specifies `index_mut` with a
+  `RangeTo` on slices, not on `Vec`), which is free at runtime.
+
 ## Constructs rewritten for Verus compatibility
 
 | Construct | Replacement | Where |
@@ -236,6 +276,9 @@ proofs; the whole run takes 11 s).
 | `for (v, d) in vect.iter().zip(diag.iter())` | `for i in 0..vect.len()` with equal-length precondition | `diag_solver` |
 | `panic!("...: division by zero")` | `crate::trusted::abort(..)` (T8) | `diag_solver`, `forw_subst`, `back_subst` |
 | `vect[i] -= ..` on `&mut [f64]` | `vect[i] = vect[i] - ..` | `forw_subst`, `back_subst` |
+| `let Some(..) = .. else { panic!(..) }` | same let-else with `crate::trusted::abort(..)` (T8) | `pos_def_solver` |
+| `&mut vect[..ul_len]` on a `Vec` (no vstd spec for `Vec` range `index_mut`) | `&mut vect.as_mut_slice()[..ul_len]` (same pointer arithmetic) | `pos_def_solver_upperleft` |
+| `for v in &vect[ul_len..] { result.push(*v) }` | `for t in ul_len..vect.len() { result.push(vect[t]) }` | `pos_def_solver_upperleft` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
 
@@ -254,6 +297,18 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Before rewriting a construct, probe it in a scratch file: every entry in the table above
   was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
   `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L06; probed 2026-10-17):
+
+- `let Some((l, d)) = f() else { abort(..) }` (let-else with a diverging `!` call) and the
+  spec form `result matches Some((l, d)) ==> {..}` with a tuple pattern are both supported.
+- `&mut v[..k]` on `v: &mut Vec<T>` type-checks but has no vstd postcondition; both
+  `&mut v.as_mut_slice()[..k]` and `&mut v[..k]` with `v: &mut [T]` get vstd's `RangeTo`
+  `index_mut` contract (`final(v)@ == final(r)@ + old(v)@.subrange(k, len)`).
+- Products with a literal factor (`u * v * 1.0real`, `u * v * 0.0real`) and products of three
+  factors are not simplified by the linear solver; bind the factors and use
+  `by (nonlinear_arith)`.
+- `--time` prints no per-function list when no proof exceeds its threshold.
 
 Proof-engineering notes (L05; probed 2026-10-17):
 

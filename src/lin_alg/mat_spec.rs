@@ -45,6 +45,11 @@ pub open spec fn diag_view(d: Seq<real>) -> MatF {
     |r: int, c: int| if r == c { d[r] } else { 0.0real }
 }
 
+/// The block-diagonal matrix (A, I) whose leading n x n block is a.
+pub open spec fn block_ident_view(a: MatF, n: int) -> MatF {
+    |r: int, c: int| if r < n && c < n { a(r, c) } else if r == c { 1.0real } else { 0.0real }
+}
+
 /* ---------- matrix operations ---------- */
 
 /// Matrix product with inner dimension `inner`: (A B)_ij = sum_{k < inner} A_ik B_kj.
@@ -1001,6 +1006,24 @@ pub proof fn lemma_mul_diag_transpose(q: MatF, d: Seq<real>, n: int, r: int, c: 
         assert(mtr(q)(k, c) == w);
         assert(f(k) == (u * v) * w);
         assert((u * v) * w == v * u * w) by (nonlinear_arith);
+    }
+    lemma_sum_fn_ext(f, g, n as nat);
+}
+
+/// Q D Q^T is symmetric (entrywise, for any r and c).
+pub proof fn lemma_mul_diag_transpose_symmetric(q: MatF, d: Seq<real>, n: int, r: int, c: int)
+    requires
+        n >= 0,
+    ensures
+        mmul(mmul(q, diag_view(d), n), mtr(q), n)(r, c) == mmul(mmul(q, diag_view(d), n), mtr(q), n)(c, r),
+{
+    lemma_mul_diag_transpose(q, d, n, r, c);
+    lemma_mul_diag_transpose(q, d, n, c, r);
+    let f = |k: int| d[k] * q(r, k) * q(c, k);
+    let g = |k: int| d[k] * q(c, k) * q(r, k);
+    assert forall|k: int| 0 <= k < n implies #[trigger] f(k) == g(k) by {
+        let (u, v, w) = (d[k], q(r, k), q(c, k));
+        assert(u * v * w == u * w * v) by (nonlinear_arith);
     }
     lemma_sum_fn_ext(f, g, n as nat);
 }

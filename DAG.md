@@ -31,7 +31,7 @@ status: done
 L06 | LDLT factorization and positive-definite solvers: ldlt_decomp returns L D L^T = A with unit-lower L and all pivots d_i >= TOL * max(max_diag, 1); pos_def_solver solves A x = b; upper-left block solver |
 deps: L05, L03 |
 targets: ldlt_decomp, pos_def_solver, pos_def_solver_upperleft |
-status: not started
+status: done
 
 L07 | PSD block check: successful psd_block_check establishes each diagonal block B satisfies B >= -eps I with eps = 1e-9 * max(max_diag(B), 1), via shifted LDLT with positive pivots (x^T L D L^T x = sum d_k y_k^2 >= 0) |
 deps: L06 |
