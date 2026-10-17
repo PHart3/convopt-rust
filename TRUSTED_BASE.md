@@ -34,3 +34,5 @@ Layer history: L01 added no trusted items. It uses only `neg` (T7, in
 `negscal_vect`), the literals `0.0` and `1.0` (T5), and the `mul_add` and
 `sqrt` contracts (T6). L02 added no trusted items; it uses the literals
 `0.0`, `1.0`, `2.0` (T5) and the `abs`, `mul_add`, `sqrt` contracts (T6).
+L03 (`src/lin_alg/mat_spec.rs`) is spec- and proof-only over Verus reals and
+added no trusted items; it uses no `f64` literal or contract.

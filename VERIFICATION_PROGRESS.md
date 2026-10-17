@@ -20,23 +20,34 @@ Runtime checks: `cargo build`, `cargo test`.
 | L00 scaffolding and trusted exact-real model | done | `src/trusted.rs`, `src/real_spec.rs`, `src/lin_alg/comparison.rs` in `verus!`. |
 | L01 vector views and basic vector/matrix operations | done | `src/lin_alg/vec_spec.rs` (new spec module), 14 functions of `src/lin_alg/matrix.rs` in `verus!`; `gauss_elim` stays outside (L13). |
 | L02 packed symmetric view and basic symmetric-matrix operations | done | `src/lin_alg/sym_spec.rs` (new spec module), 15 functions of `src/lin_alg/sym_matrix.rs` in `verus!`; the rest of that file stays outside (L04-L07, L14, L15). |
-| L03 .. L20 | not started | |
+| L03 spec-level matrix algebra | done | `src/lin_alg/mat_spec.rs` (new spec/proof module: 21 spec functions, 54 lemmas) plus 7 generic sum lemmas in `sym_spec.rs`; no executable code touched. |
+| L04 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **138 verified, 0 errors** (Verus `--time`: 2.6 s verify time; the
-15-function `sym_matrix` module takes 1.5 s in total, no slow proofs).
+Last full run: **211 verified, 0 errors** (Verus `--time`: 2.6 s verify time; no slow
+proofs; the whole run takes 4 s).
+
+- 54 proved lemmas in `src/lin_alg/mat_spec.rs` (L03; Verus reports 66 verified items for the
+  module): product algebra (associativity,
+  transpose of a product, identity, block-equality congruence, cancellation of inverses),
+  orthogonality (identity, transpose, products, inverse pairs), symmetry under congruence,
+  matrix-vector products (composition, scaling, identity, zero, shift by `s I`),
+  eigenvalues (block invariance, similarity invariance, orthogonal similarity both ways),
+  quadratic forms (`<x, A y> = <A^T x, y>`, congruence, shift, diagonal form, diagonal lower
+  bound), the semidefinite order (`A >= -eps I` iff `A + eps I >= 0`, congruence, diagonal
+  PSD), products with a diagonal matrix (`Q D Q^T` as a sum of scaled outer products), the
+  Frobenius product (commutativity, linearity, block invariance, agreement with `frob_r`),
+  and the connection lemmas for the stored representations (identity views, symmetric view,
+  packed matrix-vector product).
+- 30 proved lemmas in `src/lin_alg/sym_spec.rs` (23 from L02 plus, from L03, zero sum,
+  single-term sum, monotone sum, exchange of double sums, and extensionality, additivity
+  and scaling of square double sums).
 
 - 15 executable symmetric-matrix functions (`src/lin_alg/sym_matrix.rs`), each with an
   exact-real postcondition (L02).
 - 14 executable vector/matrix functions (`src/lin_alg/matrix.rs`) (L01).
 - 6 executable comparison functions (`src/lin_alg/comparison.rs`) (L00).
-- 33 proved lemmas in `src/lin_alg/sym_spec.rs`: packed index arithmetic (column starts,
-  entry bounds, closed-form diagonal index, `usize` fit), sums/maxima over index
-  functions (extensionality, additivity, single-term update, nonnegativity, scaling,
-  agreement with `sum_r`), square double-sum expansion (general and symmetric),
-  column form of the Frobenius product, `<A, A>_F >= 0`, and the sweep bookkeeping
-  (init, off-diagonal step, diagonal step, next column, done).
 - 13 proved lemmas in `src/lin_alg/vec_spec.rs` (L01 lemmas plus column-major index
   injectivity).
 - 3 proved lemmas about `sqrt_r` (`src/real_spec.rs`).
@@ -99,6 +110,35 @@ Last full run: **138 verified, 0 errors** (Verus `--time`: 2.6 s verify time; th
 - `max_diag_sym(mat, 0)` returns `|mat[0]|` or `0`; the spec only claims nonnegativity for
   `dim == 0` and the exact maximum for `dim >= 1`.
 
+## Architecture decisions (L03)
+
+- Matrices in the algebra are index functions `MatF = spec_fn(int, int) -> real`
+  (`src/lin_alg/mat_spec.rs`); every operation and predicate takes the dimensions it needs
+  (`mmul(a, b, inner)`, `meq(a, b, rows, cols)`, `is_orthogonal(q, dim)`, ...). Stored
+  matrices enter through views: `sym_view` (packed symmetric), `cm_view` (column-major),
+  `lt_view` (packed lower-triangular, zero above the diagonal), `diag_view` (vector as a
+  diagonal matrix). No executable representation changes.
+- Equality is the block equality `meq`, since index functions are unconstrained outside
+  the block. Each entrywise lemma (`lemma_mul_assoc`, `lemma_transpose_mul`, identity laws)
+  has a `_meq` form so that proofs are chains of `lemma_mul_meq`/`lemma_meq_trans` steps;
+  `lemma_cancel_inverse` packages the `A (B C) = C` step used by every orthogonality and
+  similarity argument.
+- `is_orthogonal(q, dim)` requires both `Q^T Q = I` and `Q Q^T = I`, so that no
+  "left inverse implies right inverse" theorem is needed: rotations satisfy both directly
+  and `lemma_orthogonal_mul` propagates both through products (L08/L09).
+- `is_eigenvalue(a, dim, lambda)` is the existence of a nonzero `x` with `A x = lambda x`;
+  `lemma_similarity_preserves_eigenvalues` is stated for any inverse pair `(P, Q)` and
+  specialized to orthogonal similarity in both directions.
+- The semidefinite order is the quadratic-form predicate `psd_shifted(a, dim, eps)`
+  (`x^T A x + eps |x|^2 >= 0`), with `is_psd` the case `eps = 0`;
+  `lemma_psd_shifted_iff` relates it to `A + eps I >= 0`, and `lemma_quad_congruence` plus
+  `lemma_quad_diag_lower_bound` give the LDLT argument of L07 and the spectral PSD
+  argument of L12.
+- `lemma_mul_diag_transpose` gives `(Q D Q^T)_rc = sum_k d_k Q_rk Q_ck`, the entrywise
+  spec for `diag_scale_gram` (L04) and the eigen-reconstruction (L09, L12).
+- The Frobenius product `frob_f` over index functions agrees with the packed `frob_r`
+  (`lemma_frob_sym_view`); linearity lemmas serve the adjoint identity of L04.
+
 ## Constructs rewritten for Verus compatibility
 
 | Construct | Replacement | Where |
@@ -126,6 +166,21 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Before rewriting a construct, probe it in a scratch file: every entry in the table above
   was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
   `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L03):
+
+- Associativity/commutativity of real products inside closure applications is not found by
+  the linear solver: bind the factors to variables and `assert(x * y * z == z * (x * y)) by
+  (nonlinear_arith)`.
+- A term such as `mtr(b)(i, k) * mtr(a)(k, j)` is not reduced automatically when it
+  appears inside a product; assert the reduced closure applications separately first.
+- Two `#[trigger]` marks in one `forall` body form a single conjunctive multi-pattern (both
+  terms must be present). For alternatives write `#![trigger a(i, j)] #![trigger b(i, j)]`
+  (as in `meq`).
+- `dim as nat` for a possibly negative `int` is unspecified, so a `Seq::new(dim as nat, ..)`
+  extensionality proof needs `dim >= 0` as a precondition.
+- Spec closures returned by spec functions (`mmul(a, b, n)(i, j)`) beta-reduce as expected;
+  alpha-equivalent closures at lemma call sites match without extensionality.
 
 Proof-engineering notes (L02):
 

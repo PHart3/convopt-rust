@@ -284,6 +284,81 @@ pub proof fn lemma_sum_fn_seq(f: spec_fn(int) -> real, n: nat)
     }
 }
 
+/// The zero summand sums to 0.
+pub proof fn lemma_sum_fn_zero(n: nat)
+    ensures
+        sum_fn_r(|i: int| 0.0real, n) == 0.0real,
+    decreases n,
+{
+    if n > 0 {
+        lemma_sum_fn_zero((n - 1) as nat);
+    }
+}
+
+/// A sum with a single nonzero term k equals that term.
+pub proof fn lemma_sum_fn_single(f: spec_fn(int) -> real, n: nat, k: int)
+    requires
+        0 <= k < n,
+        forall|i: int| 0 <= i < n && i != k ==> #[trigger] f(i) == 0.0real,
+    ensures
+        sum_fn_r(f, n) == f(k),
+{
+    lemma_sum_fn_zero(n);
+    lemma_sum_fn_update(|i: int| 0.0real, f, n, k, f(k));
+}
+
+/// Sums are monotone in the summand.
+pub proof fn lemma_sum_fn_le(f: spec_fn(int) -> real, g: spec_fn(int) -> real, n: nat)
+    requires
+        forall|i: int| 0 <= i < n ==> #[trigger] f(i) <= g(i),
+    ensures
+        sum_fn_r(f, n) <= sum_fn_r(g, n),
+    decreases n,
+{
+    if n > 0 {
+        lemma_sum_fn_le(f, g, (n - 1) as nat);
+    }
+}
+
+/// Exchange of the order of summation in a finite double sum.
+pub proof fn lemma_sum_fn_swap(f: spec_fn(int, int) -> real, m: nat, n: nat)
+    ensures
+        sum_fn_r(|i: int| sum_fn_r(|j: int| f(i, j), n), m)
+            == sum_fn_r(|j: int| sum_fn_r(|i: int| f(i, j), m), n),
+    decreases n,
+{
+    if n == 0 {
+        let rows = |i: int| sum_fn_r(|j: int| f(i, j), 0);
+        let zero = |i: int| 0.0real;
+        assert forall|i: int| 0 <= i < m implies #[trigger] rows(i) == zero(i) by {}
+        lemma_sum_fn_ext(rows, zero, m);
+        lemma_sum_fn_zero(m);
+    } else {
+        let n1 = (n - 1) as nat;
+        lemma_sum_fn_swap(f, m, n1);
+        let rows_n = |i: int| sum_fn_r(|j: int| f(i, j), n);
+        let rows_n1 = |i: int| sum_fn_r(|j: int| f(i, j), n1);
+        let last_col = |i: int| f(i, n1 as int);
+        assert forall|i: int| 0 <= i < m implies #[trigger] rows_n(i) == rows_n1(i) + last_col(i) by {}
+        lemma_sum_fn_add(rows_n1, last_col, rows_n, m);
+    }
+}
+
+/// Double sums only depend on the values of the summand on the square.
+pub proof fn lemma_sum2_fn_ext(f: spec_fn(int, int) -> real, g: spec_fn(int, int) -> real, n: nat)
+    requires
+        forall|r: int, c: int| 0 <= r < n && 0 <= c < n ==> #[trigger] f(r, c) == g(r, c),
+    ensures
+        sum2_fn_r(f, n) == sum2_fn_r(g, n),
+{
+    let rows_f = |r: int| sum_fn_r(|c: int| f(r, c), n);
+    let rows_g = |r: int| sum_fn_r(|c: int| g(r, c), n);
+    assert forall|r: int| 0 <= r < n implies #[trigger] rows_f(r) == rows_g(r) by {
+        lemma_sum_fn_ext(|c: int| f(r, c), |c: int| g(r, c), n);
+    }
+    lemma_sum_fn_ext(rows_f, rows_g, n);
+}
+
 /// The fold maximum dominates every term and 0.
 pub proof fn lemma_max0_fn_bound(f: spec_fn(int) -> real, n: nat)
     ensures
@@ -322,6 +397,37 @@ pub proof fn lemma_sum2_fn_step_sym(f: spec_fn(int, int) -> real, n: nat)
 {
     lemma_sum2_fn_step(f, n);
     lemma_sum_fn_ext(|c: int| f(n as int, c), |r: int| f(r, n as int), n);
+}
+
+/// Double sum of a pointwise sum.
+pub proof fn lemma_sum2_fn_add(f: spec_fn(int, int) -> real, g: spec_fn(int, int) -> real, h: spec_fn(int, int) -> real, n: nat)
+    requires
+        forall|r: int, c: int| 0 <= r < n && 0 <= c < n ==> #[trigger] h(r, c) == f(r, c) + g(r, c),
+    ensures
+        sum2_fn_r(h, n) == sum2_fn_r(f, n) + sum2_fn_r(g, n),
+{
+    let rows_f = |r: int| sum_fn_r(|c: int| f(r, c), n);
+    let rows_g = |r: int| sum_fn_r(|c: int| g(r, c), n);
+    let rows_h = |r: int| sum_fn_r(|c: int| h(r, c), n);
+    assert forall|r: int| 0 <= r < n implies #[trigger] rows_h(r) == rows_f(r) + rows_g(r) by {
+        lemma_sum_fn_add(|c: int| f(r, c), |c: int| g(r, c), |c: int| h(r, c), n);
+    }
+    lemma_sum_fn_add(rows_f, rows_g, rows_h, n);
+}
+
+/// Scaling every term of a double sum scales the double sum.
+pub proof fn lemma_sum2_fn_scale(f: spec_fn(int, int) -> real, g: spec_fn(int, int) -> real, s: real, n: nat)
+    requires
+        forall|r: int, c: int| 0 <= r < n && 0 <= c < n ==> #[trigger] g(r, c) == s * f(r, c),
+    ensures
+        sum2_fn_r(g, n) == s * sum2_fn_r(f, n),
+{
+    let rows_f = |r: int| sum_fn_r(|c: int| f(r, c), n);
+    let rows_g = |r: int| sum_fn_r(|c: int| g(r, c), n);
+    assert forall|r: int| 0 <= r < n implies #[trigger] rows_g(r) == s * rows_f(r) by {
+        lemma_sum_fn_scale(|c: int| f(r, c), |c: int| g(r, c), s, n);
+    }
+    lemma_sum_fn_scale(rows_f, rows_g, s, n);
 }
 
 /* ---------- Frobenius product facts ---------- */

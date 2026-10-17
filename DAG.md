@@ -16,7 +16,7 @@ status: done
 L03 | Reusable spec-level matrix algebra: product, transpose, identity, orthogonality (Q^T Q = I and Q Q^T = I), associativity/transpose lemmas, Frobenius product lemmas, eigenvalue definition and similarity invariance, PSD/order definitions (A >= -eps I) |
 deps: L02 |
 targets: (spec/proof only: mat_mul, mat_transpose, is_orthogonal, is_eigenvalue, lemma_similarity_preserves_eigenvalues, lemma_mul_assoc, lemma_transpose_mul) |
-status: not started
+status: done
 
 L04 | Constraint operator and adjoint: constraint_action spec, constraint_lin_comb adjoint identity <constraint_action(X), y> = <X, constraint_lin_comb(y)>_F with off-diagonal 1/2 factors, Gram matrix, Q D Q^T reconstruction |
 deps: L03 |
