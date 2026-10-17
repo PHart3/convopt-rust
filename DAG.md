@@ -26,7 +26,7 @@ status: done
 L05 | Triangular and diagonal solvers: packed lower-triangular view, forward/back substitution solve L x = b and L^T x = b, diagonal solve, with division-safety contracts |
 deps: L02 |
 targets: forw_subst, back_subst, diag_solver |
-status: not started
+status: done
 
 L06 | LDLT factorization and positive-definite solvers: ldlt_decomp returns L D L^T = A with unit-lower L and all pivots d_i >= TOL * max(max_diag, 1); pos_def_solver solves A x = b; upper-left block solver |
 deps: L05, L03 |

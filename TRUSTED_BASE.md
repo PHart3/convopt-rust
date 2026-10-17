@@ -41,3 +41,10 @@ method contract. Its executable code calls vstd's `slice_to_vec` wrapper
 (vstd's own `external_body` specification of `<[T]>::to_vec`, `out@ == slice@`)
 in place of the unsupported method call; vstd is used as a library and is not
 part of this project's trusted base.
+L05 added no trusted items. Its solvers use the literals `0.0`, `1.0` and
+`1e-10` (the latter through the constant `TOL`, now declared inside the
+`verus!` block of `src/lin_alg/matrix.rs` so that Verus can read its value;
+T5), the `abs` and `max` contracts (T6), and `abort` (T8) for the three
+data-dependent "division by zero" exits that were `panic!` calls. The
+division `vect[j] / d` in each solver is covered by T3 because the preceding
+tolerance check establishes `|rv(d)| >= TOL * scale >= 1e-10 > 0`.

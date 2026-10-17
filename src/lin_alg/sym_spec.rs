@@ -129,6 +129,21 @@ pub proof fn lemma_dim_fits_idx(dim: int, i: int)
         requires dim >= 0;
 }
 
+/// The packed lower-triangular column offset k * (2 * dim - k + 1) / 2 fits in usize when dim_fits(dim).
+pub proof fn lemma_lt_idx_fits(dim: int, k: int)
+    requires
+        dim_fits(dim),
+        0 <= k <= dim,
+    ensures
+        2 * dim + 1 <= usize::MAX,
+        k * (2 * dim - k + 1) <= usize::MAX,
+{
+    assert(2 * dim + 1 <= (dim + 2) * (dim + 2)) by (nonlinear_arith)
+        requires dim >= 0;
+    assert(k * (2 * dim - k + 1) <= (dim + 2) * (dim + 2)) by (nonlinear_arith)
+        requires 0 <= k <= dim;
+}
+
 /// dim_fits is monotone.
 pub proof fn lemma_dim_fits_monotone(d1: int, d2: int)
     requires
@@ -241,6 +256,20 @@ pub proof fn lemma_sum_fn_update(f: spec_fn(int) -> real, g: spec_fn(int) -> rea
         lemma_sum_fn_ext(f, g, (n - 1) as nat);
     } else {
         lemma_sum_fn_update(f, g, (n - 1) as nat, k, delta);
+    }
+}
+
+/// Trailing zero summands do not change the sum.
+pub proof fn lemma_sum_fn_tail_zero(f: spec_fn(int) -> real, n: nat, m: nat)
+    requires
+        n <= m,
+        forall|k: int| n <= k < m ==> #[trigger] f(k) == 0.0real,
+    ensures
+        sum_fn_r(f, m) == sum_fn_r(f, n),
+    decreases m - n,
+{
+    if n < m {
+        lemma_sum_fn_tail_zero(f, n, (m - 1) as nat);
     }
 }
 

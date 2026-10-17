@@ -237,7 +237,8 @@ Permitted trusted components include:
 
 Every use of `external_body`, `assume`, or an equivalent trusted
 mechanism must be documented and justified in a clear, concise way.
-Place such documentation in TRUSTED_BASE.md.
+Place such documentation in TRUSTED_BASE.md, a file that should
+be kept concise and up-to-date.
 
 Do not introduce trusted assumptions merely to bypass difficult proofs.
 

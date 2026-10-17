@@ -20,12 +20,13 @@ pub type Vector = Vec<f64>;
 pub type Matrix = Vector;
 // column-major lower triangular matrix stored as a flat vector
 pub type LowTriMatrix = Vector;
-// default tolerance level
-pub const TOL: f64 = 1e-10;
 
 verus! {
 
 broadcast use crate::trusted::group_real_model;
+
+// default tolerance level
+pub const TOL: f64 = 1e-10;
 
 // standard basis vectors
 pub fn standard_basis(i: usize, dim: usize) -> (result: Vector)

@@ -22,12 +22,25 @@ Runtime checks: `cargo build`, `cargo test`.
 | L02 packed symmetric view and basic symmetric-matrix operations | done | `src/lin_alg/sym_spec.rs` (new spec module), 15 functions of `src/lin_alg/sym_matrix.rs` in `verus!`; the rest of that file stays outside (L04-L07, L14, L15). |
 | L03 spec-level matrix algebra | done | `src/lin_alg/mat_spec.rs` (new spec/proof module: 21 spec functions, 54 lemmas) plus 7 generic sum lemmas in `sym_spec.rs`; no executable code touched. |
 | L04 constraint operator and adjoint | done | `src/lin_alg/constr_spec.rs` (new spec/proof module: operator `A`, adjoint `A*`, Gram matrix, triangle sums, adjoint identity, Gram-action lemma); `constraint_action`, `constraint_lin_comb`, `constraint_gram`, `diag_scale_gram` in a second `verus!` block of `src/lin_alg/sym_matrix.rs`. |
-| L05 .. L20 | not started | |
+| L05 triangular and diagonal solvers | done | `src/lin_alg/solve_spec.rs` (new spec/proof module: partial row sums, pivot scale, `mat_vec` of the triangular and diagonal views); `diag_solver`, `forw_subst`, `back_subst` plus the helper `pivot_scale` in a third `verus!` block of `src/lin_alg/sym_matrix.rs`; `TOL` moved into the `verus!` block of `src/lin_alg/matrix.rs`. |
+| L06 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **277 verified, 0 errors** (Verus `--time`: 4.1 s SMT time; no slow
-proofs; the whole run takes 9 s).
+Last full run: **306 verified, 0 errors** (Verus `--time`: 5.1 s SMT time; no slow
+proofs; the whole run takes 11 s).
+
+- 3 executable solvers and 1 helper (`src/lin_alg/sym_matrix.rs`, third `verus!` block) (L05):
+  `diag_solver` returns `x` with `x_i = b_i / d_i` and `D x = b` (`mat_vec(diag_view(d))`),
+  `forw_subst` returns `x` with `L x = b` (`mat_vec(lt_view(L))`), `back_subst` returns `x`
+  with `L^T x = b` (`mat_vec(mtr(lt_view(L)))`); each also ensures the division-safety
+  contract that every pivot satisfies `|pivot| >= TOL * max(max_t |m_t|, 1)` on return
+  (otherwise the function aborts). `pivot_scale` computes that scale.
+- 10 proved lemmas (and 5 spec functions) in `src/lin_alg/solve_spec.rs` (L05): fold step of
+  the prefix maximum, step and extensionality of prefix and range row sums, and
+  `(A x)_i` as a full, lower-triangular (prefix), upper-triangular (suffix) or diagonal
+  (single-term) row sum. Plus `lemma_sum_fn_tail_zero` and `lemma_lt_idx_fits` in
+  `sym_spec.rs`.
 
 - 4 executable constraint-operator functions (`src/lin_alg/sym_matrix.rs`, second `verus!`
   block) with exact-real postconditions (L04): `constraint_action` returns `A(X)`,
@@ -181,6 +194,29 @@ proofs; the whole run takes 9 s).
 - `lemma_gram_action` (`G y = A(A*(y))` for the dense rows) is the hook for the regularized
   Gram solve of L17.
 
+## Architecture decisions (L05)
+
+- Solver specs are stated as `mat_vec(view, dim, x) == b` over the L03 views (`lt_view`,
+  `mtr(lt_view)`, `diag_view`), so L06 can compose `L D L^T x = b` with `lemma_mat_vec_mul`
+  without unfolding any solver. `diag_solver` additionally states the entrywise quotient.
+- The substitution loops are specified with partial row sums (`src/lin_alg/solve_spec.rs`):
+  `row_prefix_r(a, x, i, n) = sum_{k < n} a(i, k) x_k` for forward substitution (column `j`
+  processed means the right-hand side `vect[i]` equals `b_i - row_prefix(i, j)` for `i >= j`
+  and row `i` is solved, `row_prefix(i, i + 1) == b_i`, for `i < j`) and
+  `row_range_r(a, x, i, lo, hi)` for back substitution (suffix sums from `lo = j + 1`).
+  The extensionality lemmas discharge the fact that pushing or overwriting `solution[j]`
+  leaves sums over other index ranges unchanged.
+- The pivot scale `max(max_t |m_t|, 1)` ranges over the *whole* stored vector (as the
+  original `fold`), stated as `pivot_scale_r(rvs(mat@))`. The division-safety contract is
+  reported as a postcondition (every pivot is at least `TOL` times the scale), which also
+  yields `rv(d) != 0` for the T3 division axiom.
+- `back_subst` keeps its `(0..dim).rev()` loop using the named-iterator form
+  `for j in it: (0..dim).rev()`; invariants refer to `it.index()` (columns processed) and
+  `it.seq()` (the reversed range), and the body asserts `j == dim - 1 - it.index()`.
+- Preconditions: `dim_fits(dim)` (covers the packed lower-triangular offsets
+  `k * (2 * dim - k + 1) / 2`, see `lemma_lt_idx_fits`) and `mat.len() >= dim * (dim + 1) / 2`,
+  the length `ident_mat_low_tri`/`ldlt_decomp` produce.
+
 ## Constructs rewritten for Verus compatibility
 
 | Construct | Replacement | Where |
@@ -195,6 +231,11 @@ proofs; the whole run takes 9 s).
 | `slice.to_vec()` (no vstd spec) | `vstd::slice::slice_to_vec(slice)` (vstd's wrapper around `to_vec`) | `constraint_action`, `constraint_gram`, `diag_scale_gram` |
 | `chunks_exact(..).enumerate().skip(1)`, `iter_mut().zip(..)`, `d.iter().zip(q.chunks_exact(len))`, `for (r, c) in *list` | index loops over the same slices (same cost) | `constraint_action`, `constraint_lin_comb`, `constraint_gram`, `diag_scale_gram` |
 | `dot_prod(col, vect)` with `vect` longer than `col` (silent `zip` truncation) | `dot_prod(col, &vect[..row_dim])` (free slice) | `constraint_lin_comb` |
+| `pub const TOL` declared outside `verus!` (Verus cannot read an external const) | same declaration moved inside the `verus!` block of `matrix.rs` | `TOL` |
+| `iter().map(abs).fold(0.0, f64::max).max(1.0)` | helper `pivot_scale` (index loop with `max.max(..)`) | `diag_solver`, `forw_subst`, `back_subst` |
+| `for (v, d) in vect.iter().zip(diag.iter())` | `for i in 0..vect.len()` with equal-length precondition | `diag_solver` |
+| `panic!("...: division by zero")` | `crate::trusted::abort(..)` (T8) | `diag_solver`, `forw_subst`, `back_subst` |
+| `vect[i] -= ..` on `&mut [f64]` | `vect[i] = vect[i] - ..` | `forw_subst`, `back_subst` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
 
@@ -207,11 +248,26 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Iterator chains (`zip`, `map`, `fold`, `chunks_exact`, `scan`, ...) are not
   verifiable; replace with index loops of identical cost when a function is moved
   into `verus!`.
-- `vec![x; n]`, `&v[a..b]` slicing, `v.first()`, `Option::unwrap_or` and `for j in 0..=i`
-  loops are supported by vstd (probed 2026-10-17); keep such code as written.
+- `vec![x; n]`, `&v[a..b]` slicing, `v.first()`, `Option::unwrap_or`, `for j in 0..=i`
+  and `for j in it: (0..n).rev()` loops are supported by vstd (probed 2026-10-17); keep
+  such code as written.
 - Before rewriting a construct, probe it in a scratch file: every entry in the table above
   was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
   `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L05; probed 2026-10-17):
+
+- `for x in it: (0..n).rev()` is supported: `it.index()` counts processed elements and
+  `it.seq()` is the reversed range (`it.seq()[k] == n - 1 - k`), both usable in invariants;
+  a plain `for j in (0..n).rev()` verifies but gives no exit information. `&mut [f64]`
+  parameters support `v[i] = ..` (vstd `index_mut`), `old(v)` in loop invariants, and
+  `&Vec<f64>` arguments coerce to `&[f64]` parameters.
+- A `const` used inside `verus!` must be declared inside `verus!`; its value is then known
+  to the solver (`rv(TOL)` triggers the `1e-10` literal axiom).
+- After `v[i] = v[i] - s * m`, matching the invariant's `a(i, j) * x[j]` needs the explicit
+  commutativity step `assert(p * q == q * p) by (nonlinear_arith)` on the two `rv` factors.
+- Inner loops need the ghost facts `b == rvs(old(vect)@)` and `dim == old(vect)@.len()`
+  restated, or `b[i]` has no known length (loop isolation).
 
 Proof-engineering notes (L04, closure matching; probed 2026-10-17):
 

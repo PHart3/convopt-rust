@@ -21,6 +21,9 @@ use crate::lin_alg::mat_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
+use crate::lin_alg::solve_spec::*;
+use crate::trusted::abort;
+#[cfg(verus_keep_ghost)]
 use vstd::arithmetic::div_mod::lemma_fundamental_div_mod;
 use vstd::slice::slice_to_vec;
 
@@ -1542,57 +1545,280 @@ pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool 
     true
 }
 
-// solver for diagonal linear system Dx = b
-pub fn diag_solver(diag : &Vector, vect : &Vector) -> Vector {
-    let mut solution = Vec::new();
-    let scale = diag.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
-    for (v, d) in vect.iter().zip(diag.iter()) {
-        if scaled_near_zero(*d, scale, TOL) {
-            panic!("diag_solver: division by zero");
+verus! {
+
+// Pivot scale of the solvers: max(max_t |mat[t]|, 1) over the whole stored matrix.
+#[inline]
+fn pivot_scale(mat: &[f64]) -> (scale: f64)
+    ensures
+        rv(scale) == pivot_scale_r(rvs(mat@)),
+{
+    let mut max: f64 = 0.0;
+    for t in 0..mat.len()
+        invariant
+            rv(max) == abs_max_prefix_r(rvs(mat@), t as nat),
+    {
+        proof {
+            lemma_abs_max_prefix_step(rvs(mat@), t as nat);
         }
-        solution.push(v / d);
+        max = max.max(mat[t].abs());
+    }
+    max.max(1.0)
+}
+
+// solver for diagonal linear system Dx = b
+// (aborts when some diagonal entry is below TOL times the pivot scale)
+pub fn diag_solver(diag: &Vector, vect: &Vector) -> (solution: Vector)
+    requires
+        diag@.len() == vect@.len(),
+    ensures
+        solution@.len() == vect@.len(),
+        forall|i: int| 0 <= i < vect@.len()
+            ==> abs_r(rv(#[trigger] diag@[i])) >= rv(TOL) * pivot_scale_r(rvs(diag@)),
+        forall|i: int| 0 <= i < vect@.len()
+            ==> rv(#[trigger] solution@[i]) == rv(vect@[i]) / rv(diag@[i]),
+        mat_vec(diag_view(rvs(diag@)), vect@.len() as int, rvs(solution@)) == rvs(vect@),
+{
+    let mut solution = Vec::new();
+    let scale = pivot_scale(diag);
+    for i in 0..vect.len()
+        invariant
+            diag@.len() == vect@.len(),
+            rv(scale) == pivot_scale_r(rvs(diag@)),
+            solution@.len() == i,
+            forall|k: int| 0 <= k < i ==> abs_r(rv(#[trigger] diag@[k])) >= rv(TOL) * rv(scale),
+            forall|k: int| 0 <= k < i ==> rv(#[trigger] solution@[k]) == rv(vect@[k]) / rv(diag@[k]),
+    {
+        if scaled_near_zero(diag[i], scale, TOL) {
+            abort("diag_solver: division by zero");
+        }
+        solution.push(vect[i] / diag[i]);
+    }
+    proof {
+        let (d, x, b) = (rvs(diag@), rvs(solution@), rvs(vect@));
+        let dim = vect@.len() as int;
+        assert forall|i: int| 0 <= i < dim implies #[trigger] mat_vec(diag_view(d), dim, x)[i] == b[i] by {
+            lemma_diag_mat_vec(d, dim, x, i);
+            let (u, v) = (d[i], b[i]);
+            assert(u * (v / u) == v) by (nonlinear_arith)
+                requires u != 0.0real;
+        }
+        assert(mat_vec(diag_view(d), dim, x) =~= b);
     }
     solution
 }
 
 // substitution solvers for full-rank triangular linear systems Ax = b
+// (each aborts when a diagonal entry is below TOL times the pivot scale;
+// on return, every diagonal entry satisfies the pivot condition and the
+// solution solves the system exactly in the real model)
 
-pub fn forw_subst(mat : &LowTriMatrix, vect : &mut [f64]) -> Vector {
+pub fn forw_subst(mat: &LowTriMatrix, vect: &mut [f64]) -> (solution: Vector)
+    requires
+        dim_fits(old(vect)@.len() as int),
+        mat@.len() >= old(vect)@.len() * (old(vect)@.len() + 1) / 2,
+    ensures
+        solution@.len() == old(vect)@.len(),
+        final(vect)@.len() == old(vect)@.len(),
+        forall|j: int| 0 <= j < old(vect)@.len()
+            ==> abs_r(#[trigger] lt_entry(rvs(mat@), old(vect)@.len() as int, j, j)) >= rv(TOL) * pivot_scale_r(rvs(mat@)),
+        mat_vec(lt_view(rvs(mat@), old(vect)@.len() as int), old(vect)@.len() as int, rvs(solution@)) == rvs(old(vect)@),
+{
     let dim = vect.len();
+    let ghost l = lt_view(rvs(mat@), dim as int);
+    let ghost b = rvs(old(vect)@);
     let mut solution = Vec::with_capacity(dim);
     let mut d : f64;
-    let scale = mat.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
-    for j in 0..dim {
-	d = mat[(j * (2 * dim - j + 1)) / 2];
-	if scaled_near_zero(d, scale, TOL) {
-	    panic!("forw_subst: division by zero");
-	}
-	solution.push(vect[j] / d);
-	for i in j + 1..dim {
-	    vect[i] -= solution[j] * mat[j * (2 * dim - j + 1) / 2 + (i - j)];
-	}
+    let scale = pivot_scale(mat);
+    proof {
+        lemma_lt_col_start_end(dim as int);
+    }
+    for j in 0..dim
+        invariant
+            dim == old(vect)@.len(),
+            vect@.len() == dim,
+            dim_fits(dim as int),
+            mat@.len() >= lt_col_start(dim as int, dim as int),
+            l == lt_view(rvs(mat@), dim as int),
+            b == rvs(old(vect)@),
+            rv(scale) == pivot_scale_r(rvs(mat@)),
+            solution@.len() == j,
+            forall|i: int| 0 <= i < j
+                ==> abs_r(#[trigger] lt_entry(rvs(mat@), dim as int, i, i)) >= rv(TOL) * rv(scale),
+            forall|i: int| 0 <= i < j ==> #[trigger] row_prefix_r(l, rvs(solution@), i, (i + 1) as nat) == b[i],
+            forall|i: int| j <= i < dim ==> rv(#[trigger] vect@[i]) == b[i] - row_prefix_r(l, rvs(solution@), i, j as nat),
+    {
+        proof {
+            lemma_lt_idx_fits(dim as int, j as int);
+            lemma_lt_idx_bound(dim as int, j as int, j as int, dim as int);
+        }
+        d = mat[(j * (2 * dim - j + 1)) / 2];
+        if scaled_near_zero(d, scale, TOL) {
+            abort("forw_subst: division by zero");
+        }
+        let ghost sol = rvs(solution@);
+        solution.push(vect[j] / d);
+        proof {
+            let sol2 = rvs(solution@);
+            // the new solution entry solves row j; earlier rows and the pending right-hand sides are unchanged
+            assert forall|i: int| 0 <= i < j
+                implies #[trigger] row_prefix_r(l, sol2, i, (i + 1) as nat) == b[i] by {
+                lemma_row_prefix_ext(l, sol, sol2, i, (i + 1) as nat);
+            }
+            lemma_row_prefix_ext(l, sol, sol2, j as int, j as nat);
+            lemma_row_prefix_step(l, sol2, j as int, j as nat);
+            let (u, v) = (rv(d), rv(vect@[j as int]));
+            assert(u * (v / u) == v) by (nonlinear_arith)
+                requires u != 0.0real;
+            assert forall|i: int| j < i < dim
+                implies rv(#[trigger] vect@[i]) == b[i] - row_prefix_r(l, sol2, i, j as nat) by {
+                lemma_row_prefix_ext(l, sol, sol2, i, j as nat);
+            }
+        }
+        for i in j + 1..dim
+            invariant
+                j < dim,
+                dim == old(vect)@.len(),
+                vect@.len() == dim,
+                dim_fits(dim as int),
+                mat@.len() >= lt_col_start(dim as int, dim as int),
+                l == lt_view(rvs(mat@), dim as int),
+                b == rvs(old(vect)@),
+                solution@.len() == j + 1,
+                forall|i2: int| j < i2 < i
+                    ==> rv(#[trigger] vect@[i2]) == b[i2] - row_prefix_r(l, rvs(solution@), i2, (j + 1) as nat),
+                forall|i2: int| i <= i2 < dim
+                    ==> rv(#[trigger] vect@[i2]) == b[i2] - row_prefix_r(l, rvs(solution@), i2, j as nat),
+        {
+            proof {
+                lemma_lt_idx_fits(dim as int, j as int);
+                lemma_lt_idx_bound(dim as int, i as int, j as int, dim as int);
+                lemma_row_prefix_step(l, rvs(solution@), i as int, j as nat);
+            }
+            vect[i] = vect[i] - solution[j] * mat[j * (2 * dim - j + 1) / 2 + (i - j)];
+            proof {
+                let (p, q) = (rv(solution@[j as int]), l(i as int, j as int));
+                assert(p * q == q * p) by (nonlinear_arith);
+            }
+        }
+    }
+    proof {
+        let x = rvs(solution@);
+        assert forall|i: int| 0 <= i < dim implies #[trigger] mat_vec(l, dim as int, x)[i] == b[i] by {
+            lemma_lt_mat_vec(rvs(mat@), dim as int, x, i);
+        }
+        assert(mat_vec(l, dim as int, x) =~= b);
     }
     solution
 }
 
 // here we implicitly treat a given lower triangular matrix as its (upper triangular) transpose
-pub fn back_subst(mat : &LowTriMatrix, vect : &mut [f64]) -> Vector {
+pub fn back_subst(mat: &LowTriMatrix, vect: &mut [f64]) -> (solution: Vector)
+    requires
+        dim_fits(old(vect)@.len() as int),
+        mat@.len() >= old(vect)@.len() * (old(vect)@.len() + 1) / 2,
+    ensures
+        solution@.len() == old(vect)@.len(),
+        final(vect)@.len() == old(vect)@.len(),
+        forall|j: int| 0 <= j < old(vect)@.len()
+            ==> abs_r(#[trigger] lt_entry(rvs(mat@), old(vect)@.len() as int, j, j)) >= rv(TOL) * pivot_scale_r(rvs(mat@)),
+        mat_vec(mtr(lt_view(rvs(mat@), old(vect)@.len() as int)), old(vect)@.len() as int, rvs(solution@)) == rvs(old(vect)@),
+{
     let dim = vect.len();
+    let ghost u = mtr(lt_view(rvs(mat@), dim as int));
+    let ghost b = rvs(old(vect)@);
     let mut solution = vec![0.0; dim];
     let mut d : f64;
-    let scale = mat.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
-    for j in (0..dim).rev() {
-	d = mat[(j * (2 * dim - j + 1)) / 2];
-	if scaled_near_zero(d, scale, TOL) {
-	    panic!("back_subst: division by zero");
-	}
-	solution[j] = vect[j] / d;
-	for i in 0..j {
-	    vect[i] -= solution[j] * mat[i * (2 * dim - i + 1) / 2 + (j - i)];
-	}
+    let scale = pivot_scale(mat);
+    proof {
+        lemma_lt_col_start_end(dim as int);
+    }
+    // columns dim - 1, ..., j + 1 have been processed when the loop body runs for j
+    for j in it: (0..dim).rev()
+        invariant
+            dim == old(vect)@.len(),
+            vect@.len() == dim,
+            dim_fits(dim as int),
+            mat@.len() >= lt_col_start(dim as int, dim as int),
+            u == mtr(lt_view(rvs(mat@), dim as int)),
+            b == rvs(old(vect)@),
+            rv(scale) == pivot_scale_r(rvs(mat@)),
+            solution@.len() == dim,
+            it.seq().len() == dim,
+            forall|k: int| 0 <= k < dim ==> #[trigger] it.seq()[k] == dim - 1 - k,
+            forall|i: int| dim - it.index() <= i < dim
+                ==> abs_r(#[trigger] lt_entry(rvs(mat@), dim as int, i, i)) >= rv(TOL) * rv(scale),
+            forall|i: int| dim - it.index() <= i < dim
+                ==> #[trigger] row_range_r(u, rvs(solution@), i, i as nat, dim as nat) == b[i],
+            forall|i: int| 0 <= i < dim - it.index()
+                ==> rv(#[trigger] vect@[i]) == b[i] - row_range_r(u, rvs(solution@), i, (dim - it.index()) as nat, dim as nat),
+    {
+        proof {
+            assert(j == dim - 1 - it.index());
+            lemma_lt_idx_fits(dim as int, j as int);
+            lemma_lt_idx_bound(dim as int, j as int, j as int, dim as int);
+        }
+        d = mat[(j * (2 * dim - j + 1)) / 2];
+        if scaled_near_zero(d, scale, TOL) {
+            abort("back_subst: division by zero");
+        }
+        let ghost sol = rvs(solution@);
+        solution[j] = vect[j] / d;
+        proof {
+            let sol2 = rvs(solution@);
+            // the new solution entry solves row j; later rows and the pending right-hand sides are unchanged
+            assert forall|i: int| j < i < dim
+                implies #[trigger] row_range_r(u, sol2, i, i as nat, dim as nat) == b[i] by {
+                lemma_row_range_ext(u, sol, sol2, i, i as nat, dim as nat);
+            }
+            lemma_row_range_ext(u, sol, sol2, j as int, (j + 1) as nat, dim as nat);
+            lemma_row_range_step(u, sol2, j as int, j as nat, dim as nat);
+            let (p, v) = (rv(d), rv(vect@[j as int]));
+            assert(p * (v / p) == v) by (nonlinear_arith)
+                requires p != 0.0real;
+            assert forall|i: int| 0 <= i < j
+                implies rv(#[trigger] vect@[i]) == b[i] - row_range_r(u, sol2, i, (j + 1) as nat, dim as nat) by {
+                lemma_row_range_ext(u, sol, sol2, i, (j + 1) as nat, dim as nat);
+            }
+        }
+        for i in 0..j
+            invariant
+                j < dim,
+                dim == old(vect)@.len(),
+                vect@.len() == dim,
+                dim_fits(dim as int),
+                mat@.len() >= lt_col_start(dim as int, dim as int),
+                u == mtr(lt_view(rvs(mat@), dim as int)),
+                b == rvs(old(vect)@),
+                solution@.len() == dim,
+                forall|i2: int| 0 <= i2 < i
+                    ==> rv(#[trigger] vect@[i2]) == b[i2] - row_range_r(u, rvs(solution@), i2, j as nat, dim as nat),
+                forall|i2: int| i <= i2 < j
+                    ==> rv(#[trigger] vect@[i2]) == b[i2] - row_range_r(u, rvs(solution@), i2, (j + 1) as nat, dim as nat),
+        {
+            proof {
+                lemma_lt_idx_fits(dim as int, i as int);
+                lemma_lt_idx_bound(dim as int, j as int, i as int, dim as int);
+                lemma_row_range_step(u, rvs(solution@), i as int, j as nat, dim as nat);
+            }
+            vect[i] = vect[i] - solution[j] * mat[i * (2 * dim - i + 1) / 2 + (j - i)];
+            proof {
+                let (p, q) = (rv(solution@[j as int]), u(i as int, j as int));
+                assert(p * q == q * p) by (nonlinear_arith);
+            }
+        }
+    }
+    proof {
+        let x = rvs(solution@);
+        assert forall|i: int| 0 <= i < dim implies #[trigger] mat_vec(u, dim as int, x)[i] == b[i] by {
+            lemma_ut_mat_vec(rvs(mat@), dim as int, x, i);
+        }
+        assert(mat_vec(u, dim as int, x) =~= b);
     }
     solution
 }
+
+} // verus!
 
 // substitution solver for symmetric positive definite matrix
 pub fn pos_def_solver(mat : &SymMatrix, vect : &mut [f64]) -> Vector {
