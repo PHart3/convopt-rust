@@ -6,7 +6,7 @@ status: done
 L01 | Vector views (Seq<Real>) and basic vector/matrix constructors and operations |
 deps: L00 |
 targets: standard_basis, ident_mat, zero_mat, dot_prod, euclid_norm, euclid_distance, vect_add, vect_subt, scal_vect, negscal_vect, vect_add_scaled, matrix_add_diff, ident_mat_low_tri, vector_equality |
-status: not started
+status: done
 
 L02 | Packed symmetric-matrix view (packed index lemmas, (i,j) -> Real spec view, symmetry), column-major Matrix view, and basic symmetric-matrix operations |
 deps: L01 |

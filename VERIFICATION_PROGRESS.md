@@ -18,15 +18,19 @@ Runtime checks: `cargo build`, `cargo test`.
 | Layer | Status | Notes |
 |-------|--------|-------|
 | L00 scaffolding and trusted exact-real model | done | `src/trusted.rs`, `src/real_spec.rs`, `src/lin_alg/comparison.rs` in `verus!`. |
-| L01 .. L20 | not started | |
+| L01 vector views and basic vector/matrix operations | done | `src/lin_alg/vec_spec.rs` (new spec module), 14 functions of `src/lin_alg/matrix.rs` in `verus!`; `gauss_elim` stays outside (L13). |
+| L02 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **14 verified, 0 errors** (Verus `--time`: 0.24 s total).
+Last full run: **59 verified, 0 errors** (Verus `--time`: 1.4 s verify time, no slow proofs).
 
-- 6 executable comparison functions (`src/lin_alg/comparison.rs`), each with an exact-real postcondition.
+- 14 executable vector/matrix functions (`src/lin_alg/matrix.rs`), each with an exact-real postcondition (L01).
+- 6 executable comparison functions (`src/lin_alg/comparison.rs`), each with an exact-real postcondition (L00).
+- 12 proved lemmas in `src/lin_alg/vec_spec.rs`: packed lower-triangular column offsets (zero, step, end, monotone, index bound), prefix sums (`take` step, `take` all), nonnegative sums, `<a, a> >= 0`.
 - 3 proved lemmas about `sqrt_r` (`src/real_spec.rs`): uniqueness, `sqrt(x^2) = |x|`, monotonicity.
 - 5 `external_body` wrappers in `src/trusted.rs` (counted as verified by Verus; they are trusted, see TRUSTED_BASE.md).
+- The remainder are spec functions and loop bodies, which Verus counts separately.
 
 ## Architecture decisions (L00)
 
@@ -43,11 +47,28 @@ Last full run: **14 verified, 0 errors** (Verus `--time`: 0.24 s total).
 - Code outside `verus!` blocks is external by default; functions are moved into `verus!`
   layer by layer.
 
+## Architecture decisions (L01)
+
+- Vector view: `rvs(v@): Seq<real>` for both `Vec<f64>` and `&[f64]` (`src/lin_alg/vec_spec.rs`).
+  Vector algebra at spec level: `vadd_r`, `vsub_r`, `vscale_r`, `vmul_r`, `sum_r`, `dot_r`,
+  `norm_r`, `dist_r`, `std_basis_r`, `const_r`.
+- Matrix index maps (used by L02+): column-major `cm_idx`/`cm_entry`/`is_ident_r`; packed
+  lower-triangular column-major `lt_col_start`/`lt_idx`/`lt_entry`/`is_lt_ident_r`.
+- Binary vector operations require equal lengths (the mathematical reading of `zip`); the
+  original code silently truncated. Callers in later layers must establish the lengths.
+- `ident_mat` and `zero_mat` require their `dim * dim` / `dim_c * dim_r` capacity to fit in
+  `usize` (Verus checks the executable multiplication for overflow).
+- Every function returning a vector also ensures its length explicitly: sequence-length facts
+  do not follow automatically from `rvs(r@) == ...` equalities (no term triggers the
+  `Seq::new` length axiom).
+
 ## Constructs rewritten for Verus compatibility
 
 | Construct | Replacement | Where |
 |-----------|-------------|-------|
-| `-(expr)` on `f64` (unsupported by Verus) | `crate::trusted::neg(expr)` (inline wrapper) | `is_significantly_negative` |
+| `-(expr)` on `f64` (unsupported by Verus) | `crate::trusted::neg(expr)` (inline wrapper) | `is_significantly_negative`, `negscal_vect` |
+| `iter().zip(..)` / `for v in vect` loops | index loops `for i in 0..n` (same cost) | `dot_prod`, `euclid_distance`, `vect_add`, `vect_subt`, `scal_vect`, `negscal_vect`, `vect_add_scaled`, `matrix_add_diff`, `vector_equality` |
+| `Vec::extend(vec)` (no vstd spec) | `Vec::append(&mut vec)` (same memcpy) | `ident_mat` |
 | imports of spec-only items / `vstd::std_specs` (erased under `cargo`) | gated with `#[cfg(verus_keep_ghost)]` | `trusted.rs`, `real_spec.rs`, `comparison.rs` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
@@ -61,6 +82,16 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Iterator chains (`zip`, `map`, `fold`, `chunks_exact`, `scan`, ...) are not
   verifiable; replace with index loops of identical cost when a function is moved
   into `verus!`.
+- `vec![x; n]` and `&v[a..b]` slicing are supported by vstd.
+
+Proof-engineering notes (L01):
+
+- Loop bodies are verified in isolation: facts about `let ghost` variables bound before a
+  loop are invisible inside it unless restated as invariants (or the term is inlined).
+- `Vec::append(&mut other)` empties `other`; snapshot `other@` in a ghost variable first.
+- `assert(..) by (nonlinear_arith)` sees only its `requires` clause, not `let` definitions.
+- `i * dim` with `i == 0` is not simplified automatically; assert `0 * dim == 0` by
+  `nonlinear_arith` before loops whose invariant has such products.
 
 ## Open issues
 

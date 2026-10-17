@@ -29,3 +29,7 @@ mode and is never used in this project.
 
 Items T7 and T8 are counted by Verus as "verified" functions (5 in total)
 because `external_body` functions are reported as such.
+
+Layer history: L01 added no trusted items. It uses only `neg` (T7, in
+`negscal_vect`), the literals `0.0` and `1.0` (T5), and the `mul_add` and
+`sqrt` contracts (T6).
