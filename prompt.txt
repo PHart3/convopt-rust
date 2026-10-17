@@ -10,9 +10,10 @@ If DAG.md does not exist: create it with a DAG of proof layers covering the spec
 with every status "not started". Then stop for human review.
 
 Otherwise, on each run:
-1. Pick the first "in progress" layer; if none, the first "not started" layer whose dependencies are
-all "done". Set it to "in progress" in DAG.md.
-2. Complete only that layer. Run the Verus command and cargo build, stage changes with git add,
-and update VERIFICATION_PROGRESS.md and TRUSTED_BASE.md.
-3. When finished, set the layer to "done" and stop. Do not start another layer.
-4. If stuck, leave the layer "in progress", record the issue in VERIFICATION_PROGRESS.md, and stop.
+0. Let S be the set of layers whose status is "done" right now. Do not change S during this run.
+1. Pick the first "in progress" layer; if none, the first "not started" layer whose deps are all
+   in S. Set it to "in progress" in DAG.md. If there is no such layer, stop.
+2. Complete that layer. Run the Verus command and cargo build, stage changes with git add, and update
+   VERIFICATION_PROGRESS.md and TRUSTED_BASE.md.
+3. If stuck, leave the layer "in progress", record the issue in VERIFICATION_PROGRESS.md, and stop.
+4. Otherwise set the layer to "done" (it is not added to S) and return to step 1.
