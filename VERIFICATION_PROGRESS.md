@@ -19,17 +19,28 @@ Runtime checks: `cargo build`, `cargo test`.
 |-------|--------|-------|
 | L00 scaffolding and trusted exact-real model | done | `src/trusted.rs`, `src/real_spec.rs`, `src/lin_alg/comparison.rs` in `verus!`. |
 | L01 vector views and basic vector/matrix operations | done | `src/lin_alg/vec_spec.rs` (new spec module), 14 functions of `src/lin_alg/matrix.rs` in `verus!`; `gauss_elim` stays outside (L13). |
-| L02 .. L20 | not started | |
+| L02 packed symmetric view and basic symmetric-matrix operations | done | `src/lin_alg/sym_spec.rs` (new spec module), 15 functions of `src/lin_alg/sym_matrix.rs` in `verus!`; the rest of that file stays outside (L04-L07, L14, L15). |
+| L03 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **59 verified, 0 errors** (Verus `--time`: 1.4 s verify time, no slow proofs).
+Last full run: **138 verified, 0 errors** (Verus `--time`: 2.6 s verify time; the
+15-function `sym_matrix` module takes 1.5 s in total, no slow proofs).
 
-- 14 executable vector/matrix functions (`src/lin_alg/matrix.rs`), each with an exact-real postcondition (L01).
-- 6 executable comparison functions (`src/lin_alg/comparison.rs`), each with an exact-real postcondition (L00).
-- 12 proved lemmas in `src/lin_alg/vec_spec.rs`: packed lower-triangular column offsets (zero, step, end, monotone, index bound), prefix sums (`take` step, `take` all), nonnegative sums, `<a, a> >= 0`.
-- 3 proved lemmas about `sqrt_r` (`src/real_spec.rs`): uniqueness, `sqrt(x^2) = |x|`, monotonicity.
-- 5 `external_body` wrappers in `src/trusted.rs` (counted as verified by Verus; they are trusted, see TRUSTED_BASE.md).
+- 15 executable symmetric-matrix functions (`src/lin_alg/sym_matrix.rs`), each with an
+  exact-real postcondition (L02).
+- 14 executable vector/matrix functions (`src/lin_alg/matrix.rs`) (L01).
+- 6 executable comparison functions (`src/lin_alg/comparison.rs`) (L00).
+- 33 proved lemmas in `src/lin_alg/sym_spec.rs`: packed index arithmetic (column starts,
+  entry bounds, closed-form diagonal index, `usize` fit), sums/maxima over index
+  functions (extensionality, additivity, single-term update, nonnegativity, scaling,
+  agreement with `sum_r`), square double-sum expansion (general and symmetric),
+  column form of the Frobenius product, `<A, A>_F >= 0`, and the sweep bookkeeping
+  (init, off-diagonal step, diagonal step, next column, done).
+- 13 proved lemmas in `src/lin_alg/vec_spec.rs` (L01 lemmas plus column-major index
+  injectivity).
+- 3 proved lemmas about `sqrt_r` (`src/real_spec.rs`).
+- 5 `external_body` wrappers in `src/trusted.rs` (trusted, see TRUSTED_BASE.md).
 - The remainder are spec functions and loop bodies, which Verus counts separately.
 
 ## Architecture decisions (L00)
@@ -62,6 +73,32 @@ Last full run: **59 verified, 0 errors** (Verus `--time`: 1.4 s verify time, no 
   do not follow automatically from `rvs(r@) == ...` equalities (no term triggers the
   `Seq::new` length axiom).
 
+## Architecture decisions (L02)
+
+- Packed symmetric view (`src/lin_alg/sym_spec.rs`): entry (r, c), r <= c, of a dim x dim
+  symmetric matrix sits at `pk_idx(r, c) = c * (c + 1) / 2 + r`; `sym_entry(m, r, c)` extends
+  this to all index pairs by symmetry; `pk_len(dim)` is the packed length.
+- Index-function sums: `sum_fn_r(f, n) = f(0) + .. + f(n-1)` over `spec_fn(int) -> real`
+  closures, with `sum2_fn_r` for square double sums and `max0_fn_r` for the fold-from-zero
+  maximum. Closures with captured variables are matched syntactically by Verus, so lemma
+  conclusions about closures carry over to call sites without extensionality proofs.
+- Mathematical specs: `frob_r(a, b, dim)` is the full double sum over `sym_entry` (so the
+  factor 2 on off-diagonal packed entries is proved, not defined, via `lemma_frob_step`);
+  `sym_mat_vec_r`, `sym_one_norm_r`, `max_abs_diag_r`, `sym_diag_r`, `is_sym_ident_r`.
+- Sweep bookkeeping: loops that visit the packed triangle once while updating rows r and
+  c of each entry (`sym_mat_act`, `sym_mat_one_norm`) use the invariant
+  `row_k == partial_row(t, dim, k, col, row)`, where `swept` says which unordered pairs
+  have been visited; four lemmas (off-diagonal step, diagonal step, next column, done)
+  cover every loop event. Reuse this for any similar traversal (e.g. `constraint_gram`).
+- `usize` fit: `dim_fits(dim) := (dim + 2)^2 <= usize::MAX` is the single precondition
+  covering all packed index arithmetic (`c * (c + 1)`, `i * i + 3 * i`, `k * (2 * dim - k + 1)`).
+  Functions indexing a block at `start` require `dim_fits(start + dim)`. `sym_matrix_diagonal`
+  additionally requires `pk_len(dim) * dim <= usize::MAX` (its output is cubic in dim).
+- Outer products, identity, diagonal blocks and the block map are specified entry-wise
+  (`forall r <= c < dim: result[pk_idx(r, c)] == ...`), since no flat-index decoding is needed.
+- `max_diag_sym(mat, 0)` returns `|mat[0]|` or `0`; the spec only claims nonnegativity for
+  `dim == 0` and the exact maximum for `dim >= 1`.
+
 ## Constructs rewritten for Verus compatibility
 
 | Construct | Replacement | Where |
@@ -69,7 +106,9 @@ Last full run: **59 verified, 0 errors** (Verus `--time`: 1.4 s verify time, no 
 | `-(expr)` on `f64` (unsupported by Verus) | `crate::trusted::neg(expr)` (inline wrapper) | `is_significantly_negative`, `negscal_vect` |
 | `iter().zip(..)` / `for v in vect` loops | index loops `for i in 0..n` (same cost) | `dot_prod`, `euclid_distance`, `vect_add`, `vect_subt`, `scal_vect`, `negscal_vect`, `vect_add_scaled`, `matrix_add_diff`, `vector_equality` |
 | `Vec::extend(vec)` (no vstd spec) | `Vec::append(&mut vec)` (same memcpy) | `ident_mat` |
-| imports of spec-only items / `vstd::std_specs` (erased under `cargo`) | gated with `#[cfg(verus_keep_ghost)]` | `trusted.rs`, `real_spec.rs`, `comparison.rs` |
+| imports of spec-only items / `vstd::std_specs` (erased under `cargo`) | gated with `#[cfg(verus_keep_ghost)]` | `trusted.rs`, `real_spec.rs`, `comparison.rs`, `matrix.rs`, `sym_matrix.rs` |
+| `x += y`, `v[i] += y`, `v[i] *= y` on `f64` (compiler crash) | `x = x + y`, `v[i] = v[i] + y`, `v[i] = v[i] * y` | `frob_prod_sym`, `sym_mat_one_norm`, `sym_mat_act`, `scale_off_diag` |
+| `iter().fold(0.0, max)` | index loop | `sym_mat_one_norm` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
 
@@ -82,7 +121,26 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Iterator chains (`zip`, `map`, `fold`, `chunks_exact`, `scan`, ...) are not
   verifiable; replace with index loops of identical cost when a function is moved
   into `verus!`.
-- `vec![x; n]` and `&v[a..b]` slicing are supported by vstd.
+- `vec![x; n]`, `&v[a..b]` slicing, `v.first()`, `Option::unwrap_or` and `for j in 0..=i`
+  loops are supported by vstd (probed 2026-10-17); keep such code as written.
+- Before rewriting a construct, probe it in a scratch file: every entry in the table above
+  was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
+  `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L02):
+
+- A loop whose index arithmetic is quadratic needs `dim_fits` restated in every inner
+  invariant and `lemma_dim_fits_idx` called in the body; otherwise Verus reports
+  "possible arithmetic overflow" on `start + i`, `idx += 1`.
+- `pk_col_start(0) == 0` is not derived automatically before loops (`0 * (0 + 1) / 2`
+  stays a nonlinear term); call `lemma_pk_col_start_zero()`.
+- Recursive spec functions unfold one level; base cases like `max0_fn_r(f, 1)` need an
+  explicit `assert(max0_fn_r(f, 0) == 0)` first.
+- `old(..)` cannot appear inside `assert .. by (nonlinear_arith)`; bind the value to a
+  ghost variable first.
+- A returned `r: &mut T` is specified as in vstd (`vec_index_mut`, `ref_mut_array_unsizing_coercion`):
+  `r@` is the value at return time and `final(param)@ == final(r)@` links the prophesied
+  final values; `r@ == final(param)@` is wrong (the caller may mutate through `r`).
 
 Proof-engineering notes (L01):
 

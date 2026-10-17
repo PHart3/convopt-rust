@@ -105,6 +105,20 @@ pub open spec fn is_ident_r(m: Seq<real>, dim: int) -> bool {
             ==> #[trigger] cm_entry(m, dim, r, c) == (if r == c { 1.0real } else { 0.0real })
 }
 
+/// Column-major indices are injective on in-range row indices.
+pub proof fn lemma_cm_idx_injective(row_dim: int, r1: int, c1: int, r2: int, c2: int)
+    requires
+        0 <= r1 < row_dim,
+        0 <= r2 < row_dim,
+    ensures
+        cm_idx(row_dim, r1, c1) == cm_idx(row_dim, r2, c2) <==> (r1 == r2 && c1 == c2),
+{
+    if c1 != c2 {
+        assert(c1 * row_dim + r1 != c2 * row_dim + r2) by (nonlinear_arith)
+            requires 0 <= r1 < row_dim, 0 <= r2 < row_dim, c1 != c2;
+    }
+}
+
 /* ---------- packed lower-triangular column-major view ---------- */
 //
 // Column c of a dim x dim lower-triangular matrix stores entries (c, c), ..., (dim-1, c)

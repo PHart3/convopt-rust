@@ -11,7 +11,7 @@ status: done
 L02 | Packed symmetric-matrix view (packed index lemmas, (i,j) -> Real spec view, symmetry), column-major Matrix view, and basic symmetric-matrix operations |
 deps: L01 |
 targets: max_diag_sym, frob_prod_sym, frob_norm_sym, frob_dist_sym, sym_mat_one_norm, ident_sym_mat, sym_mat_act, scale_off_diag, outer_prod_upper, outer_prod_single, outer_prod_single_scale, diag_of_sym_mat, sym_matrix_diag_block_map, sym_matrix_diag_block, sym_matrix_diagonal |
-status: not started
+status: done
 
 L03 | Reusable spec-level matrix algebra: product, transpose, identity, orthogonality (Q^T Q = I and Q Q^T = I), associativity/transpose lemmas, Frobenius product lemmas, eigenvalue definition and similarity invariance, PSD/order definitions (A >= -eps I) |
 deps: L02 |
