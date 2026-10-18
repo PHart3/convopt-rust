@@ -68,7 +68,7 @@ deps: L02 |
 targets: gauss_elim |
 status: done
 
-L14 | Constraint reduction: linear_remove_redundant_sym returns the first rank rows of the echelon form each scaled by its packed Frobenius norm, so the reduced augmented system has the same solution set as the input; inconsistency panic contract |
+L14 | Constraint reduction: linear_remove_redundant_sym returns the first rank rows of the echelon form, each divided by its packed Frobenius norm (positive when eps = TOL * max|entry| > 0 and the system is solvable); every solution of the input solves the reduced system, and every solution of the reduced system satisfies each dropped row of the echelon form up to a residual bounded by an explicit multiple of eps (from skipped_bounded of L13); the inconsistency panic is an abort |
 deps: L13 |
 targets: linear_remove_redundant_sym |
 status: not started

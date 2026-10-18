@@ -637,17 +637,13 @@ Proof-engineering notes (L01):
 
 ## Open issues
 
-- L14 (`linear_remove_redundant_sym`) as worded in `DAG.md` claims that the reduced system
-  "has the same solution set as the input". Under the tolerance-based elimination the rows
-  dropped (rows `>= rank`) are exactly zero in pivot columns but only bounded by
-  `2^k * TOL * scale` in skipped columns (`skipped_bounded`, L13), so the provable statement
-  is: solutions of the input solve the reduced system, and the dropped rows satisfy that
-  bound. L14 should be specified accordingly.
-
-- `constraint_action` and `constraint_lin_comb` ignore the zero-pattern list when the dense
-  constraint matrix is empty (early return in the original code). The verified
-  postconditions state this behaviour; whether `sdpad` can reach it with a nonempty list
-  (an SDP with LMI blocks but no linear constraints) must be settled in L17/L18.
+- L14 (`linear_remove_redundant_sym`): the goal in `DAG.md` has been reworded (2026-10-18)
+  from "same solution set" to the two provable directions: input solutions solve the reduced
+  system exactly, and reduced-system solutions satisfy the dropped rows up to a residual
+  bounded by a multiple of `eps = TOL * max|entry|` (from `skipped_bounded`, L13). The row
+  scaling divides by the packed norm, which is positive only when `eps > 0` (an all-zero
+  input yields zero pivots and NaN rows in the original code); L14 should take `eps > 0` as
+  a precondition.
 
 - The full-verification command in CLAUDE.md needs `-V no-solver-version-check` on
   this machine (Z3 4.16.0 with build hashcode); without it Verus panics as soon as any
