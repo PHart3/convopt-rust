@@ -1,4 +1,4 @@
-L00 | Verus scaffolding and trusted exact-real model: spec view rv: f64 -> real over Verus's native SMT reals, sqrt_r axiom, trusted axioms giving vstd's f64 operator/comparison hooks exact-real meaning, literal axioms, assume_specification contracts for std f64 methods (abs sqrt recip signum max min mul_add hypot is_finite), inline wrappers for unsupported primitives (neg, infinities, FRAC_1_SQRT_2, abort); verified comparison functions; create TRUSTED_BASE.md |
+L00 | Verus scaffolding and trusted exact-real model: spec view rv: f64 -> real over Verus's native SMT reals, sqrt_r axiom, trusted axioms giving vstd's f64 operator/comparison hooks exact-real meaning, literal axioms, assume_specification contracts for std f64 methods (abs sqrt recip signum max min mul_add hypot is_finite), inline wrappers for unsupported primitives (neg, infinities, abort); verified comparison functions; create TRUSTED_BASE.md |
 deps: none |
 targets: float_equality, scaled_near_zero, pivot_below_positive_threshold, is_significantly_negative, residual_is_small, relative_residual_is_small |
 status: done
@@ -46,7 +46,7 @@ status: done
 L09 | Common eigensolver specification: predicate eigen_decomp_approx(A, Q, B, eps) with Q^T Q = I, A = Q B Q^T, B symmetric; max-off-diagonal stopping criterion lemma: max |B_ij| (i != j) < tol * max(1, max_diag) implies ||B - diag(B)||_F <= eps; rotation-sequence invariant lemma (orthogonality and similarity are preserved by each jacobi_rot) |
 deps: L08 |
 targets: (spec/proof only: eigen_decomp_approx, lemma_offdiag_bound, lemma_rotation_preserves_decomp) |
-status: not started
+status: done
 
 L10 | Cached Jacobi: index_max_in_col returns argmax index in column; cache invariant (maxima[n-1] is column index of row-n maximum); cache update after rotation is correct; selected pivot is the cached global maximum; jacobi_eigen_cach satisfies eigen_decomp_approx with the implementation's tolerance |
 deps: L09 |
@@ -68,10 +68,10 @@ deps: L02 |
 targets: gauss_elim |
 status: done
 
-L14 | Constraint reduction: linear_remove_redundant_sym returns the first rank rows of the echelon form, each divided by its packed Frobenius norm (positive when eps = TOL * max|entry| > 0 and the system is solvable); every solution of the input solves the reduced system, and every solution of the reduced system satisfies each dropped row of the echelon form up to a residual bounded by an explicit multiple of eps (from skipped_bounded of L13); the inconsistency panic is an abort |
+L14 | Constraint reduction: linear_remove_redundant_sym returns the first rank rows of the echelon form, each divided by the Frobenius norm of its symmetric matrix (positive when eps = TOL * max|entry| > 0 and the system is solvable); every solution of the input solves the reduced system, and every solution of the reduced system satisfies each dropped row of the echelon form up to a residual bounded by an explicit multiple of eps (from skipped_bounded of L13); the inconsistency panic is an abort |
 deps: L13 |
 targets: linear_remove_redundant_sym |
-status: not started
+status: done
 
 L15 | User-facing symmetric-map representation (MatrixSym) and composition with diagonal-block embedding: flattening, diagonal-block composition, and helper constructors |
 deps: L02 |

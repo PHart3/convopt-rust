@@ -24,10 +24,10 @@ mode and is never used in this project.
 | T4 | `axiom_eq`, `axiom_ne`, `axiom_lt`, `axiom_le`, `axiom_gt`, `axiom_ge` | Executable `f64` comparisons return the corresponding exact-real comparison of `rv` values. | The exact-real abstraction of comparisons. Under IEEE this differs only on NaN (all comparisons false) and signed zeros (equal under both). |
 | T5 | `axiom_literals` | Each `f64` literal used by the verified code (`0.0`, `0.5`, `1.0`, `1.6`, `2.0`, `5.0`, `1e3`, `1e4`, `1e-3`, `1e-4`, `1e-5`, `1e-6`, `1e-8`, `1e-9`, `1e-10`, `1e-12`) has `rv` equal to its decimal value. | Literals are the entry points of the abstraction: the tolerance and tuning constants in the source are read as the exact decimals written. Only literals that appear in the code are listed; add an entry when a new literal is verified. |
 | T6 | `assume_specification` for `f64::abs`, `max`, `min`, `sqrt`, `mul_add`, `hypot`, `recip`, `signum`, `is_finite` | `abs`, `max`, `min` are exact. `sqrt(x) == sqrt_r(rv(x))` for `rv(x) >= 0`, else unspecified. `mul_add(x,a,b) == x*a + b`. `hypot(x,y) == sqrt_r(x^2 + y^2)`. `recip(x) == 1/x` for `x != 0`, else unspecified. `signum(x)` is `1` or `-1`, matching the sign of a nonzero `x`. `is_finite` is unconstrained. | vstd gives these std methods no specification. Each contract is the exact-real reading of the std documentation. `signum` on zero may return either sign (IEEE: depends on the sign bit), so the contract leaves it open. `is_finite` is a genuine property of floats that the exact-real model cannot express, so nothing is claimed; its one use (an assertion in `linear_remove_redundant_sym`) will be treated as a data-dependent abort. |
-| T7 | `neg`, `pos_infinity`, `neg_infinity`, `frac_1_sqrt_2` (`external_body`, `inline(always)`) | `rv(neg(x)) == -rv(x)`. The infinities are unconstrained. `frac_1_sqrt_2()` is positive with square `1/2`. | Verus rejects unary `-x` on floats and the std float constants. The wrappers are one-instruction inline functions whose bodies are the rejected expressions, so executable code and performance are unchanged. The infinities are only used as initial sentinels in the solver's bookkeeping; the model makes no claim about them. |
+| T7 | `neg`, `pos_infinity`, `neg_infinity` (`external_body`, `inline(always)`) | `rv(neg(x)) == -rv(x)`. The infinities are unconstrained. | Verus rejects unary `-x` on floats and the std float constants. The wrappers are one-instruction inline functions whose bodies are the rejected expressions, so executable code and performance are unchanged. The infinities are only used as initial sentinels in the solver's bookkeeping; the model makes no claim about them. |
 | T8 | `abort(msg) -> !` (`external_body`) | Diverges. No precondition, no postcondition. | The solver panics on data-dependent failures (inconsistent constraints, non-positive-definite systems, non-convergence). vstd forbids `panic!` unless proved unreachable, which is impossible for these data-dependent checks. `abort` makes such exits explicit: a function that aborts establishes nothing, and verified postconditions only cover normal returns. Reachability of aborts is deliberately not analyzed. |
 
-Items T7 and T8 are counted by Verus as "verified" functions (5 in total)
+Items T7 and T8 are counted by Verus as "verified" functions (4 in total)
 because `external_body` functions are reported as such.
 
 Layer history: L01 added no trusted items. It uses only `neg` (T7, in
@@ -62,6 +62,19 @@ T3: by `2 a_jk` (nonzero by the precondition), by `|tau| + sqrt(1 + tau^2)` (pos
 since the square root is nonnegative with square `>= 1`, T1), and `recip` of
 `sqrt(1 + t^2)` (positive for the same reason). The `sqrt` contract applies because
 both arguments are `>= 1`.
+L09 (`src/lin_alg/eigen_spec.rs`) is spec- and proof-only over Verus reals and added
+no trusted items; its square-root facts (`lemma_sqrt_mul`, monotonicity, `sqrt(x^2) = |x|`)
+are proved from T1. The threshold `1e-12` appears as the real constant
+`0.000000000001real`, matching the T5 literal that L10/L11 will use.
+L14 added no trusted items. `linear_remove_redundant_sym` uses the literal `0.0` (T5),
+the `hypot` and `sqrt` contracts (T6: each fold step `scale' = sqrt(scale^2 + y^2)` has a
+nonnegative argument, so T1 applies; the off-diagonal factor `2.0.sqrt()` has square 2),
+and `abort` (T8) for the two data-dependent exits of the original code: the inconsistency
+`panic!` and the `assert!(scale.is_finite(), ..)` (`is_finite` is unconstrained, T6). Its
+division by the row scale is covered by T3: the scale is proved positive from the pivot
+bound of `gauss_elim` (L13) and the precondition `abs_max_r(input) > 0`. The
+`frac_1_sqrt_2` wrapper that L00 had provided for this function was removed as unused
+(T7 now has three wrappers).
 L13 added no trusted items. `gauss_elim` uses the literals `0.0` and `TOL` (T5), the
 `abs`, `max` contracts (T6) and the comparison `scaled_near_zero` (T4). Its division
 `A_jn / A_rn` is covered by T3 when the pivot is nonzero; a zero pivot (all-zero input)

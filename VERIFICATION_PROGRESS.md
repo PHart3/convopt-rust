@@ -26,14 +26,55 @@ Runtime checks: `cargo build`, `cargo test`.
 | L06 LDLT factorization and positive-definite solvers | done | `src/lin_alg/ldlt_spec.rs` (new spec/proof module: LDLT recurrence, locality and preservation lemmas, `L D L^T = A`, block-diagonal solve); `ldlt_decomp`, `pos_def_solver`, `pos_def_solver_upperleft` in the third `verus!` block of `src/lin_alg/sym_matrix.rs`; `psd_block_check` stays outside (L07). |
 | L07 PSD block check | done | `psd_block_check` in the third `verus!` block of `src/lin_alg/sym_matrix.rs`; block-check specs in `src/lin_alg/ldlt_spec.rs`; reusable PSD lemmas in `src/lin_alg/mat_spec.rs`. |
 | L08 shared Jacobi rotation core | done | `src/lin_alg/jacobi_spec.rs` (new spec/proof module); `jacobi_rot` in a `verus!` block of `src/lin_alg/jacobi.rs`; the eigensolvers and spectral operations of that file stay outside (L10-L12). |
+| L09 common eigensolver specification | done | `src/lin_alg/eigen_spec.rs` (new spec/proof module: invariant, stopping criterion, off-diagonal Frobenius bound, shared contract `eigensolver_ok`); no executable code touched. |
+| L14 constraint reduction | done | `src/lin_alg/reduce_spec.rs` (new spec/proof module); `linear_remove_redundant_sym` in a `verus!` block of `src/lin_alg/sym_matrix.rs`. **Two executable corrections** (packed-column start `start = diag + 1`; off-diagonal factor `sqrt(2)` instead of `1/sqrt(2)`, confirmed by the user), see the L14 architecture decisions. |
 | L13 Gaussian elimination | done | `src/lin_alg/gauss_spec.rs` (new spec/proof module); `gauss_elim` in a second `verus!` block of `src/lin_alg/matrix.rs`. |
 | L15 user-facing symmetric-map representation | done | `matrix_diagonal_mult_sym`, `mat_sym_diagonal_mult_sym` and the six partitioned helpers in two further `verus!` blocks of `src/lin_alg/sym_matrix.rs`; `matrixsym_flatten`, `mk_symmap`, `zero_symmap`, `ident_symmap` in two `verus!` blocks of `src/sdp.rs` (`sdp_to_standard` stays outside, L16). |
-| L09 .. L12, L14, L16 .. L20 | not started | |
+| L10 .. L12, L16 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **536 verified, 0 errors** (Verus `--time`: 12 s SMT time; no slow
-proofs; the whole run takes 17 s).
+Last full run: **604 verified, 0 errors** (Verus `--time`: 13 s SMT time; no slow
+proofs; the whole run takes 23 s).
+
+- 1 executable function (`src/lin_alg/sym_matrix.rs`, own `verus!` block) (L14):
+  `linear_remove_redundant_sym` requires `dim >= 1`, `dim_fits(dim)`, an input length that
+  is a multiple of `red_col_dim(dim) = pk_len(dim) + 1`, and a nonzero input
+  (`abs_max_r(input) > 0`, so that the elimination tolerance `eps = TOL * max|entry|` is
+  positive); it ensures `reduced_system(input, final(mat), result, dim)`: for the pivot
+  sequence of `gauss_elim`, the echelon form `e` (left in `mat`) satisfies
+  `same_solutions(input, e)`, `echelon_form`, `skipped_bounded`, every pivot column lies in
+  the packed part (the right-hand side column holds no pivot), every pivot row has a
+  positive Frobenius norm, and `result` (`rank` rows, column-major) is row `i` of `e` divided
+  by `row_scale_r(e, rd, dim, i)` for `i < rank`. Both data-dependent exits abort (T8).
+- 12 spec functions and 15 lemmas in `src/lin_alg/reduce_spec.rs` (L14; Verus reports 28
+  items): the Frobenius row norm `row_scale_r = sqrt(sum_{r <= c} pk_wt(r, c) M_rc^2)` with
+  its column-wise partial sums (`row_sq_term_r`, `col_sq_r`, `row_sq_upto_r`, step lemmas)
+  and `lemma_row_sq_frob` (it is `<M_i, M_i>_F` of the packed row `packed_row_r`); positivity of the norm of
+  a pivot row (`lemma_row_scale_pos`, via `lemma_pk_idx_surjective`, `lemma_sum_fn_ge_term`,
+  `lemma_tri_sum_ge_term`); the result predicates `reduced_with`/`reduced_system`;
+  `lemma_reduced_of_input_solution` (input solutions solve the reduced system);
+  `lemma_reduced_solution_echelon` (reduced solutions satisfy the kept echelon rows exactly
+  and every dropped row up to the residual `2^rank * eps * (1 + ||x||_1)`, through
+  `lemma_dropped_row_entry`, `lemma_dropped_row_residual`, `lemma_abs_sum_fn_le`,
+  `lemma_pow2_monotone`, with `one_norm_r` and `row_residual_r`).
+
+- 10 spec functions and 7 lemmas in `src/lin_alg/eigen_spec.rs` (L09; Verus reports 14
+  items): the invariant `eigen_decomp_inv(a, q, b, dim)` (`Q` orthogonal, `A = Q B Q^T` on
+  the block) with `lemma_eigen_inv_init` (`Q = I`, `B = A`), `lemma_eigen_inv_step` (one
+  `jacobi_rot` call, given by its existential `jacobi_step` postcondition, preserves it) and
+  `lemma_eigen_inv_eigenvalues` (`A` and `B` have the same eigenvalues); the stopping
+  criterion `offdiag_below(b, dim, thr)`, the threshold `jacobi_thr_r = 1e-12 * max(1, max_i
+  |B_ii|)` and `jacobi_converged`; the diagonal part `mdiag`, `moffdiag = B - diag(B)`,
+  `offdiag_norm_r = ||B - diag(B)||_F`, `offdiag_count_r = dim (dim - 1)` with
+  `lemma_mdiag_view`, `lemma_offdiag_frob_bound` (`||B - diag(B)||_F^2 <= dim (dim - 1) thr^2`)
+  and `lemma_offdiag_norm_bound`; the contract `eigen_decomp_approx(a, q, b, dim, eps)`,
+  the bound `jacobi_eps_r = sqrt(dim (dim - 1)) * jacobi_thr_r`, `lemma_converged_approx`
+  (invariant + stopping criterion give the contract with that bound) and the shared
+  eigensolver postcondition `eigensolver_ok(a, b, q, vals, dim)` (`vals = diag(B)`, `Q` of
+  length `dim * dim`, `eigen_decomp_approx` with `jacobi_eps_r`). Plus `lemma_sqrt_mul` in
+  `src/real_spec.rs`, `lemma_sum_fn_const` in `sym_spec.rs` and `lemma_frob_f_self_nonneg`
+  in `mat_spec.rs`.
 
 - 12 executable functions (L15): in `src/lin_alg/sym_matrix.rs`, `matrix_diagonal_mult_sym`
   (column `pk_idx(start + a, start + b)` of the result is column `pk_idx(a, b)` of the dense
@@ -375,6 +416,74 @@ proofs; the whole run takes 17 s).
   (`(a, q, _) = jacobi_rot(a, q, ..)`) is verifiable with the invariant
   `final(x)@ == final(p)@` linking the moving reference to the parameter (probed).
 
+## Architecture decisions (L09)
+
+- The eigensolver loops are specified by one invariant on the stored representations,
+  `eigen_decomp_inv(a, q, b, dim)` (`src/lin_alg/eigen_spec.rs`): `cm_view(q)` orthogonal and
+  `sym_view(a) = Q sym_view(b) Q^T` on the block. Its three lemmas are the only facts L10 and
+  L11 need about the rotation sequence: `lemma_eigen_inv_init` for `ident_mat` and the input,
+  `lemma_eigen_inv_step` consuming the existential postcondition of `jacobi_rot` directly
+  (`choose` on `c, s`), and `lemma_eigen_inv_eigenvalues` for the similarity invariance.
+  Symmetry of `B` needs no bookkeeping (`sym_view` is symmetric by construction).
+- The stopping criterion is the predicate `offdiag_below(b, dim, thr)` (every off-diagonal
+  magnitude `< thr`), not a fold-computed maximum: the cached solver justifies it through
+  its cache invariant (the pivot is the global maximum), the cyclic solver through its final
+  scan, and both then use `lemma_converged_approx`. The threshold `jacobi_thr_r` reads the
+  executable check `scaled_near_zero(x, 1.0.max(max_diag), 1e-12)` as `|x| < 1e-12 *
+  max_r(1, max_abs_diag_r(b, dim))`; `max_abs_diag_r` is the fold the solvers compute (exact
+  for `dim >= 1`).
+- The approximate-eigendecomposition bound is stated as `offdiag_norm_r(b, dim) =
+  sqrt(frob_f(B - diag(B), B - diag(B))) <= jacobi_eps_r = sqrt(dim (dim - 1)) * thr`, with
+  `B - diag(B)` the index function `moffdiag(sym_view(b)) = msub(B, mdiag(B))` so that L12 can
+  write `B = diag(B) + (B - diag(B))` in the matrix algebra; `lemma_mdiag_view` identifies
+  `mdiag(B)` with `diag_view(sym_diag_r(b, dim))`, the eigenvalue vector the solvers return.
+  Nothing claims that `B` is diagonal. `dim * (dim - 1)` enters as the real
+  `offdiag_count_r(dim)` (`int as real` is supported by this Verus build and interpreted as
+  the embedding).
+- `eigensolver_ok(a, b, q, vals, dim)` is the postcondition both `jacobi_eigen_cach` and
+  `jacobi_eigen_cyc` must ensure (with `a = rvs(old(a)@)`, `b = rvs(final(a)@)`): it is the
+  common eigensolver interface used by L12.
+
+## Architecture decisions (L14)
+
+- **Bug found and fixed.** The row-norm loop of `linear_remove_redundant_sym` walks the packed
+  columns `k = 1..dim`, adding the off-diagonal entries `start..diag` with weight 1/2 and the
+  diagonal entry `diag = pk_idx(k, k)` with weight 1, and then advanced `start += k`. The
+  correct start of column `k + 1` is `pk_col_start(k + 1) = diag + 1 = start + k + 1`, so from
+  `k = 2` on the loop restarted `k - 1` entries too early and counted the last `k - 1` packed
+  entries of column `k - 1` (its diagonal entry and all but its first off-diagonal entry) a
+  second time, with weight 1/2. The computed scale was therefore not the intended packed
+  Frobenius norm (`dim = 3`: `e_2^2` entered as `1.5 e_2^2`). The fix is the one statement
+  `start = diag + 1`; the solution-set guarantees hold for any positive scale, so only the
+  conditioning of the reduced system changes. `cargo test` passes with the fix.
+- **Second change (made by the author, 2026-10-18; not a verification finding).** The off-diagonal entries were
+  multiplied by `FRAC_1_SQRT_2` before the `hypot` fold, halving their squares; the intended
+  scale is the Frobenius norm of the symmetric matrix, in which off-diagonal packed entries
+  count twice. The factor is now `2.0_f64.sqrt()` (bitwise equal to `std::f64::consts::SQRT_2`,
+  and covered by the existing `sqrt` contract instead of a trusted constant wrapper).
+- The row norm is specified as `row_scale_r(e, rd, dim, i) = sqrt(row_sq_r)` with
+  `row_sq_r = tri_sum_r(pk_wt(r, c) * M_i[r, c]^2, dim)`, i.e. `frob_r(M_i, M_i, dim)` for the
+  packed row `packed_row_r` (`lemma_row_sq_frob`, via `lemma_frob_tri` of L04). The `hypot`
+  fold is tracked by `rv(scale)^2 == row_sq_upto_r(k) + col_sq_r(k, r)` (columns `< k`
+  complete, rows `< r` of column `k`), with `(x f)^2 = 2 x^2` for `f = sqrt(2)`.
+- The result predicate `reduced_with(a0, e, res, dim, pivots)` (`reduce_spec.rs`) re-exports
+  the `gauss_elim` facts on the echelon form `e` together with the row scaling, under one
+  existential pivot sequence (`reduced_system`, triggered on `pivots.len()`). What the
+  reduction guarantees is proved as lemmas over this predicate, not as postconditions:
+  input solutions solve the reduced system exactly, and reduced solutions satisfy the kept
+  echelon rows exactly and every dropped echelon row `i >= rank` up to `|row_i . x - b_i|
+  <= 2^rank * eps * (1 + ||x||_1)` (dropped rows are exactly zero in pivot columns and below
+  `skip_bound <= 2^rank * eps` elsewhere, including the right-hand side). No claim relates
+  numerical rank to exact rank, and no bound is claimed for the dropped rows of the *input*
+  (that would need the inverse row operations).
+- Positivity of the scale (and hence the division contract T3) follows from the echelon
+  form: the pivot of row `i < rank` has magnitude `>= eps > 0` and sits in the packed part,
+  because the consistency flag of `gauss_elim` says the last pivot column is not the
+  right-hand side and pivot columns increase. Hence the precondition `abs_max_r(input) > 0`
+  (an all-zero input gives `eps = 0`, zero pivots and `0 / 0` rows in the original code).
+- The `assert!(scale.is_finite(), ..)` of the original code is kept as a data-dependent abort
+  (T8): `is_finite` has no exact-real meaning (T6).
+
 ## Architecture decisions (L13)
 
 - `gauss_elim` is specified by two exact facts and one tolerance fact
@@ -460,14 +569,19 @@ proofs; the whole run takes 17 s).
 | `v[a..=b].to_vec()` | `slice_to_vec(&v[a..=b])` (vstd's wrapper; `..=` ranges are supported) | `mk_symmap_real`, `mk_symmap` |
 | `for _ in offset..c`, `for _ in 0..output_size` | `for _z in ..`, `for _k in ..` (the counter appears in the invariant) | block compositions, `mk_symmap`, `zero_symmap` |
 | `panic!("sym_matrix_proj: ..")` | `crate::trusted::abort(..)` (T8) | `sym_matrix_proj` |
+| `use std::f64::consts::FRAC_1_SQRT_2` and `x * FRAC_1_SQRT_2` (wrong weight, see L14 decisions) | `let f = 2.0_f64.sqrt();` once per call (`sqrt` contract, T6), `x * f` | `linear_remove_redundant_sym` |
+| `panic!("..inconsistent")`, `assert!(scale.is_finite(), ..)` | `abort(..)` (T8), `if !scale.is_finite() { abort(..) }` | `linear_remove_redundant_sym` |
+| `let (mut start, mut scale): (usize, f64);` before the loop | `let mut scale: f64 = 0.0;` and `let mut start = 1;` inside the loop body | `linear_remove_redundant_sym` |
+| `scale.hypot(echelon[..] * ..)` | `let v = echelon[..]; let y = v * f; scale = scale.hypot(y);` (named intermediates for the proof) | `linear_remove_redundant_sym` |
+| `start += k` (bug, see L14 decisions) | `start = diag + 1` | `linear_remove_redundant_sym` |
 | `let (mut diff, mut offset);` | initialized `let` bindings inside the loop | `mk_symmap` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
 
 - `x += y`, `x -= y`, `x *= y` on `f64` (including `v[i] *= y`) crash this Verus build
   (`get_range Float(64)`); write `x = x + y` (`v[i] = v[i] * y` verifies).
-- `f64::INFINITY`, `f64::NEG_INFINITY`, `core::f64::consts::FRAC_1_SQRT_2`: use the
-  wrappers in `src/trusted.rs`.
+- `f64::INFINITY`, `f64::NEG_INFINITY`: use the wrappers in `src/trusted.rs`; std float
+  constants such as `consts::SQRT_2` are unsupported, write `2.0_f64.sqrt()` (same bits).
 - `panic!`/`assert!` on data-dependent conditions: use `crate::trusted::abort`.
 - Postconditions on `&mut` parameters use the new style: `old(v)` / `final(v)`.
 - Iterator chains (`zip`, `map`, `fold`, `chunks_exact`, `scan`, ...) are not
@@ -496,6 +610,31 @@ Proof-engineering notes (L15; probed 2026-10-17):
 - `mat.first().unwrap_or(&vec![]).len()` verifies as written (spec:
   `if len == 0 { 0 } else { v@[0]@.len() }`).
 - `x.len()` for a `Vec` must appear inside each loop body that needs `len <= usize::MAX`.
+
+Proof-engineering notes (L14; probed 2026-10-18):
+
+- A private `use crate::lin_alg::matrix::TOL;` in `sym_matrix.rs` shadows the name coming
+  from its `pub use crate::lin_alg::matrix::*;` re-export, so downstream modules importing
+  `sym_matrix::*` lose `TOL` (a Rust visibility effect, reported by Verus as E0425). Rely on
+  the glob re-export instead.
+- `let (echelon, rank, solvable) = gauss_elim(mat, ..)` with `echelon: &mut Matrix` only read
+  afterwards: `final(mat)@ == final(echelon)@` resolves to the current `echelon@` at the end
+  of the function without any extra step (probed), so the postcondition can be stated on
+  `rvs(final(mat)@)`. Restate `e == rvs(echelon@)` and `echelon@.len() == len` as loop
+  invariants.
+- `v[j * n + i]` with `v@.len() == n * m` known only as an int equality reports overflow in
+  every loop; carry `len <= usize::MAX` (and `n * m <= len`) as invariants.
+- A `choose` over the existential postcondition of `gauss_elim` is found when its body is
+  written with exactly the postcondition's argument terms (`rvs(echelon@)`, `row_dim as int`,
+  `rv(TOL) * abs_max_r(rvs(old(mat)@))`), not with the ghost aliases.
+
+Proof-engineering notes (L09; probed 2026-10-18):
+
+- `n as real` for `n: int`/`nat` is supported and linear facts transfer (`n >= 2` gives
+  `n as real >= 2.0real`); but `(n as real) * x` with `n as real == 0.0real` known only by
+  equality is a nonlinear term: close it with `by (nonlinear_arith) requires n as real ==
+  0.0real`. The cast of `(n - 1) as nat` must be bridged by an explicit
+  `assert((m as real) == (n as real) - 1.0real)` before use in `nonlinear_arith`.
 
 Proof-engineering notes (L13; probed 2026-10-17):
 
@@ -637,13 +776,15 @@ Proof-engineering notes (L01):
 
 ## Open issues
 
-- L14 (`linear_remove_redundant_sym`): the goal in `DAG.md` has been reworded (2026-10-18)
-  from "same solution set" to the two provable directions: input solutions solve the reduced
-  system exactly, and reduced-system solutions satisfy the dropped rows up to a residual
-  bounded by a multiple of `eps = TOL * max|entry|` (from `skipped_bounded`, L13). The row
-  scaling divides by the packed norm, which is positive only when `eps > 0` (an all-zero
-  input yields zero pivots and NaN rows in the original code); L14 should take `eps > 0` as
-  a precondition.
+- L14 changed the executable row scaling of `linear_remove_redundant_sym` twice (packed-column
+  start, and the off-diagonal factor `sqrt(2)` requested by the user); the scale is now the
+  Frobenius norm of the row's symmetric matrix. Both changes are documented in the L14
+  architecture decisions.
+- L16 (`sdp_to_standard`) must establish the preconditions of `linear_remove_redundant_sym`:
+  `total_dim >= 1`, `dim_fits`, a length that is a multiple of `pk_len(dim) + 1`, and a
+  nonzero constraint matrix (`abs_max_r > 0`); the last one is a genuine restriction on the
+  user's problem (an all-zero constraint system is rejected by the specification, and the
+  original code produced `0 / 0` rows for it).
 
 - The full-verification command in CLAUDE.md needs `-V no-solver-version-check` on
   this machine (Z3 4.16.0 with build hashcode); without it Verus panics as soon as any

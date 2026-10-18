@@ -1094,6 +1094,24 @@ pub proof fn lemma_frob_sym_view(a: Seq<real>, b: Seq<real>, dim: int)
     lemma_sum2_fn_ext(f, g, dim as nat);
 }
 
+/// <A, A>_F >= 0.
+pub proof fn lemma_frob_f_self_nonneg(a: MatF, dim: int)
+    requires
+        dim >= 0,
+    ensures
+        frob_f(a, a, dim) >= 0.0real,
+{
+    let f = |r: int, c: int| a(r, c) * a(r, c);
+    let rows = |r: int| sum_fn_r(|c: int| f(r, c), dim as nat);
+    assert forall|r: int| 0 <= r < dim implies #[trigger] rows(r) >= 0.0real by {
+        assert forall|c: int| 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {
+            assert(a(r, c) * a(r, c) >= 0.0real) by (nonlinear_arith);
+        }
+        lemma_sum_fn_nonneg(|c: int| f(r, c), dim as nat);
+    }
+    lemma_sum_fn_nonneg(rows, dim as nat);
+}
+
 /// <A, B>_F = <B, A>_F.
 pub proof fn lemma_frob_f_comm(a: MatF, b: MatF, dim: int)
     requires

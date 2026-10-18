@@ -24,6 +24,14 @@ use crate::lin_alg::constr_spec::*;
 use crate::lin_alg::solve_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::ldlt_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::reduce_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::gauss_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::trusted::sqrt_r;
+#[cfg(verus_keep_ghost)]
+use crate::real_spec::lemma_sqrt_unique;
 use crate::trusted::abort;
 #[cfg(verus_keep_ghost)]
 use vstd::arithmetic::div_mod::lemma_fundamental_div_mod;
@@ -1249,36 +1257,293 @@ pub fn mat_sym_diagonal_mult_sym(sym_dim: usize, mat: &SymMatrix, start: usize, 
 
 // removes redundant constraints from an augmented matrix [A | b] where rows of A represent symmetric matrices
 // also preconditions resulting constraint matrix by normalizing rows
-use std::f64::consts::FRAC_1_SQRT_2;
-pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
+//
+// Verified against src/lin_alg/reduce_spec.rs: the result consists of the first `rank` rows
+// of the echelon form produced by gauss_elim, each divided by the Frobenius norm of the
+// symmetric matrix it represents, sqrt(sum_{r <= c} pk_wt(r, c) M_rc^2) (off-diagonal packed
+// entries count twice); an inconsistent system aborts.
+verus! {
+
+pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Matrix)
+    requires
+        dim >= 1,
+        dim_fits(dim as int),
+        old(mat)@.len() as int % red_col_dim(dim as int) == 0,
+        abs_max_r(rvs(old(mat)@)) > 0.0real,
+    ensures
+        final(mat)@.len() == old(mat)@.len(),
+        reduced_system(rvs(old(mat)@), rvs(final(mat)@), rvs(result@), dim as int),
+{
+    let ghost a0 = rvs(old(mat)@);
+    let ghost d = dim as int;
+    let ghost cd = red_col_dim(d);
+    let ghost eps = gauss_eps_r(a0);
+    let ghost len = old(mat)@.len() as int;
+    proof {
+        lemma_dim_fits_idx(d, d);
+        lemma_pk_col_start_monotone(0, d);
+        assert(d * (d + 1) / 2 + 1 <= (d + 2) * (d + 2)) by (nonlinear_arith)
+            requires d >= 0;
+    }
     let col_dim = (dim * (dim + 1)) / 2 + 1;
     let row_dim = mat.len() / col_dim;
-    let (echelon, rank, solvable) = gauss_elim(mat, col_dim, row_dim);
-    if !solvable {
-        panic!("linear_remove_redundant_sym: your system of constraints is inconsistent");
+    let ghost rd = row_dim as int;
+    proof {
+        assert(col_dim as int == cd);
+        lemma_fundamental_div_mod(len, cd);
+        assert(cd * rd == rd * cd) by (nonlinear_arith);
+        assert(old(mat)@.len() == row_dim * col_dim);
+        assert(len <= usize::MAX);
     }
-    let mut result : Matrix = vec![0.0; col_dim * rank];
-    let (mut start, mut scale) : (usize, f64);
-    for i in 0..rank {
-	scale = 0.0;
-	scale = scale.hypot(echelon[i]);
-	start = 1;
-	for k in 1..dim {
-	    let diag = (k * k + 3 * k) / 2;
-	    for col in start..diag {
-		scale = scale.hypot(echelon[col * row_dim + i] * FRAC_1_SQRT_2);
-	    }
-	    scale = scale.hypot(echelon[diag * row_dim + i]);
-	    start += k;
-	}
-	assert!(scale.is_finite(), "linear_remove_redundant_sym: row has non-finite packed norm");
-	for j in 0..col_dim {
-	    result[j * rank + i] = echelon[j * row_dim + i] / scale;
-	}
+    let (echelon, rank, solvable) = gauss_elim(mat, col_dim, row_dim);
+    let ghost e = rvs(echelon@);
+    let ghost pivots = choose|p: Seq<int>| {
+        &&& #[trigger] echelon_form(rvs(echelon@), row_dim as int, col_dim as int, p, rv(TOL) * abs_max_r(rvs(old(mat)@)))
+        &&& skipped_bounded(rvs(echelon@), row_dim as int, col_dim as int, p, rv(TOL) * abs_max_r(rvs(old(mat)@)), col_dim as int)
+        &&& p.len() == rank
+        &&& solvable == (p.len() == 0 || p.last() < col_dim - 1)
+    };
+    if !solvable {
+        abort("linear_remove_redundant_sym: your system of constraints is inconsistent");
+    }
+    let ghost rk = rank as int;
+    proof {
+        assert(echelon_form(e, rd, cd, pivots, eps));
+        // every pivot column lies in the packed part (the right-hand side holds no pivot)
+        assert forall|l: int| 0 <= l < rk implies #[trigger] pivots[l] < cd - 1 by {
+            if l < rk - 1 {
+                assert(pivots[l] < pivots[rk - 1]);
+            }
+        }
+        assert(rank <= row_dim);
+        assert(col_dim * rank <= col_dim * row_dim) by (nonlinear_arith)
+            requires rank <= row_dim;
+        assert(cd * rk == rk * cd) by (nonlinear_arith);
+        assert(rv(TOL) == 0.0000000001real);
+        assert(eps > 0.0real) by (nonlinear_arith)
+            requires rv(TOL) > 0.0real, abs_max_r(a0) > 0.0real, eps == rv(TOL) * abs_max_r(a0);
+        lemma_pk_col_start_zero();
+        assert(0 * rd == 0) by (nonlinear_arith);
+    }
+    let mut result: Matrix = vec![0.0; col_dim * rank];
+    let f = 2.0_f64.sqrt();
+    proof {
+        assert(rv(f) * rv(f) == 2.0real);
+    }
+    for i in 0..rank
+        invariant
+            dim >= 1,
+            d == dim as int,
+            dim_fits(d),
+            cd == red_col_dim(d),
+            col_dim as int == cd,
+            (dim * (dim + 1)) / 2 + 1 == col_dim,
+            rd == row_dim as int,
+            rk == rank as int,
+            rank <= row_dim,
+            len == rd * cd,
+            len == cd * rd,
+            len <= usize::MAX,
+            col_dim * rank <= len,
+            e == rvs(echelon@),
+            echelon@.len() == len,
+            echelon_form(e, rd, cd, pivots, eps),
+            pivots.len() == rk,
+            eps > 0.0real,
+            forall|l: int| 0 <= l < rk ==> #[trigger] pivots[l] < cd - 1,
+            rv(f) * rv(f) == 2.0real,
+            result@.len() == col_dim * rank,
+            cd * rk == rk * cd,
+            forall|i2: int, j: int| 0 <= i2 < i && 0 <= j < cd
+                ==> #[trigger] cm_entry(rvs(result@), rk, i2, j) == cm_entry(e, rd, i2, j) / row_scale_r(e, rd, d, i2),
+    {
+        let ghost ii = i as int;
+        proof {
+            lemma_cm_idx_bound(rd, ii, 0, cd);
+            lemma_pk_col_start_zero();
+            assert(0 * rd == 0) by (nonlinear_arith);
+            assert(cm_idx(rd, ii, 0) == ii);
+        }
+        let mut scale: f64 = 0.0;
+        scale = scale.hypot(echelon[i]);
+        proof {
+            let x = rv(echelon@[ii]);
+            assert(x * x >= 0.0real) by (nonlinear_arith);
+            assert(rv(scale) == sqrt_r(0.0real * 0.0real + x * x));
+            assert(constr_entry(e, rd, ii, pk_idx(0, 0)) == x);
+            assert(row_sq_term_r(e, rd, ii, 0, 0) == 1.0real * (x * x));
+            lemma_row_sq_upto_zero(e, rd, ii);
+            lemma_row_sq_upto_step(e, rd, ii, 0);
+            lemma_col_sq_zero(e, rd, ii, 0);
+            lemma_col_sq_step(e, rd, ii, 0, 0);
+            assert(rv(scale) * rv(scale) == row_sq_upto_r(e, rd, ii, 1));
+        }
+        let mut start = 1;
+        for k in 1..dim
+            invariant
+                dim >= 1,
+                d == dim as int,
+                dim_fits(d),
+                cd == red_col_dim(d),
+                rd == row_dim as int,
+                len == rd * cd,
+                len == cd * rd,
+                len <= usize::MAX,
+                e == rvs(echelon@),
+                echelon@.len() == len,
+                ii == i as int,
+                i < rank,
+                rank <= row_dim,
+                rv(f) * rv(f) == 2.0real,
+                1 <= k <= dim,
+                start as int == pk_col_start(k as int),
+                rv(scale) >= 0.0real,
+                rv(scale) * rv(scale) == row_sq_upto_r(e, rd, ii, k as int),
+        {
+            let ghost kk = k as int;
+            proof {
+                lemma_dim_fits_idx(d, kk);
+                lemma_pk_diag_idx(kk);
+                lemma_pk_idx_bound(kk, kk, d);
+                lemma_pk_col_start_step(kk);
+                lemma_col_sq_zero(e, rd, ii, kk);
+            }
+            let diag = (k * k + 3 * k) / 2;
+            proof {
+                assert(diag as int == pk_idx(kk, kk));
+                assert(diag == start + k);
+            }
+            for col in start..diag
+                invariant
+                    d == dim as int,
+                    dim_fits(d),
+                    cd == red_col_dim(d),
+                    rd == row_dim as int,
+                    len == rd * cd,
+                    len == cd * rd,
+                    len <= usize::MAX,
+                    e == rvs(echelon@),
+                    echelon@.len() == len,
+                    ii == i as int,
+                    i < rank,
+                    rank <= row_dim,
+                    rv(f) * rv(f) == 2.0real,
+                    kk == k as int,
+                    1 <= k < dim,
+                    start as int == pk_col_start(kk),
+                    diag as int == pk_idx(kk, kk),
+                    start <= col <= diag,
+                    rv(scale) >= 0.0real,
+                    rv(scale) * rv(scale) == row_sq_upto_r(e, rd, ii, kk) + col_sq_r(e, rd, ii, kk, col as int - start as int),
+            {
+                let ghost r = col as int - start as int;
+                proof {
+                    assert(col as int == pk_idx(r, kk));
+                    lemma_pk_idx_bound(r, kk, d);
+                    lemma_cm_idx_bound(rd, ii, col as int, cd);
+                }
+                let v = echelon[col * row_dim + i];
+                let y = v * f;
+                let ghost prev = rv(scale);
+                scale = scale.hypot(y);
+                proof {
+                    let (xv, fv) = (rv(v), rv(f));
+                    assert(rv(y) * rv(y) == (fv * fv) * (xv * xv)) by (nonlinear_arith)
+                        requires rv(y) == xv * fv;
+                    assert(prev * prev >= 0.0real) by (nonlinear_arith);
+                    assert(xv * xv >= 0.0real) by (nonlinear_arith);
+                    assert(rv(scale) == sqrt_r(prev * prev + rv(y) * rv(y)));
+                    assert(constr_entry(e, rd, ii, pk_idx(r, kk)) == xv);
+                    assert(row_sq_term_r(e, rd, ii, r, kk) == 2.0real * (xv * xv));
+                    lemma_col_sq_step(e, rd, ii, kk, r);
+                }
+            }
+            proof {
+                lemma_cm_idx_bound(rd, ii, diag as int, cd);
+            }
+            let v = echelon[diag * row_dim + i];
+            let ghost prev = rv(scale);
+            scale = scale.hypot(v);
+            proof {
+                let xv = rv(v);
+                assert(prev * prev >= 0.0real) by (nonlinear_arith);
+                assert(xv * xv >= 0.0real) by (nonlinear_arith);
+                assert(rv(scale) == sqrt_r(prev * prev + xv * xv));
+                assert(constr_entry(e, rd, ii, pk_idx(kk, kk)) == xv);
+                assert(row_sq_term_r(e, rd, ii, kk, kk) == 1.0real * (xv * xv));
+                lemma_col_sq_step(e, rd, ii, kk, kk);
+                lemma_row_sq_upto_step(e, rd, ii, kk);
+            }
+            start = diag + 1;
+        }
+        if !scale.is_finite() {
+            abort("linear_remove_redundant_sym: row has non-finite packed norm");
+        }
+        proof {
+            lemma_row_scale_pos(e, rd, d, pivots, eps, ii);
+            lemma_sqrt_unique(row_sq_r(e, rd, d, ii), rv(scale));
+            assert(rv(scale) == row_scale_r(e, rd, d, ii));
+        }
+        let ghost before = rvs(result@);
+        for j in 0..col_dim
+            invariant
+                d == dim as int,
+                cd == red_col_dim(d),
+                col_dim as int == cd,
+                rd == row_dim as int,
+                rk == rank as int,
+                len == rd * cd,
+                len == cd * rd,
+                len <= usize::MAX,
+                e == rvs(echelon@),
+                echelon@.len() == len,
+                ii == i as int,
+                i < rank,
+                rank <= row_dim,
+                rv(scale) == row_scale_r(e, rd, d, ii),
+                rv(scale) > 0.0real,
+                col_dim * rank <= len,
+                result@.len() == col_dim * rank,
+                cd * rk == rk * cd,
+                forall|i2: int, j2: int| 0 <= i2 < rk && 0 <= j2 < cd && !(i2 == ii && j2 < j)
+                    ==> #[trigger] cm_entry(rvs(result@), rk, i2, j2) == cm_entry(before, rk, i2, j2),
+                forall|j2: int| 0 <= j2 < j
+                    ==> #[trigger] cm_entry(rvs(result@), rk, ii, j2) == cm_entry(e, rd, ii, j2) / row_scale_r(e, rd, d, ii),
+        {
+            let ghost jj = j as int;
+            proof {
+                lemma_cm_idx_bound(rk, ii, jj, cd);
+                lemma_cm_idx_bound(rd, ii, jj, cd);
+            }
+            let ghost prev = rvs(result@);
+            result[j * rank + i] = echelon[j * row_dim + i] / scale;
+            proof {
+                let cur = rvs(result@);
+                assert(cm_entry(cur, rk, ii, jj) == cm_entry(e, rd, ii, jj) / rv(scale));
+                assert forall|i2: int, j2: int| 0 <= i2 < rk && 0 <= j2 < cd && !(i2 == ii && j2 < jj + 1)
+                    implies #[trigger] cm_entry(cur, rk, i2, j2) == cm_entry(before, rk, i2, j2) by {
+                    lemma_cm_entry_write_other(prev, cur, rk, cd, ii, jj, i2, j2);
+                }
+                assert forall|j2: int| 0 <= j2 < jj + 1
+                    implies #[trigger] cm_entry(cur, rk, ii, j2) == cm_entry(e, rd, ii, j2) / row_scale_r(e, rd, d, ii) by {
+                    if j2 < jj {
+                        lemma_cm_entry_write_other(prev, cur, rk, cd, ii, jj, ii, j2);
+                    }
+                }
+            }
+        }
+    }
+    proof {
+        assert forall|i: int| 0 <= i < rk implies #[trigger] row_scale_r(e, rd, d, i) > 0.0real by {
+            lemma_row_scale_pos(e, rd, d, pivots, eps, i);
+        }
+        assert(reduced_with(a0, e, rvs(result@), d, pivots));
+        assert(pivots.len() == rk);
     }
     result
 }
 
+} // verus!
 
 // the constraint matrix for block-diagonal decision variable Z is represented implicitly by a matrix M and a vector V
 // each row of M is a symmetric matrix

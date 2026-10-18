@@ -253,17 +253,6 @@ pub fn neg_infinity() -> f64 {
     f64::NEG_INFINITY
 }
 
-/// 1 / sqrt(2), characterized as the positive root of r^2 = 1/2.
-#[verifier::external_body]
-#[inline(always)]
-pub fn frac_1_sqrt_2() -> (r: f64)
-    ensures
-        rv(r) > 0.0real,
-        rv(r) * rv(r) == 0.5real,
-{
-    core::f64::consts::FRAC_1_SQRT_2
-}
-
 /* ---------- T8: program abort ---------- */
 
 /// Aborts the program with a message.  Nothing is claimed about reachability:

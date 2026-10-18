@@ -255,10 +255,15 @@ Keep the project compiling and existing tests passing.
 Prefer small, independently verifiable changes.
 
 Track progress in `VERIFICATION_PROGRESS.md`: layer status (not started / in progress / done),
-verified-function count, constructs rewritten for Verus compatibility, and open issues.
-Update it at the end of each session, replacing stale content and maintaining a clear 
-and concise writing style. Read this file at session start, creating it if it does not
-exist yet. At the end of each session, remove stale/obsolete content from the file.
+verified-function count, constructs rewritten for Verus compatibility/verification, and open 
+issues. Update it at the end of each session, replacing stale content and maintaining a clear 
+and concise writing style. Read this file at session start, creating it if it does not exist 
+yet. At the end of each session, remove stale/obsolete content from the file.
+
+If you encounter a genuine error in the original Rust code as a result of trying to verify 
+it, briefly explain the error, how Verus exposed it, and how it was fixed in `EXPOSED_BUGS.md`. 
+This file is just for human review, so make it highly readable and do not consult it during
+your runs.
 
 ### Performance Preservation
 
@@ -323,6 +328,9 @@ for verification.
 Keep Verus specifications and proofs idomatic, transparent, concise, and 
 conceptually instructive. Prefer clear invariants and reusable lemmas 
 over opaque, oversized proofs or unnecessary verification machinery.
+
+Code comments describe the current behavior and specification of the code;
+do not record change history or bug fixes in source comments.
 
 ### Scope
 

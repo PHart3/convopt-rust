@@ -441,6 +441,24 @@ pub proof fn lemma_sum_fn_zero(n: nat)
     }
 }
 
+/// A constant summand sums to n times the constant.
+pub proof fn lemma_sum_fn_const(x: real, n: nat)
+    ensures
+        sum_fn_r(|i: int| x, n) == (n as real) * x,
+    decreases n,
+{
+    if n > 0 {
+        let m = (n - 1) as nat;
+        lemma_sum_fn_const(x, m);
+        assert((m as real) == (n as real) - 1.0real);
+        assert((m as real) * x + x == (n as real) * x) by (nonlinear_arith)
+            requires (m as real) == (n as real) - 1.0real;
+    } else {
+        assert((n as real) * x == 0.0real) by (nonlinear_arith)
+            requires n as real == 0.0real;
+    }
+}
+
 /// A sum with a single nonzero term k equals that term.
 pub proof fn lemma_sum_fn_single(f: spec_fn(int) -> real, n: nat, k: int)
     requires

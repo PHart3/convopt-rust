@@ -93,6 +93,23 @@ pub proof fn lemma_sqrt_square(x: real)
     lemma_sqrt_unique(x * x, abs_r(x));
 }
 
+/// sqrt(x y) = sqrt(x) sqrt(y) for nonnegative x, y.
+pub proof fn lemma_sqrt_mul(x: real, y: real)
+    requires
+        x >= 0.0real,
+        y >= 0.0real,
+    ensures
+        sqrt_r(x * y) == sqrt_r(x) * sqrt_r(y),
+{
+    let (s, t) = (sqrt_r(x), sqrt_r(y));
+    assert(x * y >= 0.0real) by (nonlinear_arith)
+        requires x >= 0.0real, y >= 0.0real;
+    assert(s * t >= 0.0real) by (nonlinear_arith)
+        requires s >= 0.0real, t >= 0.0real;
+    assert((s * t) * (s * t) == (s * s) * (t * t)) by (nonlinear_arith);
+    lemma_sqrt_unique(x * y, s * t);
+}
+
 /// sqrt is monotone on nonnegative reals.
 pub proof fn lemma_sqrt_monotone(x: real, y: real)
     requires
