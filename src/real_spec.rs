@@ -20,6 +20,49 @@ pub open spec fn min_r(x: real, y: real) -> real {
     if x <= y { x } else { y }
 }
 
+/// |x y| = |x| |y|.
+pub proof fn lemma_abs_mul(x: real, y: real)
+    ensures
+        abs_r(x * y) == abs_r(x) * abs_r(y),
+{
+    if x >= 0.0real && y >= 0.0real {
+        assert(x * y >= 0.0real) by (nonlinear_arith)
+            requires x >= 0.0real, y >= 0.0real;
+    } else if x >= 0.0real {
+        assert(x * y <= 0.0real && x * (-y) == -(x * y)) by (nonlinear_arith)
+            requires x >= 0.0real, y < 0.0real;
+    } else if y >= 0.0real {
+        assert(x * y <= 0.0real && (-x) * y == -(x * y)) by (nonlinear_arith)
+            requires x < 0.0real, y >= 0.0real;
+    } else {
+        assert(x * y > 0.0real && (-x) * (-y) == x * y) by (nonlinear_arith)
+            requires x < 0.0real, y < 0.0real;
+    }
+}
+
+/// |a - b| <= |a| + |b|.
+pub proof fn lemma_abs_sub_triangle(a: real, b: real)
+    ensures
+        abs_r(a - b) <= abs_r(a) + abs_r(b),
+{
+}
+
+/// |num / den| <= 1 when |num| <= |den| and den != 0.
+pub proof fn lemma_abs_quotient_le_one(num: real, den: real)
+    requires
+        den != 0.0real,
+        abs_r(num) <= abs_r(den),
+    ensures
+        abs_r(num / den) <= 1.0real,
+{
+    let q = num / den;
+    assert((num / den) * den == num) by (nonlinear_arith)
+        requires den != 0.0real;
+    lemma_abs_mul(q, den);
+    assert(abs_r(q) <= 1.0real) by (nonlinear_arith)
+        requires abs_r(q) * abs_r(den) <= abs_r(den), abs_r(den) > 0.0real;
+}
+
 /// The nonnegative square root is unique.
 pub proof fn lemma_sqrt_unique(x: real, y: real)
     requires

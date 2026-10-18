@@ -4,6 +4,8 @@ pub mod mat_spec;
 pub mod constr_spec;
 pub mod solve_spec;
 pub mod ldlt_spec;
+pub mod jacobi_spec;
+pub mod gauss_spec;
 pub mod matrix;
 pub(crate) mod comparison;
 pub mod sym_matrix;

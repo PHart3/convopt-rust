@@ -53,3 +53,19 @@ L06 added no trusted items. `ldlt_decomp` uses the literals `0.0`, `1.0`, `TOL`
 by T3 because the pivot check of the earlier row established
 `rv(d[j]) >= TOL * max(max_i |A_ii|, 1) >= 1e-10 > 0`. `pos_def_solver` replaces
 its data-dependent `panic!` on a failed factorization by `abort` (T8).
+L07 added no trusted items. `psd_block_check` uses the literals `1e-9`, `1.0` (T5) and
+the `max` contract (T6); its positivity argument rests on the pivot bound of
+`ldlt_decomp` (L06) and the constant `TOL > 0` (T5).
+L08 added no trusted items. `jacobi_rot` uses the literals `0.0`, `1.0`, `2.0` (T5) and
+the `signum`, `abs`, `sqrt`, `recip` contracts (T6). Its three divisions are covered by
+T3: by `2 a_jk` (nonzero by the precondition), by `|tau| + sqrt(1 + tau^2)` (positive
+since the square root is nonnegative with square `>= 1`, T1), and `recip` of
+`sqrt(1 + t^2)` (positive for the same reason). The `sqrt` contract applies because
+both arguments are `>= 1`.
+L13 added no trusted items. `gauss_elim` uses the literals `0.0` and `TOL` (T5), the
+`abs`, `max` contracts (T6) and the comparison `scaled_near_zero` (T4). Its division
+`A_jn / A_rn` is covered by T3 when the pivot is nonzero; a zero pivot (all-zero input)
+leaves the multiplier unspecified, and the verified postconditions hold for any value.
+L15 added no trusted items. The twelve constructors and converters use the literals `0.0`,
+`1.0` (T5) and no method contract; `sym_matrix_proj` replaces its data-dependent `panic!`
+on `row > col` by `abort` (T8).

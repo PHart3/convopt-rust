@@ -24,12 +24,84 @@ Runtime checks: `cargo build`, `cargo test`.
 | L04 constraint operator and adjoint | done | `src/lin_alg/constr_spec.rs` (new spec/proof module: operator `A`, adjoint `A*`, Gram matrix, triangle sums, adjoint identity, Gram-action lemma); `constraint_action`, `constraint_lin_comb`, `constraint_gram`, `diag_scale_gram` in a second `verus!` block of `src/lin_alg/sym_matrix.rs`. |
 | L05 triangular and diagonal solvers | done | `src/lin_alg/solve_spec.rs` (new spec/proof module: partial row sums, pivot scale, `mat_vec` of the triangular and diagonal views); `diag_solver`, `forw_subst`, `back_subst` plus the helper `pivot_scale` in a third `verus!` block of `src/lin_alg/sym_matrix.rs`; `TOL` moved into the `verus!` block of `src/lin_alg/matrix.rs`. |
 | L06 LDLT factorization and positive-definite solvers | done | `src/lin_alg/ldlt_spec.rs` (new spec/proof module: LDLT recurrence, locality and preservation lemmas, `L D L^T = A`, block-diagonal solve); `ldlt_decomp`, `pos_def_solver`, `pos_def_solver_upperleft` in the third `verus!` block of `src/lin_alg/sym_matrix.rs`; `psd_block_check` stays outside (L07). |
-| L07 .. L20 | not started | |
+| L07 PSD block check | done | `psd_block_check` in the third `verus!` block of `src/lin_alg/sym_matrix.rs`; block-check specs in `src/lin_alg/ldlt_spec.rs`; reusable PSD lemmas in `src/lin_alg/mat_spec.rs`. |
+| L08 shared Jacobi rotation core | done | `src/lin_alg/jacobi_spec.rs` (new spec/proof module); `jacobi_rot` in a `verus!` block of `src/lin_alg/jacobi.rs`; the eigensolvers and spectral operations of that file stay outside (L10-L12). |
+| L13 Gaussian elimination | done | `src/lin_alg/gauss_spec.rs` (new spec/proof module); `gauss_elim` in a second `verus!` block of `src/lin_alg/matrix.rs`. |
+| L15 user-facing symmetric-map representation | done | `matrix_diagonal_mult_sym`, `mat_sym_diagonal_mult_sym` and the six partitioned helpers in two further `verus!` blocks of `src/lin_alg/sym_matrix.rs`; `matrixsym_flatten`, `mk_symmap`, `zero_symmap`, `ident_symmap` in two `verus!` blocks of `src/sdp.rs` (`sdp_to_standard` stays outside, L16). |
+| L09 .. L12, L14, L16 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **335 verified, 0 errors** (Verus `--time`: 6.3 s SMT time; no slow
-proofs; the whole run takes 14 s).
+Last full run: **536 verified, 0 errors** (Verus `--time`: 12 s SMT time; no slow
+proofs; the whole run takes 17 s).
+
+- 12 executable functions (L15): in `src/lin_alg/sym_matrix.rs`, `matrix_diagonal_mult_sym`
+  (column `pk_idx(start + a, start + b)` of the result is column `pk_idx(a, b)` of the dense
+  input, every other column is zero) and `mat_sym_diagonal_mult_sym` (the same for one
+  packed matrix: the block embedding), and the partitioned helpers `mk_symmap_real`
+  (`result[c][r] == vect[pk_idx(r, c)]`), `sym_matrix_trace` (identity), `sym_matrix_scale`,
+  `sym_matrix_zero`, `sym_matrix_proj` (single 1 at `(row, col)`), `sym_matrix_add`; in
+  `src/sdp.rs`, `matrixsym_flatten` (entry `(r, pk_idx(j, i))` of the column-major result is
+  `mat[r][i][j]`), `mk_symmap` (row `k` is the packed matrix at `entries[k * pk_len ..]`),
+  `zero_symmap`, `ident_symmap` (row `n * dim + i` picks entry `(min(n, i), max(n, i))`).
+- 8 spec functions and 7 lemmas (L15): `part_shape`, `symmap_shape`, `is_block_idx`,
+  `block_prev_end` with `lemma_pk_idx_order` (packed indices order pairs lexicographically
+  by (column, row)), `lemma_block_idx_gap`, `lemma_block_prev_end_le`,
+  `lemma_block_prev_end_bound`, `lemma_block_idx_max` in `src/lin_alg/sym_spec.rs`;
+  `lemma_cm_idx_bound` in `vec_spec.rs`; `symmap_dim`, `ident_symmap_entry` in `src/sdp.rs`.
+
+- 1 executable function (`src/lin_alg/matrix.rs`, second `verus!` block) (L13): `gauss_elim`
+  requires `col_dim >= 1` and `mat.len() == row_dim * col_dim`, and ensures
+  `same_solutions(input, output)` (the row operations preserve the solution set of the
+  augmented system `[A | b]`) and the existence of a pivot sequence `pivots` with
+  `echelon_form(output, pivots, eps)` (pivot columns strictly increasing, pivot `i` in row
+  `i` of magnitude `>= eps = TOL * max |input entry|`, exact zeros below every pivot),
+  `skipped_bounded(output, pivots, eps)` (the tolerance-based skip rule: a column without a
+  pivot is below `2^k * eps` in every row from its examination row on, `k` = pivots found
+  later), rank = `pivots.len()`, and consistency flag = "no pivot in the last column".
+  Pivot-selection correctness (the chosen row maximizes the magnitude over the remaining
+  rows) and the skip rule at examination time are verified assertions inside the function.
+- 11 spec functions and 19 lemmas in `src/lin_alg/gauss_spec.rs` (L13): the augmented
+  system and its solution set (`aug_row_ok`, `solves`, `same_solutions`), the row operations
+  `rows_swapped`/`row_subtracted` with their solution-set preservation lemmas, the echelon
+  predicates (`pivots_ok`, `echelon_form`) with preservation under swaps and row
+  subtractions below the pivot rows and the push of a new pivot, and the skip rule
+  (`pow2_r`, `pivots_below`, `is_pivot_col`, `skip_bound`, `skipped_bounded`) with its
+  preservation lemmas. Plus `lemma_abs_mul`, `lemma_abs_sub_triangle`,
+  `lemma_abs_quotient_le_one` in `src/real_spec.rs`; `lemma_cm_entry_write_other` moved to
+  `src/lin_alg/vec_spec.rs` and generalized to rectangular matrices.
+
+- 1 executable function (`src/lin_alg/jacobi.rs`, `verus!` block) (L08): `jacobi_rot`
+  requires a nonzero pivot entry `(j, k)`, `j < k < dim`, and ensures the existence of
+  `c, s` with `jacobi_step(A, Q, A', Q', dim, j, k, c, s)`: `c^2 + s^2 = 1`,
+  `A' = J^T A J` and `Q' = Q J` for `J = rot_mat(j, k, c, s)` (block equalities of the
+  packed and column-major views), `A'_jk = 0`, and the returned value `|A_jk|`; the
+  returned references are linked to the parameters by `final(mat)@ == final(res.0)@`.
+- 7 spec functions and 19 lemmas in `src/lin_alg/jacobi_spec.rs` (L08; Verus reports 62
+  items): the rotation `rot_mat`, the explicit products `rot_target` (`J^T A J`) and
+  `rot_cols` (`Q J`) with their product lemmas, the two-term sum, `J^T J = I` and
+  `is_orthogonal(J)`, the scalar identities of the executable choice of `t, c, s`
+  (`lemma_jacobi_t`, `lemma_jacobi_cs`, `lemma_jacobi_scalars`: the rotated 2 x 2 block is
+  `diag(a_jj - t a_jk, a_kk + t a_jk)`, so the pivot entry is annihilated), locality of
+  single-entry writes to packed and column-major matrices, `is_orthogonal`/`is_symmetric`
+  congruence under `meq`, the step invariant `lemma_rotation_step` (`A = Q B Q^T` with `Q`
+  orthogonal is preserved by `B' = J^T B J`, `Q' = Q J`) with its stored-representation form
+  `lemma_jacobi_step_preserves`, and `lemma_jacobi_step_similar` (symmetry and eigenvalues of
+  `B` are preserved).
+
+- 1 executable function (`src/lin_alg/sym_matrix.rs`, third `verus!` block) (L07):
+  `psd_block_check` requires `blocks_fit` (every listed block lies inside the packed matrix
+  and its index arithmetic fits in `usize`) and ensures that a `true` result gives
+  `block_psd_ok(A, start, dim)` for every listed block, i.e. `B >= -eps I` with
+  `eps = 1e-9 * max(max_i |B_ii|, 1)` for the block `B = block_view(A, start)`.
+- 4 spec functions and 1 lemma in `src/lin_alg/ldlt_spec.rs` (L07): `block_diag_abs_r`,
+  `block_max_abs_diag_r`, `psd_check_eps_r`, `block_psd_ok`, `blocks_fit`, and
+  `lemma_block_max_abs_diag` (the diagonal scale of the extracted block equals that of the
+  block inside the full matrix). Plus, in `mat_spec.rs`, the view `block_view` and the lemmas
+  `lemma_psd_shifted_zero_dim`, `lemma_diag_congruence_psd` (`Q D Q^T >= 0` for `d >= 0`, also
+  the spectral PSD argument of L12) and `lemma_shifted_factorization_psd`
+  (`Q D Q^T = A + eps I` with `d >= 0` gives `A >= -eps I`); and `lemma_max0_fn_ext` in
+  `sym_spec.rs`.
 
 - 3 executable LDLT functions (`src/lin_alg/sym_matrix.rs`, third `verus!` block) (L06):
   `ldlt_decomp` returns `None` or `Some((l, d))` with `l` unit lower-triangular, every pivot
@@ -257,6 +329,96 @@ proofs; the whole run takes 14 s).
   is passed as `&mut vect.as_mut_slice()[..ul_len]` (vstd specifies `index_mut` with a
   `RangeTo` on slices, not on `Vec`), which is free at runtime.
 
+## Architecture decisions (L07)
+
+- The guarantee of a successful check is stated per block as `block_psd_ok(A, start, dim)`
+  (`src/lin_alg/ldlt_spec.rs`): `psd_shifted(block_view(A, start), dim, eps)` with
+  `eps = psd_check_eps_r(A, start, dim) = 1e-9 * max(block_max_abs_diag_r, 1)`, all in terms
+  of the full packed matrix, so L18 can use it without reference to the temporary block
+  copies. The block list is constrained by `blocks_fit(blocks@, mat@.len())`, which the
+  `psd_blocks` construction of L17 must establish.
+- The proof composes the existing contracts: `sym_matrix_diag_block` (block entries),
+  `max_diag_sym` (the scale, exact for `dim >= 1`), the packed shift loop (entry invariants:
+  off-diagonal entries copied, diagonal entries plus `eps`), and `ldlt_decomp`
+  (`L D L^T = B + eps I` with pivots `>= TOL > 0`); the mathematical step is
+  `lemma_shifted_factorization_psd` in `mat_spec.rs`, built from `lemma_diag_psd`,
+  `lemma_psd_congruence` and `lemma_psd_shifted_iff` (L03). For `dim == 0` the scale is
+  unspecified and the guarantee is `lemma_psd_shifted_zero_dim`.
+- `block_max_abs_diag_r` is defined through the named per-term function `block_diag_abs_r`
+  so that its `max0_fn_r` closure can be matched from proofs (closure-matching rule of L04).
+
+## Architecture decisions (L08)
+
+- The rotation is specified by its matrix: `rot_mat(j, k, c, s)` is the identity except for
+  the 2 x 2 block `[[c, s], [-s, c]]` at rows/columns `j < k` (`src/lin_alg/jacobi_spec.rs`).
+  `jacobi_rot` ensures `exists c, s: jacobi_step(..)`, i.e. `c^2 + s^2 = 1`, `A' = J^T A J`
+  and `Q' = Q J` as block equalities (`meq`) of `sym_view`/`cm_view`. The existential is the
+  honest statement: `signum(0)` is unspecified in the model (T6), so `c, s` are not
+  functions of the input. Everything the eigensolvers need follows from `jacobi_step`
+  (`lemma_jacobi_step_preserves`, `lemma_jacobi_step_similar`), so L09-L11 never unfold the
+  rotation.
+- `rot_entry` writes entry `(r, l)` of `J^T A J` exactly as the products
+  `(J^T (A J))(r, l)` compute it (nested, not expanded), so `lemma_rot_congruence` is pure
+  sum manipulation (`lemma_sum_fn_two`, `lemma_sum_fn_single`) and all ring reasoning is
+  concentrated in `lemma_jacobi_scalars`.
+- The executable `t = sign(tau) / (|tau| + sqrt(1 + tau^2))` is characterized by the
+  quadratic `t^2 + 2 tau t - 1 = 0` (`lemma_jacobi_t`); multiplied by `a_jk` it becomes
+  `a_jk t^2 + (a_kk - a_jj) t - a_jk = 0`, the hypothesis of `lemma_jacobi_scalars`, which
+  gives the diagonal updates `a_jj - t a_jk`, `a_kk + t a_jk` and `A'_jk = 0`. The division
+  by `2 a_jk` is the reason for the nonzero-pivot precondition (both callers check it).
+- Sweep invariants are stated on `sym_entry`/`cm_entry` for all index pairs (not on packed
+  positions): `rot_done(j, k, m, r, l)` says which entries already hold `rot_target` after
+  rows `< m` are processed; single-entry writes are propagated with
+  `lemma_sym_entry_write_other`/`lemma_cm_entry_write_other` (packed/column-major index
+  injectivity). Reuse this pattern for the eigensolver bookkeeping loops.
+- The tuple-of-`&mut` return type of `jacobi_rot` is kept; the callers' reborrow loop
+  (`(a, q, _) = jacobi_rot(a, q, ..)`) is verifiable with the invariant
+  `final(x)@ == final(p)@` linking the moving reference to the parameter (probed).
+
+## Architecture decisions (L13)
+
+- `gauss_elim` is specified by two exact facts and one tolerance fact
+  (`src/lin_alg/gauss_spec.rs`). Exact: `same_solutions(input, output)`, i.e. for every `x`
+  of length `col_dim - 1`, `A x = b` holds for the input iff it holds for the output (each
+  swap and each row subtraction is proved to preserve it); and `echelon_form(output, pivots,
+  eps)` for a ghost pivot sequence (exported existentially). Tolerance: `skipped_bounded`
+  records what the skip rule `|max remaining entry| < TOL * scale` implies for the output:
+  the entries of a skipped column grow by at most a factor 2 per later elimination step,
+  because partial pivoting keeps every multiplier `|A_jn / A_rn| <= 1`. Numerical rank is
+  not related to exact rank (CLAUDE.md), and rows `>= rank` are not claimed to be zero:
+  they are exactly zero in pivot columns and bounded by `2^k * eps` in skipped columns.
+- The pivot sequence is ghost state (`let ghost mut pivots: Seq<int>`, pushed in proof
+  blocks); `pivots_below(pivots, c)` recovers the row index at which column `c` was
+  examined, so no second ghost map is needed. The consistency flag is specified through the
+  pivot sequence: `coeff_rank == row_search - [last pivot is the last column]` is the loop
+  invariant.
+- Loop invariants describe whole-matrix states with `cm_entry` and an index-conditional
+  (`if c < m3 { swapped } else { unchanged }`); single writes are propagated with
+  `lemma_cm_entry_write_other`, then the row-operation predicate is asserted once and the
+  three preservation lemmas (solution set, echelon, skip bound) are applied.
+- When the pivot is zero (`scale == 0`, all-zero input, never skipped) the multiplier is
+  `0 / 0`, unspecified in the model; the annihilation `A_jn - piv * A_rn = 0` still holds
+  because `A_jn = 0` by the maximality of the pivot, and the skip bound is vacuous.
+
+## Architecture decisions (L15)
+
+- Partitioned symmetric matrices (`Vec<Vector>`, column `c` of the upper triangle stored
+  as a vector of length `c + 1`) are specified entrywise: `part_shape(v, dim)` fixes the
+  lengths and postconditions state `rv(v@[c]@[r])` for `r <= c < dim`; `symmap_shape`
+  lifts this to the rows of a `MatrixSym`. No conversion function between the partitioned
+  and packed forms is defined; the bridge is the index `pk_idx(r, c)` in the postconditions
+  of `mk_symmap_real`, `mk_symmap` and `matrixsym_flatten`.
+- The block compositions are specified by the packed index map of the block:
+  `is_block_idx(t, start, dim)` says that `t = pk_idx(start + a, start + b)` for some block
+  entry `(a, b)`; the loops over `sym_matrix_diag_block_map` carry the ghost pair `(ga, gb)`
+  of the current block entry (`i == pk_idx(ga, gb)`), and the zero-fill between consecutive
+  block columns is justified by `lemma_block_idx_gap` through `block_prev_end` (the packed
+  index following the previous block entry). `matrix_diagonal_mult_sym` keeps its early
+  return for `dim == 0` (empty result, stated as such); for `dim >= 1` it requires the dense
+  input length to be a multiple of `pk_len(dim)` and the result length to fit in `usize`.
+- `sym_matrix_proj` keeps its runtime check `row > col` (user input) as an `abort` (T8) and
+  requires `col < dim` (otherwise the original code returns a vector of the wrong length).
+
 ## Constructs rewritten for Verus compatibility
 
 | Construct | Replacement | Where |
@@ -279,6 +441,26 @@ proofs; the whole run takes 14 s).
 | `let Some(..) = .. else { panic!(..) }` | same let-else with `crate::trusted::abort(..)` (T8) | `pos_def_solver` |
 | `&mut vect[..ul_len]` on a `Vec` (no vstd spec for `Vec` range `index_mut`) | `&mut vect.as_mut_slice()[..ul_len]` (same pointer arithmetic) | `pos_def_solver_upperleft` |
 | `for v in &vect[ul_len..] { result.push(*v) }` | `for t in ul_len..vect.len() { result.push(vect[t]) }` | `pos_def_solver_upperleft` |
+| `for (start, dim) in blocks` over `&Vec<(usize, usize)>` | `for b in 0..blocks.len() { let (start, dim) = blocks[b]; .. }` | `psd_block_check` |
+| `for _ in 0..c` | `for _r in 0..c` (the counter appears only in the invariant) | `psd_block_check` |
+| `let (mut eps, mut idx): (f64, usize);` declared before the loop | `let eps = ..; let mut idx = 0;` inside the loop body (same cost) | `psd_block_check` |
+| `mat[i] += x`, `mat[i] -= x` on `f64` | `mat[i] = mat[i] + x`, `mat[i] = mat[i] - x` | `jacobi_rot` |
+| `tau.signum() / (tau.abs() + (1.0 + tau * tau).sqrt())` and `(1.0 + t * t).sqrt().recip()` | the same expressions with the intermediate results bound by `let` (`sigma`, `sq`, `sq2`), so the method contracts can be named in the proof | `jacobi_rot` |
+| `if m == j \|\| m == k { continue; }` (`continue` is unsupported in `for` loops) | `if m != j && m != k { .. }` | `jacobi_rot` |
+| `let (mut val_old_k, ..)` declared before the loop | `let` inside the loop body | `jacobi_rot` |
+| `orth.split_at_mut(k * dim)`, `&mut left[j * dim..(j + 1) * dim]`, `iter_mut().zip(..)` | index loop over `orth[j * dim + m]`, `orth[k * dim + m]` (same cost) | `jacobi_rot` |
+| `for n in 0..col_dim { if row_search >= row_dim { break; } .. continue; .. }` | `while n < col_dim && row_search < row_dim { .. if !skip { .. } n += 1; }` (same iterations; `continue` is unsupported) | `gauss_elim` |
+| `mat.swap(i1, i2)` (no vstd spec) | `let tmp = mat[i1]; mat[i1] = mat[i2]; mat[i2] = tmp;` | `gauss_elim` |
+| `mat.iter().map(abs).fold(0.0, f64::max)` | index loop with `max.max(mat[t].abs())` | `gauss_elim` |
+| `mat[i] -= piv * mat[k]` | `mat[i] = mat[i] - piv * mat[k]` | `gauss_elim` |
+| `let (mut row_search, mut coeff_rank, mut pivot_row);` | separate initialized `let mut` bindings | `gauss_elim` |
+| `(mat, row_search, row_search == coeff_rank)` returned directly | bound to `let res = ..` first, so the final proof block can name `res.1`, `res.2` | `gauss_elim` |
+| `for c in ones { .. }`, `for v in vect`, `for row in mat`, `iter().zip(..)` | index loops | `matrix_diagonal_mult_sym`, `mat_sym_diagonal_mult_sym`, `sym_matrix_scale`, `sym_matrix_add`, `matrixsym_flatten` |
+| `result.extend(vec![0.0; row_dim])` (no vstd spec for `extend`) | `result.append(&mut vec![0.0; row_dim])` (same memcpy) | `matrix_diagonal_mult_sym` |
+| `v[a..=b].to_vec()` | `slice_to_vec(&v[a..=b])` (vstd's wrapper; `..=` ranges are supported) | `mk_symmap_real`, `mk_symmap` |
+| `for _ in offset..c`, `for _ in 0..output_size` | `for _z in ..`, `for _k in ..` (the counter appears in the invariant) | block compositions, `mk_symmap`, `zero_symmap` |
+| `panic!("sym_matrix_proj: ..")` | `crate::trusted::abort(..)` (T8) | `sym_matrix_proj` |
+| `let (mut diff, mut offset);` | initialized `let` bindings inside the loop | `mk_symmap` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
 
@@ -297,6 +479,74 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Before rewriting a construct, probe it in a scratch file: every entry in the table above
   was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
   `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L15; probed 2026-10-17):
+
+- In `for x in a..b`, the loop variable is the range iterator's `peek` (vstd
+  `std_specs/range.rs`), which is `Some(a + index)` only for `0 <= index <= b - a`; for an
+  empty range (`a > b`) it is `None` and `x` is an unconstrained value. So an invariant
+  that mentions `x` is checked at entry for arbitrary `x` unless `a <= b` is known: even
+  `a <= x` alone fails "before loop" (probed 2026-10-18). Either prove `a <= b` before the
+  loop (`lemma_block_prev_end_le`), guard the invariant with `a <= b ==> ..`, or state it
+  through the named iterator (`for x in it: a..b`, `it.index()` is 0 at entry) or without
+  `x`.
+- `extend_from_slice` is specified through `cloned` (vstd), which resolves to equality for
+  `f64`; `Vec::append` gives `v@ == old + other@` directly. Entries of the old prefix need the
+  index bound (`lemma_cm_idx_bound`) before the `Seq` push/add axioms apply.
+- `mat.first().unwrap_or(&vec![]).len()` verifies as written (spec:
+  `if len == 0 { 0 } else { v@[0]@.len() }`).
+- `x.len()` for a `Vec` must appear inside each loop body that needs `len <= usize::MAX`.
+
+Proof-engineering notes (L13; probed 2026-10-17):
+
+- An `exists` postcondition needs a ground witness term with the *same* function symbol
+  and arguments as its trigger, including the result: for a tuple result, bind
+  `let res = (..)` before the final proof block and assert the trigger term on `res.0@`,
+  `res.1`; `res.k` inside the postcondition is not a ground term, so a witness stated on the
+  local variables is not found (probed: fails for `res.1`, passes for `res.0@` by luck).
+  Alternatively trigger on a term without the result (`#![trigger p.len()]`).
+- `break` is supported in `for` loops (only `continue` is not; `while` loops support
+  both), but after a `for` with `break` nothing is known about the exit condition; a
+  `while` with the combined condition gives it for free.
+- `Vec::swap` has no vstd specification; a three-line swap through a temporary verifies.
+- Quantified facts proved before a loop must be restated as invariants with the same
+  trigger (`abs_r(cm_entry(swapped, ..)) >= eps` was lost inside the elimination loop).
+
+Proof-engineering notes (L08; probed 2026-10-17):
+
+- `nonlinear_arith` proves a *single* distributive, associative or commutative step
+  instantly (`c * (x - y) == c * x - c * y`, `c * (s * x) == c * c * (t * x)` with `s` written
+  as `c * t`), but a two-level identity (`c * (c * a - s * b) - s * (c * b - s * d) == ...`)
+  or an identity with substitution hypotheses (`requires s == c * t, ..`) runs for minutes.
+  Decompose into one-step facts and let the linear solver combine them: it treats
+  monomials as atoms, so write the same monomial with the same bracketing everywhere,
+  and substitute `s == c * t` by congruence (state the step on `c * (c * t) * x`).
+- `let`-bound names are invisible inside `assert .. by (nonlinear_arith)`; write the
+  products out (or pass them in `requires`).
+- `continue` is not supported in `for` loops (`for-loops do not yet support continue`,
+  a front-end error that aborts the whole crate) but is supported in `while` loops
+  (probed 2026-10-18). A `for` loop with `continue` can therefore be kept as a `while` loop
+  with an explicit counter, or rewritten with an `if` block as in `jacobi_rot`.
+- A `Vec` length is only known to fit in `usize` after the term `v.len()` appears
+  (`assert(orth.len() == dim * dim)`); otherwise `j * dim` reports possible overflow even
+  with `orth@.len() == dim * dim`.
+- Reads that precede a write must be related to the loop invariant *before* the write, with
+  a ghost snapshot (`assert(sym_entry(prev, m, k) == ..)`), since the invariant's trigger is
+  on the entry state.
+- Returning `(&'a mut A, &'a mut B, f64)` is supported; the vstd-style postconditions are
+  `res.0@ == ..` (value at return) plus `final(mat)@ == final(res.0)@`.
+
+Proof-engineering notes (L07; probed 2026-10-17):
+
+- `ldlt_decomp(..).is_none()` keeps its vstd spec, and the `Some` payload is available in the
+  following proof block as `fact->Some_0` (a tuple, destructured with `let (l, d) = ..`),
+  so the original control flow needs no let-else (which would leave `l`, `d` unused under
+  `cargo` and warn).
+- Two facts quantified over the same indices but with different triggers must be stated in
+  separate `assert forall` blocks: in a conjunction only the first conjunct's trigger is
+  used, and a `meq` goal over the second pair is never instantiated.
+- Multiplying by `mscale(eps, mident())` produces `eps * 1.0real` and `eps * 0.0real`; assert
+  the entry with the literal product written out and the linear solver closes it.
 
 Proof-engineering notes (L06; probed 2026-10-17):
 
@@ -387,6 +637,13 @@ Proof-engineering notes (L01):
 
 ## Open issues
 
+- L14 (`linear_remove_redundant_sym`) as worded in `DAG.md` claims that the reduced system
+  "has the same solution set as the input". Under the tolerance-based elimination the rows
+  dropped (rows `>= rank`) are exactly zero in pivot columns but only bounded by
+  `2^k * TOL * scale` in skipped columns (`skipped_bounded`, L13), so the provable statement
+  is: solutions of the input solve the reduced system, and the dropped rows satisfy that
+  bound. L14 should be specified accordingly.
+
 - `constraint_action` and `constraint_lin_comb` ignore the zero-pattern list when the dense
   constraint matrix is empty (early return in the original code). The verified
   postconditions state this behaviour; whether `sdpad` can reach it with a nonempty list
@@ -395,5 +652,4 @@ Proof-engineering notes (L01):
 - The full-verification command in CLAUDE.md needs `-V no-solver-version-check` on
   this machine (Z3 4.16.0 with build hashcode); without it Verus panics as soon as any
   function is verified.
-- `cargo build` warns that `use vstd::prelude::*` in `src/lib.rs` is unused; the import
-  is required by CLAUDE.md and is harmless.
+- `cargo build` and `cargo test` currently report no warnings.

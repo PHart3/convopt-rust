@@ -156,6 +156,123 @@ pub proof fn lemma_dim_fits_monotone(d1: int, d2: int)
         requires 0 <= d1 <= d2;
 }
 
+/// Packed indices order pairs (r, c), r <= c, lexicographically by (c, r).
+pub proof fn lemma_pk_idx_order(r1: int, c1: int, r2: int, c2: int)
+    requires
+        0 <= r1 <= c1,
+        0 <= r2 <= c2,
+    ensures
+        pk_idx(r1, c1) < pk_idx(r2, c2) <==> (c1 < c2 || (c1 == c2 && r1 < r2)),
+{
+    if c1 < c2 {
+        lemma_pk_idx_bound(r1, c1, c2);
+    } else if c2 < c1 {
+        lemma_pk_idx_bound(r2, c2, c1);
+    }
+}
+
+/* ---------- the diagonal block of a larger packed matrix ---------- */
+
+/// t is the packed index, in a larger matrix, of an entry of the dim x dim diagonal block at `start`.
+pub open spec fn is_block_idx(t: int, start: int, dim: int) -> bool {
+    exists|a: int, b: int| 0 <= a <= b < dim && t == #[trigger] pk_idx(start + a, start + b)
+}
+
+/// The packed index just after the block entry preceding (a, b) in packed order
+/// (0 for the first entry (0, 0)).
+pub open spec fn block_prev_end(start: int, a: int, b: int) -> int {
+    if a > 0 { pk_idx(start + a - 1, start + b) + 1 }
+    else if b > 0 { pk_idx(start + b - 1, start + b - 1) + 1 }
+    else { 0 }
+}
+
+/// No block entry lies strictly between consecutive block entries: every index in
+/// [block_prev_end(a, b), pk_idx(start + a, start + b)) is outside the block.
+pub proof fn lemma_block_idx_gap(start: int, dim: int, a: int, b: int, t: int)
+    requires
+        start >= 0,
+        0 <= a <= b < dim,
+        block_prev_end(start, a, b) <= t < pk_idx(start + a, start + b),
+    ensures
+        !is_block_idx(t, start, dim),
+{
+    if is_block_idx(t, start, dim) {
+        let (a2, b2) = choose|a2: int, b2: int| 0 <= a2 <= b2 < dim && t == #[trigger] pk_idx(start + a2, start + b2);
+        // (a2, b2) precedes (a, b), hence is at most its predecessor
+        lemma_pk_idx_order(start + a2, start + b2, start + a, start + b);
+        if a > 0 {
+            lemma_pk_idx_order(start + a2, start + b2, start + a - 1, start + b);
+            if pk_idx(start + a2, start + b2) < pk_idx(start + a - 1, start + b) {
+            }
+        } else {
+            lemma_pk_idx_order(start + a2, start + b2, start + b - 1, start + b - 1);
+        }
+    }
+}
+
+/// A block entry (a, b) preceding (ga, gb) in packed order lies before block_prev_end(ga, gb).
+pub proof fn lemma_block_prev_end_bound(start: int, a: int, b: int, ga: int, gb: int)
+    requires
+        start >= 0,
+        0 <= a <= b,
+        0 <= ga <= gb,
+        pk_idx(a, b) < pk_idx(ga, gb),
+    ensures
+        pk_idx(start + a, start + b) < block_prev_end(start, ga, gb),
+{
+    lemma_pk_idx_order(a, b, ga, gb);
+    if ga > 0 {
+        lemma_pk_idx_order(start + a, start + b, start + ga - 1, start + gb);
+        lemma_pk_idx_order(start + ga - 1, start + gb, start + a, start + b);
+    } else {
+        lemma_pk_idx_order(start + a, start + b, start + gb - 1, start + gb - 1);
+        lemma_pk_idx_order(start + gb - 1, start + gb - 1, start + a, start + b);
+    }
+}
+
+/// The predecessor's end is at most the entry itself.
+pub proof fn lemma_block_prev_end_le(start: int, a: int, b: int)
+    requires
+        start >= 0,
+        0 <= a <= b,
+    ensures
+        0 <= block_prev_end(start, a, b) <= pk_idx(start + a, start + b),
+{
+    lemma_pk_col_start_monotone(0, start + b);
+    lemma_pk_col_start_zero();
+    if a == 0 && b > 0 {
+        lemma_pk_col_start_step(start + b - 1);
+    }
+}
+
+/// Every block entry has packed index at most that of the last diagonal entry.
+pub proof fn lemma_block_idx_max(start: int, dim: int, t: int)
+    requires
+        start >= 0,
+        dim >= 1,
+        is_block_idx(t, start, dim),
+    ensures
+        t <= pk_idx(start + dim - 1, start + dim - 1),
+{
+    let (a, b) = choose|a: int, b: int| 0 <= a <= b < dim && t == #[trigger] pk_idx(start + a, start + b);
+    lemma_pk_idx_order(start + a, start + b, start + dim - 1, start + dim - 1);
+    lemma_pk_idx_order(start + dim - 1, start + dim - 1, start + a, start + b);
+}
+
+/* ---------- partitioned symmetric matrices (Vec<Vector>) ---------- */
+
+/// A dim x dim symmetric matrix partitioned by the columns of its upper triangle:
+/// v[c] holds the entries (0, c), ..., (c, c), so entry (r, c) with r <= c is v[c][r].
+pub open spec fn part_shape(v: Seq<Vec<f64>>, dim: int) -> bool {
+    &&& v.len() == dim
+    &&& forall|c: int| 0 <= c < dim ==> (#[trigger] v[c])@.len() == c + 1
+}
+
+/// A list of partitioned dim x dim symmetric matrices (the rows of a MatrixSym).
+pub open spec fn symmap_shape(m: Seq<Vec<Vec<f64>>>, dim: int) -> bool {
+    forall|k: int| 0 <= k < m.len() ==> part_shape((#[trigger] m[k])@, dim)
+}
+
 /* ---------- symmetric-matrix predicates ---------- */
 
 /// m is the packed dim x dim identity matrix.
@@ -397,6 +514,19 @@ pub proof fn lemma_max0_fn_bound(f: spec_fn(int) -> real, n: nat)
 {
     if n > 0 {
         lemma_max0_fn_bound(f, (n - 1) as nat);
+    }
+}
+
+/// Maxima only depend on the values of the function on 0..n.
+pub proof fn lemma_max0_fn_ext(f: spec_fn(int) -> real, g: spec_fn(int) -> real, n: nat)
+    requires
+        forall|i: int| 0 <= i < n ==> #[trigger] f(i) == g(i),
+    ensures
+        max0_fn_r(f, n) == max0_fn_r(g, n),
+    decreases n,
+{
+    if n > 0 {
+        lemma_max0_fn_ext(f, g, (n - 1) as nat);
     }
 }
 

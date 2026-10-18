@@ -119,6 +119,40 @@ pub proof fn lemma_cm_idx_injective(row_dim: int, r1: int, c1: int, r2: int, c2:
     }
 }
 
+/// Column-major index of entry (r, c) lies before the end of column c (and of any later column).
+pub proof fn lemma_cm_idx_bound(row_dim: int, r: int, c: int, cols: int)
+    requires
+        0 <= r < row_dim,
+        0 <= c < cols,
+    ensures
+        0 <= cm_idx(row_dim, r, c) < (c + 1) * row_dim <= cols * row_dim,
+{
+    assert((c + 1) * row_dim == c * row_dim + row_dim) by (nonlinear_arith);
+    assert((c + 1) * row_dim <= cols * row_dim) by (nonlinear_arith)
+        requires c + 1 <= cols, row_dim >= 0;
+    assert(c * row_dim >= 0) by (nonlinear_arith)
+        requires c >= 0, row_dim >= 0;
+}
+
+/// Writing column-major entry (r0, c0) leaves every other entry unchanged.
+pub proof fn lemma_cm_entry_write_other(prev: Seq<real>, cur: Seq<real>, row_dim: int, col_dim: int, r0: int, c0: int, r: int, l: int)
+    requires
+        0 <= r0 < row_dim,
+        0 <= r < row_dim,
+        0 <= l < col_dim,
+        prev.len() >= row_dim * col_dim,
+        cur.len() == prev.len(),
+        forall|t: int| 0 <= t < prev.len() && t != cm_idx(row_dim, r0, c0) ==> cur[t] == prev[t],
+        !(r == r0 && l == c0),
+    ensures
+        cm_entry(cur, row_dim, r, l) == cm_entry(prev, row_dim, r, l),
+{
+    lemma_cm_idx_injective(row_dim, r, l, r0, c0);
+    assert(l * row_dim + r < row_dim * col_dim) by (nonlinear_arith)
+        requires 0 <= r < row_dim, 0 <= l < col_dim;
+    assert(cur[cm_idx(row_dim, r, l)] == prev[cm_idx(row_dim, r, l)]);
+}
+
 /* ---------- packed lower-triangular column-major view ---------- */
 //
 // Column c of a dim x dim lower-triangular matrix stores entries (c, c), ..., (dim-1, c)

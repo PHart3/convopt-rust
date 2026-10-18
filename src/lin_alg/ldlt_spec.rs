@@ -17,6 +17,8 @@ use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::seq::*;
 #[cfg(verus_keep_ghost)]
+use crate::real_spec::{abs_r, max_r};
+#[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::sym_spec::*;
@@ -235,6 +237,51 @@ pub proof fn lemma_block_ident_solve(a: MatF, n: int, total: int, x: Seq<real>, 
         }
     }
     assert(mat_vec(m, total, x) =~= b);
+}
+
+/* ---------- the PSD block check ---------- */
+
+/// |A_ii| of the diagonal block starting at `start` (per-term form, see block_max_abs_diag_r).
+pub open spec fn block_diag_abs_r(a: Seq<real>, start: int, i: int) -> real {
+    abs_r(sym_entry(a, start + i, start + i))
+}
+
+/// max(max_{i < dim} |A_{start+i, start+i}|, 0): the diagonal scale of the block.
+pub open spec fn block_max_abs_diag_r(a: Seq<real>, start: int, dim: int) -> real {
+    max0_fn_r(|i: int| block_diag_abs_r(a, start, i), dim as nat)
+}
+
+/// The shift eps = 1e-9 * max(max_i |B_ii|, 1) used by psd_block_check on the block B.
+pub open spec fn psd_check_eps_r(a: Seq<real>, start: int, dim: int) -> real {
+    0.000000001real * max_r(block_max_abs_diag_r(a, start, dim), 1.0real)
+}
+
+/// The guarantee of a successful check on one block: B >= -eps I.
+pub open spec fn block_psd_ok(a: Seq<real>, start: int, dim: int) -> bool {
+    psd_shifted(block_view(a, start), dim, psd_check_eps_r(a, start, dim))
+}
+
+/// Every listed block (start, dim) lies inside a packed matrix of length len whose
+/// index arithmetic fits in usize.
+pub open spec fn blocks_fit(blocks: Seq<(usize, usize)>, len: nat) -> bool {
+    forall|b: int| 0 <= b < blocks.len() ==> {
+        &&& dim_fits((#[trigger] blocks[b]).0 + blocks[b].1)
+        &&& len >= pk_len(blocks[b].0 + blocks[b].1)
+    }
+}
+
+/// The diagonal scale of an extracted block equals that of the block inside the full matrix.
+pub proof fn lemma_block_max_abs_diag(b: Seq<real>, a: Seq<real>, start: int, dim: int)
+    requires
+        dim >= 0,
+        forall|i: int| 0 <= i < dim ==> #[trigger] sym_diag(b, i) == sym_entry(a, start + i, start + i),
+    ensures
+        max_abs_diag_r(b, dim) == block_max_abs_diag_r(a, start, dim),
+{
+    let f = |i: int| abs_r(sym_diag(b, i));
+    let g = |i: int| block_diag_abs_r(a, start, i);
+    assert forall|i: int| 0 <= i < dim implies #[trigger] f(i) == g(i) by {}
+    lemma_max0_fn_ext(f, g, dim as nat);
 }
 
 } // verus!

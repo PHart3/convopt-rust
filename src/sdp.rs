@@ -1,4 +1,14 @@
+use vstd::prelude::*;
 pub use crate::lin_alg::sym_matrix::*;
+#[cfg(verus_keep_ghost)]
+use crate::trusted::rv;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::vec_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::sym_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::constr_spec::lemma_pk_idx_injective;
+use vstd::slice::slice_to_vec;
 
 // linear map on symmetric matrices that is designed for user input
 type MatrixSym = Vec<Vec<Vector>>;
@@ -29,19 +39,138 @@ impl SDP {
     }
 }
 
+verus! {
+
+broadcast use crate::trusted::group_real_model;
+
+/// The dimension of the symmetric matrices a MatrixSym acts on: the length of its first row.
+pub open spec fn symmap_dim(m: Seq<Vec<Vector>>) -> int {
+    if m.len() == 0 { 0int } else { m[0]@.len() as int }
+}
+
 // flatten the rows of a MatrixSym
-fn matrixsym_flatten(mat : &MatrixSym) -> Matrix {
+// (the column-major matrix with one row per row of mat and one column per packed entry:
+// entry (r, pk_idx(j, i)) is mat[r][i][j])
+fn matrixsym_flatten(mat: &MatrixSym) -> (result: Matrix)
+    requires
+        symmap_shape(mat@, symmap_dim(mat@)),
+        dim_fits(symmap_dim(mat@)),
+        mat@.len() * (symmap_dim(mat@) * (symmap_dim(mat@) + 1)) <= usize::MAX,
+    ensures
+        result@.len() == mat@.len() * pk_len(symmap_dim(mat@)),
+        forall|r: int, i: int, j: int| 0 <= r < mat@.len() && 0 <= j <= i < symmap_dim(mat@)
+            ==> rv(#[trigger] result@[cm_idx(mat@.len() as int, r, pk_idx(j, i))]) == rv(mat@[r]@[i]@[j]),
+{
     let dim_c = mat.first().unwrap_or(&vec![]).len();
-    let mut result : Matrix = Vec::with_capacity(mat.len() * (dim_c * (dim_c + 1)) / 2);
-    for i in 0..dim_c {
-	for j in 0..=i {
-	    for row in mat {
-		result.push(row[i][j]);
-	    }
-	}
+    let ghost (dc, rows) = (dim_c as int, mat@.len() as int);
+    proof {
+        lemma_dim_fits_idx(dc, dc);
+        lemma_pk_col_start_zero();
+        assert(dc * (dc + 1) >= 0) by (nonlinear_arith)
+            requires dc >= 0;
+        assert(pk_len(dc) <= dc * (dc + 1));
+        assert(rows * pk_len(dc) <= rows * (dc * (dc + 1))) by (nonlinear_arith)
+            requires pk_len(dc) <= dc * (dc + 1), rows >= 0;
+    }
+    let mut result: Matrix = Vec::with_capacity(mat.len() * (dim_c * (dim_c + 1)) / 2);
+    for i in 0..dim_c
+        invariant
+            dc == dim_c as int,
+            rows == mat@.len() as int,
+            symmap_shape(mat@, dc),
+            dim_fits(dc),
+            rows * pk_len(dc) <= usize::MAX,
+            result@.len() == pk_col_start(i as int) * rows,
+            forall|r: int, i2: int, j: int| 0 <= r < rows && 0 <= j <= i2 < i
+                ==> rv(#[trigger] result@[cm_idx(rows, r, pk_idx(j, i2))]) == rv(mat@[r]@[i2]@[j]),
+    {
+        proof {
+            lemma_dim_fits_idx(dc, i as int);
+            lemma_pk_col_start_step(i as int);
+            lemma_pk_col_start_monotone(i as int + 1, dc);
+            // the entries filled so far are exactly those of the columns before pk_idx(0, i)
+            assert forall|r: int, i2: int, j2: int| 0 <= r < rows && 0 <= j2 <= i2 < dc && pk_idx(j2, i2) < pk_idx(0, i as int)
+                implies rv(#[trigger] result@[cm_idx(rows, r, pk_idx(j2, i2))]) == rv(mat@[r]@[i2]@[j2]) by {
+                lemma_pk_idx_order(j2, i2, 0, i as int);
+            }
+        }
+        for j in 0..=i
+            invariant
+                i < dim_c,
+                dc == dim_c as int,
+                rows == mat@.len() as int,
+                symmap_shape(mat@, dc),
+                rows * pk_len(dc) <= usize::MAX,
+                pk_col_start(i as int + 1) == pk_col_start(i as int) + i + 1,
+                pk_col_start(i as int + 1) <= pk_len(dc),
+                result@.len() == pk_idx(j as int, i as int) * rows,
+                forall|r: int, i2: int, j2: int| 0 <= r < rows && 0 <= j2 <= i2 < dc && pk_idx(j2, i2) < pk_idx(j as int, i as int)
+                    ==> rv(#[trigger] result@[cm_idx(rows, r, pk_idx(j2, i2))]) == rv(mat@[r]@[i2]@[j2]),
+        {
+            let ghost t = pk_idx(j as int, i as int);
+            proof {
+                assert((t + 1) * rows == t * rows + rows) by (nonlinear_arith);
+                assert((t + 1) * rows <= pk_len(dc) * rows) by (nonlinear_arith)
+                    requires t + 1 <= pk_len(dc), rows >= 0;
+                assert(pk_len(dc) * rows == rows * pk_len(dc)) by (nonlinear_arith);
+            }
+            for r in 0..mat.len()
+                invariant
+                    i < dim_c,
+                    j <= i,
+                    dc == dim_c as int,
+                    rows == mat@.len() as int,
+                    symmap_shape(mat@, dc),
+                    t == pk_idx(j as int, i as int),
+                    (t + 1) * rows == t * rows + rows,
+                    (t + 1) * rows <= usize::MAX,
+                    result@.len() == t * rows + r,
+                    forall|r2: int, i2: int, j2: int| 0 <= r2 < rows && 0 <= j2 <= i2 < dc && pk_idx(j2, i2) < t
+                        ==> rv(#[trigger] result@[cm_idx(rows, r2, pk_idx(j2, i2))]) == rv(mat@[r2]@[i2]@[j2]),
+                    forall|r2: int| 0 <= r2 < r ==> rv(#[trigger] result@[cm_idx(rows, r2, t)]) == rv(mat@[r2]@[i as int]@[j as int]),
+            {
+                let ghost prev = result@;
+                result.push(mat[r][i][j]);
+                proof {
+                    assert forall|r2: int, i2: int, j2: int| 0 <= r2 < rows && 0 <= j2 <= i2 < dc && pk_idx(j2, i2) < t
+                        implies rv(#[trigger] result@[cm_idx(rows, r2, pk_idx(j2, i2))]) == rv(mat@[r2]@[i2]@[j2]) by {
+                        lemma_cm_idx_bound(rows, r2, pk_idx(j2, i2), t);
+                        assert(result@[cm_idx(rows, r2, pk_idx(j2, i2))] == prev[cm_idx(rows, r2, pk_idx(j2, i2))]);
+                    }
+                    assert forall|r2: int| 0 <= r2 < r + 1
+                        implies rv(#[trigger] result@[cm_idx(rows, r2, t)]) == rv(mat@[r2]@[i as int]@[j as int]) by {
+                        if r2 < r {
+                            assert(result@[cm_idx(rows, r2, t)] == prev[cm_idx(rows, r2, t)]);
+                        }
+                    }
+                }
+            }
+            proof {
+                assert forall|r: int, i2: int, j2: int| 0 <= r < rows && 0 <= j2 <= i2 < dc && pk_idx(j2, i2) < t + 1
+                    implies rv(#[trigger] result@[cm_idx(rows, r, pk_idx(j2, i2))]) == rv(mat@[r]@[i2]@[j2]) by {
+                    if pk_idx(j2, i2) == t {
+                        lemma_pk_idx_injective(j2, i2, j as int, i as int);
+                    }
+                }
+            }
+        }
+        proof {
+            assert forall|r: int, i2: int, j: int| 0 <= r < rows && 0 <= j <= i2 < i + 1
+                implies rv(#[trigger] result@[cm_idx(rows, r, pk_idx(j, i2))]) == rv(mat@[r]@[i2]@[j]) by {
+                lemma_pk_idx_bound(j, i2, i as int + 1);
+                assert(pk_idx(j, i2) < pk_idx(i as int + 1, i as int));
+            }
+        }
+    }
+    proof {
+        assert(symmap_dim(mat@) == dc);
+        assert(pk_col_start(dc) * rows == rows * pk_len(dc)) by (nonlinear_arith)
+            requires pk_col_start(dc) == pk_len(dc);
     }
     result
 }
+
+} // verus!
 
 // converting a user-given SDP to one in standard form (c, A, b)
 // also stores the dimension of the final decision variable,
@@ -248,49 +377,216 @@ pub fn sdp_to_standard(sdp : &SDP, check_constraints : bool) ->
     }
 }
 
+verus! {
+
 // make an instance of MatrixSym with specified input dimension and size of output vector (i.e, number of constraints)
-pub fn mk_symmap(sym_dim : usize, output_size : usize, entries : Vector) -> MatrixSym {
-    let mut result = Vec::with_capacity(output_size);
+// (row k is the packed symmetric matrix stored at entries[k * pk_len(sym_dim) ..], in partitioned form)
+pub fn mk_symmap(sym_dim: usize, output_size: usize, entries: Vector) -> (result: MatrixSym)
+    requires
+        dim_fits(sym_dim as int),
+        entries@.len() >= output_size * pk_len(sym_dim as int),
+    ensures
+        result@.len() == output_size,
+        symmap_shape(result@, sym_dim as int),
+        forall|k: int, n: int, j: int| 0 <= k < output_size && 0 <= j <= n < sym_dim
+            ==> rv(#[trigger] result@[k]@[n]@[j]) == rv(entries@[k * pk_len(sym_dim as int) + pk_idx(j, n)]),
+{
+    let mut result: MatrixSym = Vec::with_capacity(output_size);
     let mut start = 0;
-    let (mut diff, mut offset);
+    let ghost (sd, tot) = (sym_dim as int, pk_len(sym_dim as int));
+    proof {
+        lemma_dim_fits_idx(sd, sd);
+        assert(entries.len() >= output_size * tot);
+        assert(0 * tot == 0) by (nonlinear_arith);
+    }
     let total = (sym_dim * (sym_dim + 1)) / 2;
-    for _ in 0..output_size {
-	let mut v = Vec::with_capacity(sym_dim);
-	diff = 0;
-	for n in 0..sym_dim {
-	    offset = start + diff;
-	    v.push(entries[offset..=offset + n].to_vec());
-	    diff += n + 1;
-	}
-	result.push(v);
-	start += total;
+    for _k in 0..output_size
+        invariant
+            sd == sym_dim as int,
+            tot == pk_len(sd),
+            total == tot,
+            dim_fits(sd),
+            entries@.len() >= output_size * tot,
+            start == _k * tot,
+            result@.len() == _k,
+            symmap_shape(result@, sd),
+            forall|k2: int, n: int, j: int| 0 <= k2 < _k && 0 <= j <= n < sd
+                ==> rv(#[trigger] result@[k2]@[n]@[j]) == rv(entries@[k2 * tot + pk_idx(j, n)]),
+    {
+        proof {
+            assert((_k + 1) * tot == _k * tot + tot) by (nonlinear_arith);
+            assert((_k + 1) * tot <= output_size * tot) by (nonlinear_arith)
+                requires _k + 1 <= output_size, tot >= 0;
+            lemma_pk_col_start_zero();
+        }
+        let mut v: Vec<Vector> = Vec::with_capacity(sym_dim);
+        let mut diff = 0;
+        for n in 0..sym_dim
+            invariant
+                sd == sym_dim as int,
+                tot == pk_len(sd),
+                dim_fits(sd),
+                entries@.len() >= output_size * tot,
+                _k < output_size,
+                start == _k * tot,
+                start as int + tot <= output_size * tot,
+                diff == pk_col_start(n as int),
+                part_shape(v@, n as int),
+                forall|n2: int, j: int| 0 <= j <= n2 < n ==> rv(#[trigger] v@[n2]@[j]) == rv(entries@[start + pk_idx(j, n2)]),
+        {
+            proof {
+                lemma_dim_fits_idx(sd, n as int);
+                lemma_pk_idx_bound(n as int, n as int, sd);
+                lemma_pk_col_start_step(n as int);
+                assert(entries.len() >= output_size * tot);
+            }
+            let offset = start + diff;
+            v.push(slice_to_vec(&entries[offset..=offset + n]));
+            diff += n + 1;
+        }
+        result.push(v);
+        proof {
+            assert(entries.len() >= output_size * tot);
+        }
+        start += total;
     }
     result
 }
 
 // zero MatrixSym
-pub fn zero_symmap(sym_dim : usize, output_size : usize) -> MatrixSym {
-    let mut result = Vec::with_capacity(output_size);
-    for _ in 0..output_size {
-	let mut v = Vec::with_capacity(sym_dim);
-	for n in 0..sym_dim {
-	    v.push(vec![0.0; n + 1]);
-	}
-	result.push(v);
+pub fn zero_symmap(sym_dim: usize, output_size: usize) -> (result: MatrixSym)
+    ensures
+        result@.len() == output_size,
+        symmap_shape(result@, sym_dim as int),
+        forall|k: int, n: int, j: int| 0 <= k < output_size && 0 <= j <= n < sym_dim
+            ==> rv(#[trigger] result@[k]@[n]@[j]) == 0.0real,
+{
+    let mut result: MatrixSym = Vec::with_capacity(output_size);
+    for _k in 0..output_size
+        invariant
+            result@.len() == _k,
+            symmap_shape(result@, sym_dim as int),
+            forall|k2: int, n: int, j: int| 0 <= k2 < _k && 0 <= j <= n < sym_dim
+                ==> rv(#[trigger] result@[k2]@[n]@[j]) == 0.0real,
+    {
+        let mut v: Vec<Vector> = Vec::with_capacity(sym_dim);
+        for n in 0..sym_dim
+            invariant
+                part_shape(v@, n as int),
+                forall|n2: int, j: int| 0 <= j <= n2 < n ==> rv(#[trigger] v@[n2]@[j]) == 0.0real,
+        {
+            v.push(vec![0.0; n + 1]);
+        }
+        result.push(v);
     }
     result
 }
 
+/// Row n * dim + i of the identity MatrixSym picks entry (min(n, i), max(n, i)): the map Z -> vec(Z).
+pub open spec fn ident_symmap_entry(n: int, i: int, c: int, r: int) -> real {
+    if c == (if n <= i { i } else { n }) && r == (if n <= i { n } else { i }) { 1.0real } else { 0.0real }
+}
+
 // identity MatrixSym
-pub fn ident_symmap(dim : usize) -> MatrixSym {
-    let mut result = Vec::new();
-    for n in 0..dim {
-	for i in 0..n {
-	    result.push(sym_matrix_proj(dim, i, n));
-	}
-	for i in n..dim {
-	    result.push(sym_matrix_proj(dim, n, i));
-	}
+pub fn ident_symmap(dim: usize) -> (result: MatrixSym)
+    requires
+        dim * dim <= usize::MAX,
+    ensures
+        result@.len() == dim * dim,
+        symmap_shape(result@, dim as int),
+        forall|n: int, i: int, c: int, r: int| 0 <= n < dim && 0 <= i < dim && 0 <= r <= c < dim
+            ==> rv(#[trigger] result@[n * dim + i]@[c]@[r]) == ident_symmap_entry(n, i, c, r),
+{
+    let mut result: MatrixSym = Vec::new();
+    let ghost d = dim as int;
+    for n in 0..dim
+        invariant
+            d == dim as int,
+            dim * dim <= usize::MAX,
+            result@.len() == n * d,
+            symmap_shape(result@, d),
+            forall|n2: int, i: int, c: int, r: int| 0 <= n2 < n && 0 <= i < d && 0 <= r <= c < d
+                ==> rv(#[trigger] result@[n2 * d + i]@[c]@[r]) == ident_symmap_entry(n2, i, c, r),
+    {
+        proof {
+            assert((n + 1) * d == n * d + d) by (nonlinear_arith);
+            assert((n + 1) * d <= d * d) by (nonlinear_arith)
+                requires n + 1 <= d;
+        }
+        for i in 0..n
+            invariant
+                n < dim,
+                d == dim as int,
+                (n + 1) * d == n * d + d,
+                (n + 1) * d <= d * d,
+                dim * dim <= usize::MAX,
+                result@.len() == n * d + i,
+                symmap_shape(result@, d),
+                forall|n2: int, i2: int, c: int, r: int| 0 <= n2 < n && 0 <= i2 < d && 0 <= r <= c < d
+                    ==> rv(#[trigger] result@[n2 * d + i2]@[c]@[r]) == ident_symmap_entry(n2, i2, c, r),
+                forall|i2: int, c: int, r: int| 0 <= i2 < i && 0 <= r <= c < d
+                    ==> rv(#[trigger] result@[n * d + i2]@[c]@[r]) == ident_symmap_entry(n as int, i2, c, r),
+        {
+            let ghost prev = result@;
+            result.push(sym_matrix_proj(dim, i, n));
+            proof {
+                assert forall|n2: int, i2: int, c: int, r: int| 0 <= n2 < n && 0 <= i2 < d && 0 <= r <= c < d
+                    implies rv(#[trigger] result@[n2 * d + i2]@[c]@[r]) == ident_symmap_entry(n2, i2, c, r) by {
+                    assert(n2 * d + d <= n * d) by (nonlinear_arith)
+                        requires n2 + 1 <= n, d >= 0;
+                    assert(result@[n2 * d + i2] == prev[n2 * d + i2]);
+                }
+                assert forall|i2: int, c: int, r: int| 0 <= i2 < i + 1 && 0 <= r <= c < d
+                    implies rv(#[trigger] result@[n * d + i2]@[c]@[r]) == ident_symmap_entry(n as int, i2, c, r) by {
+                    if i2 < i {
+                        assert(result@[n * d + i2] == prev[n * d + i2]);
+                    }
+                }
+            }
+        }
+        for i in n..dim
+            invariant
+                n < dim,
+                n <= i,
+                d == dim as int,
+                (n + 1) * d == n * d + d,
+                (n + 1) * d <= d * d,
+                dim * dim <= usize::MAX,
+                result@.len() == n * d + i,
+                symmap_shape(result@, d),
+                forall|n2: int, i2: int, c: int, r: int| 0 <= n2 < n && 0 <= i2 < d && 0 <= r <= c < d
+                    ==> rv(#[trigger] result@[n2 * d + i2]@[c]@[r]) == ident_symmap_entry(n2, i2, c, r),
+                forall|i2: int, c: int, r: int| 0 <= i2 < i && 0 <= r <= c < d
+                    ==> rv(#[trigger] result@[n * d + i2]@[c]@[r]) == ident_symmap_entry(n as int, i2, c, r),
+        {
+            let ghost prev = result@;
+            result.push(sym_matrix_proj(dim, n, i));
+            proof {
+                assert forall|n2: int, i2: int, c: int, r: int| 0 <= n2 < n && 0 <= i2 < d && 0 <= r <= c < d
+                    implies rv(#[trigger] result@[n2 * d + i2]@[c]@[r]) == ident_symmap_entry(n2, i2, c, r) by {
+                    assert(n2 * d + d <= n * d) by (nonlinear_arith)
+                        requires n2 + 1 <= n, d >= 0;
+                    assert(result@[n2 * d + i2] == prev[n2 * d + i2]);
+                }
+                assert forall|i2: int, c: int, r: int| 0 <= i2 < i + 1 && 0 <= r <= c < d
+                    implies rv(#[trigger] result@[n * d + i2]@[c]@[r]) == ident_symmap_entry(n as int, i2, c, r) by {
+                    if i2 < i {
+                        assert(result@[n * d + i2] == prev[n * d + i2]);
+                    }
+                }
+            }
+        }
+        proof {
+            assert forall|n2: int, i: int, c: int, r: int| 0 <= n2 < n + 1 && 0 <= i < d && 0 <= r <= c < d
+                implies rv(#[trigger] result@[n2 * d + i]@[c]@[r]) == ident_symmap_entry(n2, i, c, r) by {
+                if n2 < n {
+                    assert(n2 * d + d <= n * d) by (nonlinear_arith)
+                        requires n2 + 1 <= n, d >= 0;
+                }
+            }
+        }
     }
     result
 }
+
+} // verus!

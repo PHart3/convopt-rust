@@ -815,47 +815,437 @@ pub fn sym_matrix_diagonal(dim: usize) -> (result: Matrix)
 
 } // verus!
 
+verus! {
+
 // composition with diagonal block map
-pub fn matrix_diagonal_mult_sym(sym_dim : usize, mat : &Matrix, start : usize, dim : usize) -> Matrix {
-    let mut result : Matrix = Vec::new();
+// (mat is a row_dim x pk_len(dim) column-major matrix acting on dim x dim symmetric matrices;
+// the result is the row_dim x pk_len(sym_dim) matrix of the composition with the embedding
+// of such a matrix as the diagonal block at `start` of a sym_dim x sym_dim matrix: column
+// pk_idx(start + a, start + b) is column pk_idx(a, b) of mat, every other column is zero)
+pub fn matrix_diagonal_mult_sym(sym_dim: usize, mat: &Matrix, start: usize, dim: usize) -> (result: Matrix)
+    requires
+        dim_fits(sym_dim as int),
+        start + dim <= sym_dim,
+        dim >= 1 ==> (mat@.len() as int) % pk_len(dim as int) == 0,
+        dim >= 1 ==> ((mat@.len() as int) / pk_len(dim as int)) * pk_len(sym_dim as int) <= usize::MAX,
+    ensures
+        dim == 0 ==> result@.len() == 0,
+        dim >= 1 ==> {
+            let row_dim = (mat@.len() as int) / pk_len(dim as int);
+            &&& result@.len() == row_dim * pk_len(sym_dim as int)
+            &&& forall|r: int, a: int, b: int| 0 <= r < row_dim && 0 <= a <= b < dim
+                    ==> rv(#[trigger] result@[cm_idx(row_dim, r, pk_idx(start + a, start + b))]) == rv(mat@[cm_idx(row_dim, r, pk_idx(a, b))])
+            &&& forall|r: int, t: int| 0 <= r < row_dim && 0 <= t < pk_len(sym_dim as int) && !is_block_idx(t, start as int, dim as int)
+                    ==> rv(#[trigger] result@[cm_idx(row_dim, r, t)]) == 0.0real
+        },
+{
+    let mut result: Matrix = Vec::new();
+    proof {
+        lemma_dim_fits_monotone((start + dim) as int, sym_dim as int);
+        lemma_dim_fits_idx(sym_dim as int, sym_dim as int);
+        lemma_pk_col_start_zero();
+    }
     let ones = sym_matrix_diag_block_map(start, dim);
     if ones.is_empty() {
-	return result;
+        proof {
+            if dim >= 1 {
+                lemma_pk_idx_bound(0, 0, dim as int);
+            }
+        }
+        return result;
     }
     let row_dim = mat.len() / ones.len();
-    let (mut offset, mut i) = (0, 0);
-    for c in ones {
-	for _ in offset..c {
-	    result.extend(vec![0.0; row_dim]);
-	}
-	result.extend_from_slice(&mat[i * row_dim..(i + 1) * row_dim]);
-	offset = c + 1;
-	i += 1;
+    let ghost (sd, st, d, rd) = (sym_dim as int, start as int, dim as int, row_dim as int);
+    proof {
+        if dim == 0 {
+            lemma_pk_col_start_zero();
+        }
+        lemma_fundamental_div_mod(mat@.len() as int, pk_len(d));
+        assert(pk_len(d) * rd == rd * pk_len(d)) by (nonlinear_arith);
+        assert(mat@.len() == rd * pk_len(d));
     }
-    for _ in offset..((sym_dim * (sym_dim + 1)) / 2) {
-	result.extend(vec![0.0; row_dim]);
+    let mut offset = 0;
+    let mut i = 0;
+    let ghost mut ga: int = 0;
+    let ghost mut gb: int = 0;
+    while i < ones.len()
+        invariant
+            sd == sym_dim as int,
+            st == start as int,
+            d == dim as int,
+            rd == row_dim as int,
+            dim >= 1,
+            st + d <= sd,
+            dim_fits(sd),
+            pk_len(sd) <= usize::MAX,
+            rd * pk_len(sd) <= usize::MAX,
+            mat@.len() == rd * pk_len(d),
+            ones@.len() == pk_len(d),
+            forall|a: int, b: int| 0 <= a <= b < d ==> #[trigger] ones@[pk_idx(a, b)] == pk_idx(st + a, st + b),
+            i <= ones@.len(),
+            0 <= ga <= gb,
+            i == pk_idx(ga, gb),
+            i < ones@.len() ==> gb < d,
+            i == ones@.len() ==> ga == 0 && gb == d,
+            offset == block_prev_end(st, ga, gb),
+            offset <= pk_len(sd),
+            result@.len() == offset * rd,
+            forall|r: int, a: int, b: int| 0 <= r < rd && 0 <= a <= b < d && pk_idx(a, b) < i
+                ==> rv(#[trigger] result@[cm_idx(rd, r, pk_idx(st + a, st + b))]) == rv(mat@[cm_idx(rd, r, pk_idx(a, b))]),
+            forall|r: int, t: int| 0 <= r < rd && 0 <= t < offset && !is_block_idx(t, st, d)
+                ==> rv(#[trigger] result@[cm_idx(rd, r, t)]) == 0.0real,
+        decreases ones@.len() - i,
+    {
+        let c = ones[i];
+        proof {
+            assert(ones@[pk_idx(ga, gb)] == pk_idx(st + ga, st + gb));
+            lemma_pk_idx_bound(st + ga, st + gb, sd);
+            lemma_block_prev_end_le(st, ga, gb);
+            assert(mat.len() == rd * pk_len(d));
+        }
+        // zero columns between the previous block entry and this one
+        let ghost before = result@;
+        for _z in offset..c
+            invariant
+                rd == row_dim as int,
+                st == start as int,
+                d == dim as int,
+                0 <= ga <= gb < d,
+                offset <= _z <= c,
+                c == pk_idx(st + ga, st + gb),
+                offset == block_prev_end(st, ga, gb),
+                c < pk_len(sd),
+                rd * pk_len(sd) <= usize::MAX,
+                result@.len() == _z * rd,
+                before.len() == offset * rd,
+                forall|q: int| 0 <= q < before.len() ==> #[trigger] result@[q] == before[q],
+                forall|r: int, t: int| 0 <= r < rd && offset <= t < _z ==> rv(#[trigger] result@[cm_idx(rd, r, t)]) == 0.0real,
+        {
+            proof {
+                assert((_z + 1) * rd == _z * rd + rd) by (nonlinear_arith);
+                assert(offset * rd <= _z * rd) by (nonlinear_arith)
+                    requires offset <= _z, rd >= 0;
+            }
+            let mut zeros = vec![0.0; row_dim];
+            let ghost prev = result@;
+            result.append(&mut zeros);
+            proof {
+                assert forall|r: int, t: int| 0 <= r < rd && offset <= t < _z + 1
+                    implies rv(#[trigger] result@[cm_idx(rd, r, t)]) == 0.0real by {
+                    lemma_cm_idx_bound(rd, r, t, _z as int + 1);
+                    if t < _z {
+                        lemma_cm_idx_bound(rd, r, t, _z as int);
+                        assert(result@[cm_idx(rd, r, t)] == prev[cm_idx(rd, r, t)]);
+                    }
+                }
+                assert forall|q: int| 0 <= q < before.len() implies #[trigger] result@[q] == before[q] by {
+                    assert(result@[q] == prev[q]);
+                }
+            }
+        }
+        // column pk_idx(a, b) of mat becomes column c
+        proof {
+            assert((i + 1) * rd == i * rd + rd) by (nonlinear_arith);
+            assert(i * rd + rd <= pk_len(d) * rd) by (nonlinear_arith)
+                requires i + 1 <= pk_len(d), rd >= 0;
+            assert(rd * pk_len(d) == pk_len(d) * rd) by (nonlinear_arith);
+            assert((c + 1) * rd == c * rd + rd) by (nonlinear_arith);
+            assert(offset * rd <= c * rd) by (nonlinear_arith)
+                requires offset <= c, rd >= 0;
+        }
+        let ghost mid = result@;
+        result.extend_from_slice(&mat[i * row_dim..(i + 1) * row_dim]);
+        proof {
+            let cur = result@;
+            let ii = i as int;
+            // the new column
+            assert forall|r: int| 0 <= r < rd
+                implies rv(#[trigger] cur[cm_idx(rd, r, c as int)]) == rv(mat@[cm_idx(rd, r, ii)]) by {
+                assert(cur[c * rd + r] == mat@.subrange(ii * rd, (ii + 1) * rd)[r]);
+            }
+            // the gap columns are outside the block
+            assert forall|t: int| offset <= t < c implies !is_block_idx(t, st, d) by {
+                lemma_block_idx_gap(st, d, ga, gb, t);
+            }
+            // earlier block columns and zero columns are unchanged
+            assert forall|r: int, a: int, b: int| 0 <= r < rd && 0 <= a <= b < d && pk_idx(a, b) < i + 1
+                implies rv(#[trigger] cur[cm_idx(rd, r, pk_idx(st + a, st + b))]) == rv(mat@[cm_idx(rd, r, pk_idx(a, b))]) by {
+                if pk_idx(a, b) < ii {
+                    lemma_block_prev_end_bound(st, a, b, ga, gb);
+                    lemma_cm_idx_bound(rd, r, pk_idx(st + a, st + b), offset as int);
+                    let q = cm_idx(rd, r, pk_idx(st + a, st + b));
+                    assert(cur[q] == mid[q]);
+                    assert(mid[q] == before[q]);
+                } else {
+                    assert(pk_idx(a, b) == ii);
+                    lemma_pk_idx_injective(a, b, ga, gb);
+                }
+            }
+            assert forall|r: int, t: int| 0 <= r < rd && 0 <= t < c + 1 && !is_block_idx(t, st, d)
+                implies rv(#[trigger] cur[cm_idx(rd, r, t)]) == 0.0real by {
+                lemma_cm_idx_bound(rd, r, t, c as int);
+                let q = cm_idx(rd, r, t);
+                assert(cur[q] == mid[q]);
+                if t < offset {
+                    lemma_cm_idx_bound(rd, r, t, offset as int);
+                    assert(mid[q] == before[q]);
+                }
+            }
+            // the block entry (ga, gb) is followed by (ga + 1, gb) or (0, gb + 1)
+            lemma_pk_col_start_step(gb);
+            if ga < gb {
+                ga = ga + 1;
+            } else {
+                ga = 0;
+                gb = gb + 1;
+            }
+            if gb < d {
+                lemma_pk_idx_bound(ga, gb, d);
+            }
+        }
+        offset = c + 1;
+        i += 1;
+    }
+    // zero columns after the block
+    let ghost before = result@;
+    proof {
+        lemma_dim_fits_idx(sd, sd);
+        lemma_block_prev_end_le(st, 0, d);
+        lemma_pk_idx_bound(st + d - 1, st + d - 1, sd);
+    }
+    for _z in offset..((sym_dim * (sym_dim + 1)) / 2)
+        invariant
+            rd == row_dim as int,
+            st == start as int,
+            d == dim as int,
+            dim >= 1,
+            sd == sym_dim as int,
+            dim_fits(sd),
+            pk_len(sd) <= usize::MAX,
+            rd * pk_len(sd) <= usize::MAX,
+            offset == block_prev_end(st, 0, d),
+            offset <= _z <= pk_len(sd),
+            result@.len() == _z * rd,
+            before.len() == offset * rd,
+            forall|q: int| 0 <= q < before.len() ==> #[trigger] result@[q] == before[q],
+            forall|r: int, t: int| 0 <= r < rd && offset <= t < _z ==> rv(#[trigger] result@[cm_idx(rd, r, t)]) == 0.0real,
+    {
+        proof {
+            assert((_z + 1) * rd == _z * rd + rd) by (nonlinear_arith);
+            assert(offset * rd <= _z * rd) by (nonlinear_arith)
+                requires offset <= _z, rd >= 0;
+        }
+        let mut zeros = vec![0.0; row_dim];
+        let ghost prev = result@;
+        result.append(&mut zeros);
+        proof {
+            assert forall|r: int, t: int| 0 <= r < rd && offset <= t < _z + 1
+                implies rv(#[trigger] result@[cm_idx(rd, r, t)]) == 0.0real by {
+                lemma_cm_idx_bound(rd, r, t, _z as int + 1);
+                if t < _z {
+                    lemma_cm_idx_bound(rd, r, t, _z as int);
+                    assert(result@[cm_idx(rd, r, t)] == prev[cm_idx(rd, r, t)]);
+                }
+            }
+            assert forall|q: int| 0 <= q < before.len() implies #[trigger] result@[q] == before[q] by {
+                assert(result@[q] == prev[q]);
+            }
+        }
+    }
+    proof {
+        let cur = result@;
+        assert forall|r: int, a: int, b: int| 0 <= r < rd && 0 <= a <= b < d
+            implies rv(#[trigger] result@[cm_idx(rd, r, pk_idx(st + a, st + b))]) == rv(mat@[cm_idx(rd, r, pk_idx(a, b))]) by {
+            lemma_pk_idx_bound(a, b, d);
+            lemma_block_prev_end_bound(st, a, b, 0, d);
+            lemma_cm_idx_bound(rd, r, pk_idx(st + a, st + b), offset as int);
+            let q = cm_idx(rd, r, pk_idx(st + a, st + b));
+            assert(cur[q] == before[q]);
+            assert(rv(before[q]) == rv(mat@[cm_idx(rd, r, pk_idx(a, b))]));
+        }
+        assert forall|r: int, t: int| 0 <= r < rd && 0 <= t < pk_len(sd) && !is_block_idx(t, st, d)
+            implies rv(#[trigger] result@[cm_idx(rd, r, t)]) == 0.0real by {
+            if t < offset {
+                lemma_cm_idx_bound(rd, r, t, offset as int);
+                let q = cm_idx(rd, r, t);
+                assert(cur[q] == before[q]);
+                assert(rv(before[q]) == 0.0real);
+            }
+        }
+        // the postcondition's row count is the integer quotient
+        let rdp = (mat@.len() as int) / pk_len(dim as int);
+        assert(rdp == rd);
+        assert(pk_len(sd) * rd == rd * pk_len(sd)) by (nonlinear_arith);
+        assert(result@.len() == rdp * pk_len(sym_dim as int));
+        assert forall|r: int, a: int, b: int| 0 <= r < rdp && 0 <= a <= b < dim
+            implies rv(#[trigger] result@[cm_idx(rdp, r, pk_idx(start + a, start + b))]) == rv(mat@[cm_idx(rdp, r, pk_idx(a, b))]) by {
+            assert(rv(result@[cm_idx(rd, r, pk_idx(st + a, st + b))]) == rv(mat@[cm_idx(rd, r, pk_idx(a, b))]));
+        }
+        assert forall|r: int, t: int| 0 <= r < rdp && 0 <= t < pk_len(sym_dim as int) && !is_block_idx(t, start as int, dim as int)
+            implies rv(#[trigger] result@[cm_idx(rdp, r, t)]) == 0.0real by {
+            assert(rv(result@[cm_idx(rd, r, t)]) == 0.0real);
+        }
     }
     result
 }
 
 // composition of real-valued linear map on symmetric matrices with diagonal block map
-pub fn mat_sym_diagonal_mult_sym(sym_dim : usize, mat : &SymMatrix, start : usize, dim : usize) -> SymMatrix {
-    let mut result : SymMatrix = Vec::new();
-    let ones = sym_matrix_diag_block_map(start, dim);
-    let (mut offset, mut i) = (0, 0);
-    for c in ones {
-	for _ in offset..c {
-	    result.push(0.0);
-	}
-	result.push(mat[i]);
-	offset = c + 1;
-	i += 1;
+// (the packed dim x dim matrix mat embedded as the diagonal block at `start` of a packed
+// sym_dim x sym_dim matrix: entry (start + a, start + b) is entry (a, b) of mat, the rest is zero)
+pub fn mat_sym_diagonal_mult_sym(sym_dim: usize, mat: &SymMatrix, start: usize, dim: usize) -> (result: SymMatrix)
+    requires
+        dim_fits(sym_dim as int),
+        start + dim <= sym_dim,
+        mat@.len() >= pk_len(dim as int),
+    ensures
+        result@.len() == pk_len(sym_dim as int),
+        forall|a: int, b: int| 0 <= a <= b < dim
+            ==> rv(#[trigger] result@[pk_idx(start + a, start + b)]) == rv(mat@[pk_idx(a, b)]),
+        forall|t: int| 0 <= t < pk_len(sym_dim as int) && !is_block_idx(t, start as int, dim as int)
+            ==> rv(#[trigger] result@[t]) == 0.0real,
+{
+    let mut result: SymMatrix = Vec::new();
+    proof {
+        lemma_dim_fits_monotone((start + dim) as int, sym_dim as int);
+        lemma_dim_fits_idx(sym_dim as int, sym_dim as int);
+        lemma_pk_col_start_zero();
     }
-    for _ in offset..((sym_dim * (sym_dim + 1)) / 2) {
-	result.push(0.0);
+    let ones = sym_matrix_diag_block_map(start, dim);
+    let ghost (sd, st, d) = (sym_dim as int, start as int, dim as int);
+    proof {
+        if dim >= 1 {
+            lemma_pk_idx_bound(0, 0, d);
+        }
+    }
+    let mut offset = 0;
+    let mut i = 0;
+    let ghost mut ga: int = 0;
+    let ghost mut gb: int = 0;
+    while i < ones.len()
+        invariant
+            sd == sym_dim as int,
+            st == start as int,
+            d == dim as int,
+            st + d <= sd,
+            dim_fits(sd),
+            pk_len(sd) <= usize::MAX,
+            mat@.len() >= pk_len(d),
+            ones@.len() == pk_len(d),
+            forall|a: int, b: int| 0 <= a <= b < d ==> #[trigger] ones@[pk_idx(a, b)] == pk_idx(st + a, st + b),
+            i <= ones@.len(),
+            0 <= ga <= gb,
+            i == pk_idx(ga, gb),
+            i < ones@.len() ==> gb < d,
+            i == ones@.len() ==> ga == 0 && gb == d,
+            offset == block_prev_end(st, ga, gb),
+            offset <= pk_len(sd),
+            result@.len() == offset,
+            forall|a: int, b: int| 0 <= a <= b < d && pk_idx(a, b) < i
+                ==> rv(#[trigger] result@[pk_idx(st + a, st + b)]) == rv(mat@[pk_idx(a, b)]),
+            forall|t: int| 0 <= t < offset && !is_block_idx(t, st, d) ==> rv(#[trigger] result@[t]) == 0.0real,
+        decreases ones@.len() - i,
+    {
+        let c = ones[i];
+        proof {
+            assert(ones@[pk_idx(ga, gb)] == pk_idx(st + ga, st + gb));
+            lemma_pk_idx_bound(st + ga, st + gb, sd);
+            lemma_pk_idx_bound(ga, gb, d);
+            lemma_block_prev_end_le(st, ga, gb);
+        }
+        let ghost before = result@;
+        for _z in offset..c
+            invariant
+                offset <= _z <= c,
+                result@.len() == _z,
+                before.len() == offset,
+                forall|q: int| 0 <= q < offset ==> #[trigger] result@[q] == before[q],
+                forall|t: int| offset <= t < _z ==> rv(#[trigger] result@[t]) == 0.0real,
+        {
+            result.push(0.0);
+        }
+        let ghost mid = result@;
+        result.push(mat[i]);
+        proof {
+            let cur = result@;
+            assert forall|t: int| offset <= t < c implies !is_block_idx(t, st, d) by {
+                lemma_block_idx_gap(st, d, ga, gb, t);
+            }
+            assert forall|a: int, b: int| 0 <= a <= b < d && pk_idx(a, b) < i + 1
+                implies rv(#[trigger] cur[pk_idx(st + a, st + b)]) == rv(mat@[pk_idx(a, b)]) by {
+                if pk_idx(a, b) < i {
+                    lemma_block_prev_end_bound(st, a, b, ga, gb);
+                    let q = pk_idx(st + a, st + b);
+                    assert(cur[q] == mid[q]);
+                    assert(mid[q] == before[q]);
+                } else {
+                    lemma_pk_idx_injective(a, b, ga, gb);
+                }
+            }
+            assert forall|t: int| 0 <= t < c + 1 && !is_block_idx(t, st, d)
+                implies rv(#[trigger] cur[t]) == 0.0real by {
+                assert(cur[t] == mid[t]);
+                if t < offset {
+                    assert(mid[t] == before[t]);
+                }
+            }
+            lemma_pk_col_start_step(gb);
+            if ga < gb {
+                ga = ga + 1;
+            } else {
+                ga = 0;
+                gb = gb + 1;
+            }
+            if gb < d {
+                lemma_pk_idx_bound(ga, gb, d);
+            }
+        }
+        offset = c + 1;
+        i += 1;
+    }
+    let ghost before = result@;
+    proof {
+        lemma_block_prev_end_le(st, 0, d);
+        if dim >= 1 {
+            lemma_pk_idx_bound(st + d - 1, st + d - 1, sd);
+        }
+        lemma_dim_fits_idx(sd, sd);
+    }
+    for _z in offset..((sym_dim * (sym_dim + 1)) / 2)
+        invariant
+            st == start as int,
+            d == dim as int,
+            sd == sym_dim as int,
+            dim_fits(sd),
+            offset == block_prev_end(st, 0, d),
+            offset <= _z <= pk_len(sd),
+            result@.len() == _z,
+            before.len() == offset,
+            forall|q: int| 0 <= q < offset ==> #[trigger] result@[q] == before[q],
+            forall|t: int| offset <= t < _z ==> rv(#[trigger] result@[t]) == 0.0real,
+    {
+        result.push(0.0);
+    }
+    proof {
+        assert forall|a: int, b: int| 0 <= a <= b < d
+            implies rv(#[trigger] result@[pk_idx(st + a, st + b)]) == rv(mat@[pk_idx(a, b)]) by {
+            lemma_pk_idx_bound(a, b, d);
+            lemma_block_prev_end_bound(st, a, b, 0, d);
+            let q = pk_idx(st + a, st + b);
+            assert(result@[q] == before[q]);
+            assert(rv(before[q]) == rv(mat@[pk_idx(a, b)]));
+        }
+        assert forall|t: int| 0 <= t < pk_len(sd) && !is_block_idx(t, st, d)
+            implies rv(#[trigger] result@[t]) == 0.0real by {
+            if t < offset {
+                assert(result@[t] == before[t]);
+                assert(rv(before[t]) == 0.0real);
+            }
+        }
     }
     result
 }
+
+} // verus!
 
 // removes redundant constraints from an augmented matrix [A | b] where rows of A represent symmetric matrices
 // also preconditions resulting constraint matrix by normalizing rows
@@ -1493,29 +1883,6 @@ pub fn diag_scale_gram(d: &Vector, q: &Matrix) -> (result: SymMatrix)
 
 } // verus!
 
-// check whether a block-diagonal symmetric matrix S is positive semidefinite by running LDLT on S + eps * I
-pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool {
-    let (mut eps, mut idx) : (f64, usize);
-    for (start, dim) in blocks {
-	let block = sym_matrix_diag_block(*start, *dim, mat);
-	eps = 1e-9 * max_diag_sym(&block, *dim).max(1.0);
-	let mut block_add_scal : SymMatrix = Vec::new();
-	idx = 0;
-	for c in 0..*dim {
-	    for _ in 0..c {
-		block_add_scal.push(block[idx]);
-		idx += 1;
-	    }
-	    block_add_scal.push(block[idx] + eps);
-	    idx += 1;
-	}
-	if ldlt_decomp(&block_add_scal, *dim).is_none() {
-	    return false
-	}
-    }
-    true
-}
-
 verus! {
 
 // Pivot scale of the solvers: max(max_t |mat[t]|, 1) over the whole stored matrix.
@@ -2038,65 +2405,317 @@ pub fn pos_def_solver_upperleft(mat: &SymMatrix, vect: &mut Vector, id_len: usiz
     result
 }
 
+// check whether a block-diagonal symmetric matrix S is positive semidefinite by running LDLT on S + eps * I
+// (a successful check establishes B >= -eps I for every listed diagonal block B, with
+// eps = 1e-9 * max(max_i |B_ii|, 1), because the factorization B + eps I = L D L^T has
+// positive pivots; nothing is claimed when the check fails)
+pub fn psd_block_check(mat: &SymMatrix, blocks: &Vec<(usize, usize)>) -> (result: bool)
+    requires
+        blocks_fit(blocks@, mat@.len()),
+    ensures
+        result ==> forall|b: int| 0 <= b < blocks@.len()
+            ==> #[trigger] block_psd_ok(rvs(mat@), blocks@[b].0 as int, blocks@[b].1 as int),
+{
+    let ghost a = rvs(mat@);
+    for b in 0..blocks.len()
+        invariant
+            a == rvs(mat@),
+            blocks_fit(blocks@, mat@.len()),
+            forall|t: int| 0 <= t < b ==> #[trigger] block_psd_ok(a, blocks@[t].0 as int, blocks@[t].1 as int),
+    {
+        let (start, dim) = blocks[b];
+        proof {
+            let n = start as int + dim as int;
+            assert(n + 2 <= (n + 2) * (n + 2)) by (nonlinear_arith)
+                requires n >= 0;
+            lemma_dim_fits_monotone(dim as int, n);
+        }
+        let block = sym_matrix_diag_block(start, dim, mat);
+        let eps = 1e-9 * max_diag_sym(&block, dim).max(1.0);
+        // block + eps * I in packed form
+        let mut block_add_scal: SymMatrix = Vec::new();
+        let mut idx = 0;
+        proof {
+            lemma_pk_col_start_zero();
+        }
+        for c in 0..dim
+            invariant
+                dim_fits(dim as int),
+                block@.len() == pk_len(dim as int),
+                idx == pk_col_start(c as int),
+                block_add_scal@.len() == idx,
+                forall|r: int, c2: int| 0 <= r < c2 < c
+                    ==> rv(#[trigger] block_add_scal@[pk_idx(r, c2)]) == rv(block@[pk_idx(r, c2)]),
+                forall|c2: int| 0 <= c2 < c
+                    ==> rv(#[trigger] block_add_scal@[pk_idx(c2, c2)]) == rv(block@[pk_idx(c2, c2)]) + rv(eps),
+        {
+            proof {
+                lemma_dim_fits_idx(dim as int, c as int);
+            }
+            for _r in 0..c
+                invariant
+                    c < dim,
+                    dim_fits(dim as int),
+                    pk_col_start(c as int + 1) <= usize::MAX,
+                    block@.len() == pk_len(dim as int),
+                    idx == pk_col_start(c as int) + _r,
+                    block_add_scal@.len() == idx,
+                    forall|r2: int, c2: int| 0 <= r2 < c2 < c
+                        ==> rv(#[trigger] block_add_scal@[pk_idx(r2, c2)]) == rv(block@[pk_idx(r2, c2)]),
+                    forall|c2: int| 0 <= c2 < c
+                        ==> rv(#[trigger] block_add_scal@[pk_idx(c2, c2)]) == rv(block@[pk_idx(c2, c2)]) + rv(eps),
+                    forall|r2: int| 0 <= r2 < _r
+                        ==> rv(#[trigger] block_add_scal@[pk_idx(r2, c as int)]) == rv(block@[pk_idx(r2, c as int)]),
+            {
+                proof {
+                    lemma_pk_idx_bound(_r as int, c as int, dim as int);
+                }
+                block_add_scal.push(block[idx]);
+                idx += 1;
+                proof {
+                    assert forall|r2: int, c2: int| 0 <= r2 < c2 < c
+                        implies rv(#[trigger] block_add_scal@[pk_idx(r2, c2)]) == rv(block@[pk_idx(r2, c2)]) by {
+                        lemma_pk_idx_bound(r2, c2, c as int);
+                    }
+                    assert forall|c2: int| 0 <= c2 < c
+                        implies rv(#[trigger] block_add_scal@[pk_idx(c2, c2)]) == rv(block@[pk_idx(c2, c2)]) + rv(eps) by {
+                        lemma_pk_idx_bound(c2, c2, c as int);
+                    }
+                }
+            }
+            proof {
+                lemma_pk_idx_bound(c as int, c as int, dim as int);
+            }
+            block_add_scal.push(block[idx] + eps);
+            idx += 1;
+            proof {
+                lemma_pk_col_start_step(c as int);
+                assert forall|r2: int, c2: int| 0 <= r2 < c2 < c
+                    implies rv(#[trigger] block_add_scal@[pk_idx(r2, c2)]) == rv(block@[pk_idx(r2, c2)]) by {
+                    lemma_pk_idx_bound(r2, c2, c as int);
+                }
+                assert forall|c2: int| 0 <= c2 < c
+                    implies rv(#[trigger] block_add_scal@[pk_idx(c2, c2)]) == rv(block@[pk_idx(c2, c2)]) + rv(eps) by {
+                    lemma_pk_idx_bound(c2, c2, c as int);
+                }
+            }
+        }
+        let fact = ldlt_decomp(&block_add_scal, dim);
+        if fact.is_none() {
+            return false;
+        }
+        proof {
+            let n = dim as int;
+            let (l, d) = fact->Some_0;
+            let (bv, sv, dv) = (rvs(block@), rvs(block_add_scal@), rvs(d@));
+            let shifted = madd(sym_view(bv), mscale(rv(eps), mident()));
+            // the stored shifted block is B + eps I, and B is the block of the full matrix
+            assert forall|r: int, c: int| 0 <= r < n && 0 <= c < n
+                implies #[trigger] sym_view(sv)(r, c) == shifted(r, c) by {
+                let (lo, hi) = if r <= c { (r, c) } else { (c, r) };
+                lemma_pk_idx_bound(lo, hi, n);
+                assert(sym_entry(sv, r, c) == rv(block_add_scal@[pk_idx(lo, hi)]));
+                assert(sym_entry(bv, r, c) == rv(block@[pk_idx(lo, hi)]));
+                if r == c {
+                    assert(shifted(r, c) == sym_entry(bv, r, c) + rv(eps) * 1.0real);
+                } else {
+                    assert(shifted(r, c) == sym_entry(bv, r, c) + rv(eps) * 0.0real);
+                }
+            }
+            assert forall|r: int, c: int| 0 <= r < n && 0 <= c < n
+                implies #[trigger] sym_view(bv)(r, c) == block_view(a, start as int)(r, c) by {
+                let (lo, hi) = if r <= c { (r, c) } else { (c, r) };
+                lemma_pk_idx_bound(lo, hi, n);
+                lemma_pk_idx_bound(start + lo, start + hi, start as int + n);
+                assert(sym_entry(bv, r, c) == rv(block@[pk_idx(lo, hi)]));
+                assert(sym_entry(a, start + r, start + c) == rv(mat@[pk_idx(start + lo, start + hi)]));
+            }
+            // positive pivots: d_k >= TOL * max(.., 1) >= TOL > 0
+            assert forall|k: int| 0 <= k < n implies #[trigger] dv[k] >= 0.0real by {
+                let scale = max_r(max_abs_diag_r(sv, n), 1.0real);
+                assert(rv(TOL) * scale >= rv(TOL)) by (nonlinear_arith)
+                    requires scale >= 1.0real, rv(TOL) > 0.0real;
+            }
+            lemma_meq_trans(mmul(mmul(lt_view(rvs(l@), n), diag_view(dv), n), mtr(lt_view(rvs(l@), n)), n), sym_view(sv), shifted, n, n);
+            lemma_shifted_factorization_psd(sym_view(bv), lt_view(rvs(l@), n), dv, n, rv(eps));
+            lemma_psd_shifted_meq(sym_view(bv), block_view(a, start as int), n, rv(eps));
+            if dim >= 1 {
+                assert forall|i: int| 0 <= i < n
+                    implies #[trigger] sym_diag(bv, i) == sym_entry(a, start + i, start + i) by {
+                    lemma_pk_idx_bound(i, i, n);
+                    lemma_pk_idx_bound(start + i, start + i, start as int + n);
+                }
+                lemma_block_max_abs_diag(bv, a, start as int, n);
+            } else {
+                lemma_psd_shifted_zero_dim(block_view(a, start as int), psd_check_eps_r(a, start as int, n));
+            }
+            assert(block_psd_ok(a, start as int, dim as int));
+        }
+    }
+    true
+}
+
 } // verus!
 
-/* some functions producing real-valued linear maps represented as partitioned vectors that act on n-dimensional symmetric matrices */
+/* some functions producing real-valued linear maps represented as partitioned vectors that act on n-dimensional symmetric matrices
+   (a dim x dim symmetric matrix partitioned by the columns of its upper triangle: part_shape in sym_spec.rs) */
 
-pub fn mk_symmap_real(dim : usize, vect : &Vector) -> Vec<Vector> {
+verus! {
+
+// the packed symmetric matrix vect in partitioned form
+pub fn mk_symmap_real(dim: usize, vect: &Vector) -> (result: Vec<Vector>)
+    requires
+        dim_fits(dim as int),
+        vect@.len() >= pk_len(dim as int),
+    ensures
+        part_shape(result@, dim as int),
+        forall|c: int, r: int| 0 <= r <= c < dim ==> rv(#[trigger] result@[c]@[r]) == rv(vect@[pk_idx(r, c)]),
+{
     let mut result = Vec::with_capacity(dim);
     let mut offset = 0;
-    for i in 0..dim {
-	result.push(vect[offset..=offset + i].to_vec());
-	offset += i + 1;
+    proof {
+        lemma_pk_col_start_zero();
+    }
+    for i in 0..dim
+        invariant
+            dim_fits(dim as int),
+            vect@.len() >= pk_len(dim as int),
+            offset == pk_col_start(i as int),
+            part_shape(result@, i as int),
+            forall|c: int, r: int| 0 <= r <= c < i ==> rv(#[trigger] result@[c]@[r]) == rv(vect@[pk_idx(r, c)]),
+    {
+        proof {
+            lemma_dim_fits_idx(dim as int, i as int);
+            lemma_pk_idx_bound(i as int, i as int, dim as int);
+            lemma_pk_col_start_step(i as int);
+        }
+        result.push(slice_to_vec(&vect[offset..=offset + i]));
+        offset += i + 1;
     }
     result
 }
 
-pub fn sym_matrix_trace(dim : usize) -> Vec<Vector> {
+// the identity matrix in partitioned form (the trace functional)
+pub fn sym_matrix_trace(dim: usize) -> (result: Vec<Vector>)
+    ensures
+        part_shape(result@, dim as int),
+        forall|c: int, r: int| 0 <= r <= c < dim ==> rv(#[trigger] result@[c]@[r]) == (if r == c { 1.0real } else { 0.0real }),
+{
     let mut result = Vec::with_capacity(dim);
-    for i in 0..dim {
-	let mut v = vec![0.0; i + 1];
-	v[i] = 1.0;
-	result.push(v);
+    for i in 0..dim
+        invariant
+            part_shape(result@, i as int),
+            forall|c: int, r: int| 0 <= r <= c < i ==> rv(#[trigger] result@[c]@[r]) == (if r == c { 1.0real } else { 0.0real }),
+    {
+        let mut v = vec![0.0; i + 1];
+        v[i] = 1.0;
+        result.push(v);
     }
     result
 }
 
-pub fn sym_matrix_scale(s : f64, vect : &Vec<Vector>) -> Vec<Vector> {
-    let mut result = Vec::new();
-    for v in vect {
-	result.push(scal_vect(s, v));
+// scalar multiple of a partitioned matrix
+pub fn sym_matrix_scale(s: f64, vect: &Vec<Vector>) -> (result: Vec<Vector>)
+    ensures
+        result@.len() == vect@.len(),
+        forall|c: int| 0 <= c < vect@.len()
+            ==> (#[trigger] result@[c])@.len() == vect@[c]@.len() && rvs(result@[c]@) == vscale_r(rv(s), rvs(vect@[c]@)),
+{
+    let mut result: Vec<Vector> = Vec::new();
+    for c in 0..vect.len()
+        invariant
+            result@.len() == c,
+            forall|k: int| 0 <= k < c
+                ==> (#[trigger] result@[k])@.len() == vect@[k]@.len() && rvs(result@[k]@) == vscale_r(rv(s), rvs(vect@[k]@)),
+    {
+        result.push(scal_vect(s, &vect[c]));
     }
     result
 }
 
-pub fn sym_matrix_zero(dim : usize) -> Vec<Vector> {
+// the zero matrix in partitioned form
+pub fn sym_matrix_zero(dim: usize) -> (result: Vec<Vector>)
+    ensures
+        part_shape(result@, dim as int),
+        forall|c: int, r: int| 0 <= r <= c < dim ==> rv(#[trigger] result@[c]@[r]) == 0.0real,
+{
     let mut result = Vec::with_capacity(dim);
-    for i in 0..dim {
-	result.push(vec![0.0; i + 1])
+    for i in 0..dim
+        invariant
+            part_shape(result@, i as int),
+            forall|c: int, r: int| 0 <= r <= c < i ==> rv(#[trigger] result@[c]@[r]) == 0.0real,
+    {
+        result.push(vec![0.0; i + 1])
     }
     result
 }
 
-pub fn sym_matrix_proj(dim : usize, row : usize, col : usize) -> Vec<Vector> {
+// the matrix with a single 1 at (row, col), row <= col < dim, in partitioned form
+// (aborts when row > col)
+pub fn sym_matrix_proj(dim: usize, row: usize, col: usize) -> (result: Vec<Vector>)
+    requires
+        col < dim,
+    ensures
+        row <= col,
+        part_shape(result@, dim as int),
+        forall|c: int, r: int| 0 <= r <= c < dim
+            ==> rv(#[trigger] result@[c]@[r]) == (if c == col && r == row { 1.0real } else { 0.0real }),
+{
     if row > col {
-	panic!("sym_matrix_proj: make sure that row <= column");
+        abort("sym_matrix_proj: make sure that row <= column");
     }
     let mut result = Vec::with_capacity(dim);
-    for i in 0..col {
-	result.push(vec![0.0; i + 1]);
+    for i in 0..col
+        invariant
+            part_shape(result@, i as int),
+            forall|c: int, r: int| 0 <= r <= c < i ==> rv(#[trigger] result@[c]@[r]) == 0.0real,
+    {
+        result.push(vec![0.0; i + 1]);
     }
-    result.push(standard_basis(row, col + 1));
-    for i in col + 1..dim {
-	result.push(vec![0.0; i + 1]);
+    let basis = standard_basis(row, col + 1);
+    result.push(basis);
+    proof {
+        assert forall|c: int, r: int| 0 <= r <= c < col + 1
+            implies rv(#[trigger] result@[c]@[r]) == (if c == col && r == row { 1.0real } else { 0.0real }) by {
+            if c == col {
+                assert(rv(result@[c]@[r]) == std_basis_r(row as int, (col + 1) as nat)[r]);
+            }
+        }
+    }
+    for i in col + 1..dim
+        invariant
+            row <= col < i,
+            part_shape(result@, i as int),
+            forall|c: int, r: int| 0 <= r <= c < i
+                ==> rv(#[trigger] result@[c]@[r]) == (if c == col && r == row { 1.0real } else { 0.0real }),
+    {
+        result.push(vec![0.0; i + 1]);
     }
     result
 }
 
-pub fn sym_matrix_add(vect1 : &[Vector], vect2 : &[Vector]) -> Vec<Vector> {
-    let mut result = Vec::new();
-    for (v1, v2) in vect1.iter().zip(vect2.iter()) {
-	result.push(vect_add(v1, v2));
+// sum of two partitioned matrices
+pub fn sym_matrix_add(vect1: &[Vector], vect2: &[Vector]) -> (result: Vec<Vector>)
+    requires
+        vect1@.len() == vect2@.len(),
+        forall|c: int| 0 <= c < vect1@.len() ==> (#[trigger] vect1@[c])@.len() == vect2@[c]@.len(),
+    ensures
+        result@.len() == vect1@.len(),
+        forall|c: int| 0 <= c < vect1@.len()
+            ==> (#[trigger] result@[c])@.len() == vect1@[c]@.len() && rvs(result@[c]@) == vadd_r(rvs(vect1@[c]@), rvs(vect2@[c]@)),
+{
+    let mut result: Vec<Vector> = Vec::new();
+    for c in 0..vect1.len()
+        invariant
+            vect1@.len() == vect2@.len(),
+            forall|k: int| 0 <= k < vect1@.len() ==> (#[trigger] vect1@[k])@.len() == vect2@[k]@.len(),
+            result@.len() == c,
+            forall|k: int| 0 <= k < c
+                ==> (#[trigger] result@[k])@.len() == vect1@[k]@.len() && rvs(result@[k]@) == vadd_r(rvs(vect1@[k]@), rvs(vect2@[k]@)),
+    {
+        result.push(vect_add(&vect1[c], &vect2[c]));
     }
     result
 }
+
+} // verus!

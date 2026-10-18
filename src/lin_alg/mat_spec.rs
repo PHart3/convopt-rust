@@ -50,6 +50,11 @@ pub open spec fn block_ident_view(a: MatF, n: int) -> MatF {
     |r: int, c: int| if r < n && c < n { a(r, c) } else if r == c { 1.0real } else { 0.0real }
 }
 
+/// The diagonal block of a packed symmetric matrix starting at row/column `start`.
+pub open spec fn block_view(m: Seq<real>, start: int) -> MatF {
+    |r: int, c: int| sym_entry(m, start + r, start + c)
+}
+
 /* ---------- matrix operations ---------- */
 
 /// Matrix product with inner dimension `inner`: (A B)_ij = sum_{k < inner} A_ik B_kj.
@@ -931,6 +936,52 @@ pub proof fn lemma_psd_shifted_meq(a: MatF, b: MatF, dim: int, eps: real)
         lemma_quad_meq(a, b, dim, x);
         assert(quad_r(a, dim, x) + eps * dot_r(x, x) >= 0.0real);
     }
+}
+
+/// Every matrix of dimension 0 satisfies A >= -eps I (there is only the empty vector).
+pub proof fn lemma_psd_shifted_zero_dim(a: MatF, eps: real)
+    ensures
+        psd_shifted(a, 0, eps),
+{
+    assert forall|x: Seq<real>| x.len() == 0
+        implies #[trigger] quad_r(a, 0, x) + eps * dot_r(x, x) >= 0.0real by {
+        assert(vmul_r(x, mat_vec(a, 0, x)).len() == 0);
+        assert(vmul_r(x, x).len() == 0);
+        assert(quad_r(a, 0, x) == 0.0real);
+        assert(dot_r(x, x) == 0.0real);
+    }
+}
+
+/// Q D Q^T with all d_k >= 0 is positive semidefinite (for any Q).
+pub proof fn lemma_diag_congruence_psd(q: MatF, d: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+        forall|k: int| 0 <= k < dim ==> #[trigger] d[k] >= 0.0real,
+    ensures
+        is_psd(mmul(mmul(q, diag_view(d), dim), mtr(q), dim), dim),
+{
+    let dv = diag_view(d);
+    lemma_diag_psd(d, dim);
+    // (Q^T)^T D Q^T >= 0, and (Q^T)^T = Q on the block
+    lemma_psd_congruence(dv, mtr(q), dim);
+    lemma_transpose_twice_meq(q, dim, dim);
+    lemma_mul_meq(mtr(mtr(q)), q, dv, dv, dim, dim, dim);
+    lemma_mul_meq(mmul(mtr(mtr(q)), dv, dim), mmul(q, dv, dim), mtr(q), mtr(q), dim, dim, dim);
+    lemma_psd_shifted_meq(mmul(mmul(mtr(mtr(q)), dv, dim), mtr(q), dim), mmul(mmul(q, dv, dim), mtr(q), dim), dim, 0.0real);
+}
+
+/// A factorization Q D Q^T = A + eps I with all d_k >= 0 establishes A >= -eps I.
+pub proof fn lemma_shifted_factorization_psd(a: MatF, q: MatF, d: Seq<real>, dim: int, eps: real)
+    requires
+        dim >= 0,
+        forall|k: int| 0 <= k < dim ==> #[trigger] d[k] >= 0.0real,
+        meq(mmul(mmul(q, diag_view(d), dim), mtr(q), dim), madd(a, mscale(eps, mident())), dim, dim),
+    ensures
+        psd_shifted(a, dim, eps),
+{
+    lemma_diag_congruence_psd(q, d, dim);
+    lemma_psd_shifted_meq(mmul(mmul(q, diag_view(d), dim), mtr(q), dim), madd(a, mscale(eps, mident())), dim, 0.0real);
+    lemma_psd_shifted_iff(a, dim, eps);
 }
 
 /// A >= -eps I if and only if A + eps I >= 0.

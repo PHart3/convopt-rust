@@ -36,12 +36,12 @@ status: done
 L07 | PSD block check: successful psd_block_check establishes each diagonal block B satisfies B >= -eps I with eps = 1e-9 * max(max_diag(B), 1), via shifted LDLT with positive pivots (x^T L D L^T x = sum d_k y_k^2 >= 0) |
 deps: L06 |
 targets: psd_block_check |
-status: not started
+status: done
 
 L08 | Shared Jacobi rotation core: for pivot (k, j) with j < k prove J^T J = I, J J^T = I, A' = J^T A J, annihilation of the (k, j) entry, symmetry preserved, eigenvalues preserved, eigenvector accumulation Q' = Q J, returned value is |old pivot entry| |
 deps: L03 |
 targets: jacobi_rot |
-status: not started
+status: done
 
 L09 | Common eigensolver specification: predicate eigen_decomp_approx(A, Q, B, eps) with Q^T Q = I, A = Q B Q^T, B symmetric; max-off-diagonal stopping criterion lemma: max |B_ij| (i != j) < tol * max(1, max_diag) implies ||B - diag(B)||_F <= eps; rotation-sequence invariant lemma (orthogonality and similarity are preserved by each jacobi_rot) |
 deps: L08 |
@@ -66,7 +66,7 @@ status: not started
 L13 | Gaussian elimination: row-echelon invariants, partial-pivot selection correctness (chosen pivot has maximal magnitude in remaining rows of the column), tolerance-based skip rule, row operations preserve row space / solution set, rank and consistency outputs |
 deps: L02 |
 targets: gauss_elim |
-status: not started
+status: done
 
 L14 | Constraint reduction: linear_remove_redundant_sym returns the first rank rows of the echelon form each scaled by its packed Frobenius norm, so the reduced augmented system has the same solution set as the input; inconsistency panic contract |
 deps: L13 |
@@ -76,7 +76,7 @@ status: not started
 L15 | User-facing symmetric-map representation (MatrixSym) and composition with diagonal-block embedding: flattening, diagonal-block composition, and helper constructors |
 deps: L02 |
 targets: matrixsym_flatten, matrix_diagonal_mult_sym, mat_sym_diagonal_mult_sym, mk_symmap_real, sym_matrix_trace, sym_matrix_scale, sym_matrix_zero, sym_matrix_proj, sym_matrix_add, mk_symmap, zero_symmap, ident_symmap |
-status: not started
+status: done
 
 L16 | Standard-form conversion: sdp_to_standard preserves objective (C(Z_1..Z_n) = <obj_sum, Z>), equality constraints, LMI constraints (block B_i = H_i(...) - M_i on upper triangle), zero-pattern constraints forcing block-diagonal form, and variable reconstruction Z_i = B_{s+2i-1} - B_{s+2i}; both check_constraints branches |
 deps: L15, L14 |
