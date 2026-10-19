@@ -535,6 +535,14 @@ pub proof fn lemma_max0_fn_bound(f: spec_fn(int) -> real, n: nat)
     }
 }
 
+/// The 1-norm is nonnegative.
+pub proof fn lemma_sym_one_norm_nonneg(a: Seq<real>, dim: int)
+    ensures
+        sym_one_norm_r(a, dim) >= 0.0real,
+{
+    lemma_max0_fn_bound(|i: int| sum_fn_r(|j: int| abs_r(sym_entry(a, i, j)), dim as nat), dim as nat);
+}
+
 /// Maxima only depend on the values of the function on 0..n.
 pub proof fn lemma_max0_fn_ext(f: spec_fn(int) -> real, g: spec_fn(int) -> real, n: nat)
     requires

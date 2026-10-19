@@ -16,7 +16,9 @@ use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::real_spec::{abs_r, lemma_abs_quotient_le_one};
 #[cfg(verus_keep_ghost)]
-use crate::lin_alg::solve_spec::{abs_max_prefix_r, abs_max_r, lemma_abs_max_prefix_step};
+use crate::lin_alg::solve_spec::{abs_max_prefix_r, abs_max_r, lemma_abs_max_prefix_step, lemma_abs_max_attained};
+#[cfg(verus_keep_ghost)]
+use vstd::arithmetic::div_mod::{lemma_fundamental_div_mod, lemma_mod_bound};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::gauss_spec::*;
 
@@ -424,6 +426,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             &&& pivots.len() == res.1
             &&& res.2 == (pivots.len() == 0 || pivots.last() < col_dim - 1)
         },
+        abs_max_r(rvs(old(mat)@)) > 0.0real ==> res.1 >= 1,
 {
     let ghost a0 = rvs(old(mat)@);
     let ghost (rd, cd) = (row_dim as int, col_dim as int);
@@ -460,6 +463,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             rv(scale) == abs_max_r(a0),
             eps == rv(TOL) * abs_max_r(a0),
             pivots.len() == row_search,
+            row_search == 0 ==> mat@ == old(mat)@,
             forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
             echelon_form(rvs(mat@), rd, cd, pivots, eps),
             skipped_bounded(rvs(mat@), rd, cd, pivots, eps, n as int),
@@ -711,6 +715,28 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
     proof {
         if n < col_dim {
             lemma_skipped_extend(rvs(mat@), rd, cd, pivots, eps, n as int);
+        }
+        // a nonzero input has a pivot: without one the matrix is unchanged and every column was
+        // skipped, so every entry would be below TOL * max |entry|
+        if abs_max_r(a0) > 0.0real && row_search == 0 {
+            lemma_abs_max_attained(a0);
+            let t = choose|t: int| 0 <= t < a0.len() && abs_r(#[trigger] a0[t]) == abs_max_r(a0);
+            assert(rd > 0) by (nonlinear_arith)
+                requires a0.len() == rd * cd, a0.len() > 0, rd >= 0;
+            assert(n == col_dim);
+            lemma_fundamental_div_mod(t, rd);
+            lemma_mod_bound(t, rd);
+            let (j, c) = (t % rd, t / rd);
+            assert(c < cd) by (nonlinear_arith)
+                requires t < rd * cd, t == rd * c + j, j >= 0, rd > 0;
+            assert(cm_entry(a0, rd, j, c) == a0[t]);
+            assert(!is_pivot_col(pivots, c));
+            assert(pivots_below(pivots, c) == 0);
+            assert(skip_bound(pivots, c, eps) == pow2_r(0) * eps);
+            assert(abs_r(a0[t]) < eps);
+            assert(rv(TOL) == 0.0000000001real);
+            assert(false) by (nonlinear_arith)
+                requires abs_r(a0[t]) > 0.0real, abs_r(a0[t]) < 0.0000000001real * abs_r(a0[t]);
         }
     }
     let res = (mat, row_search, row_search == coeff_rank);

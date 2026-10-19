@@ -29,6 +29,22 @@
 // the entries lambda_k > 0 of poseigendecomp; nothing relates S' to the exact
 // PSD projection of V. The penalty is adapted from the ratio of the primal
 // and dual infeasibilities (`penalty_update_ok`).
+//
+// After each update the residuals and KKT quantities of the iterate are
+// computed (`kkt_ok`):
+//
+//   pinf  = ||A(Z) - b|| / (1 + ||b||)
+//   dinf  = ||(C - A*(y)) - S||_F / (1 + ||C||_1)
+//   prim  = <C, Z>_F  (= the user's objective, `objective_r`)
+//   dual  = b . y
+//   gap   = |dual - prim| / (1 + |dual| + |prim|)
+//   delta = max(pinf, dinf, gap)
+//
+// and the loop stops with the current iterate when delta < TOL and its PSD
+// blocks pass the check (`psd_blocks_ok`), with the best PSD-verified iterate
+// when the stagnation rule fires (`stagnation_ok`, `stagnation_stop`), or with
+// the last iterate after TOTAL_STEPS iterations (`outcome_ok`). The user's
+// solution is read from the iterate's diagonal blocks (`solution_ok`).
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -46,7 +62,7 @@ use crate::lin_alg::mat_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
-use crate::lin_alg::ldlt_spec::blocks_fit;
+use crate::lin_alg::ldlt_spec::{blocks_fit, block_psd_ok};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::reduce_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -93,8 +109,8 @@ pub open spec fn sdpad_input_ok(sdp: &SDP, check: bool) -> bool {
     &&& dim_fits(total_rows(sdp))
 }
 
-/// The reduced constraint system has at most as many rows as the stacked system
-/// (exactly as many without reduction).
+/// The reduced constraint system has at least one and at most as many rows as the stacked
+/// system (exactly as many without reduction).
 pub proof fn lemma_reduced_rows(aug: Seq<real>, mat: Seq<f64>, point: Seq<f64>, rows: int, total: int, dim: int, check: bool)
     requires
         rows >= 0,
@@ -106,6 +122,8 @@ pub proof fn lemma_reduced_rows(aug: Seq<real>, mat: Seq<f64>, point: Seq<f64>, 
         if check { reduced_from(aug, result_aug(mat, point, rows), dim) } else { result_aug(mat, point, rows) == aug },
     ensures
         rows <= total,
+        check ==> rows >= 1,
+        !check ==> rows == total,
 {
     lemma_pk_col_start_zero();
     lemma_pk_col_start_monotone(0, dim);
@@ -132,8 +150,10 @@ pub proof fn lemma_reduced_rows(aug: Seq<real>, mat: Seq<f64>, point: Seq<f64>, 
 
 /// The facts of the standard form that the solver setup relies on: the order d >= 1 of the
 /// variable, the fitting of d and of the number of dense constraint rows, the lengths of the
-/// returned data, the zero pattern, the zero right-hand sides of the zero constraints, and the
-/// block sizes (whose partition has order d).
+/// returned data, the zero pattern, the zero right-hand sides of the zero constraints, the
+/// block sizes (whose partition has order d, and whose LMI part is nonempty exactly with
+/// LMIs), and dense rows whenever there are zero constraints (with LMIs the dense rows are
+/// never all eliminated; without LMIs there are no zero constraints).
 pub proof fn lemma_std_form_facts(sdp: &SDP, res: (SymMatrix, (Matrix, Vec<(usize, usize)>), Vector, usize, Vec<usize>, Vec<usize>), check: bool)
     requires
         sdpad_input_ok(sdp, check),
@@ -151,6 +171,8 @@ pub proof fn lemma_std_form_facts(sdp: &SDP, res: (SymMatrix, (Matrix, Vec<(usiz
         forall|n: int| 0 <= n < res.4@.len() ==> #[trigger] res.4@[n] >= 1,
         res.4@.len() + res.5@.len() > 0 ==> std_dim(dims_of(res.5@), dims_of(res.4@)) == res.3,
         block_sum(dims_of(res.5@)) <= res.3,
+        (block_sum(dims_of(res.5@)) == 0) == (sdp.lmi@.len() == 0),
+        res.2@.len() == res.1.1@.len() ==> res.1.1@.len() == 0,
 {
     let d = res.3 as int;
     let cols = pk_len(d);
@@ -161,6 +183,7 @@ pub proof fn lemma_std_form_facts(sdp: &SDP, res: (SymMatrix, (Matrix, Vec<(usiz
         let d0 = sdp.objective@[0]@.len() as int;
         let m = sdp.constraint.1@.len() as int;
         assert(dims_of(res.5@) =~= Seq::<int>::empty());
+        assert(block_sum(dims_of(res.5@)) == 0);
         if sdp.constraint.0@.len() == 0 {
             lemma_dim_fits_monotone(0, d);
         } else {
@@ -187,6 +210,11 @@ pub proof fn lemma_std_form_facts(sdp: &SDP, res: (SymMatrix, (Matrix, Vec<(usiz
         assert forall|i: int| 0 <= i < res.5@.len() implies #[trigger] res.5@[i] >= 1 by {
             assert(dims_of(res.5@)[i] == bd[i]);
         }
+        // the LMI blocks are nonempty, so their total size and the row count are positive
+        assert(sum_upto(bd, 1) == sum_upto(bd, 0) + bd[0]);
+        lemma_sum_upto_monotone(bd, 1, bd.len() as int);
+        assert(block_sum(bd) >= 1);
+        assert(rows >= 1);
         assert forall|n: int| 0 <= n < res.4@.len() implies #[trigger] res.4@[n] >= 1 by {
             assert(dims_of(res.4@)[n] == vd[n]);
         }
@@ -521,12 +549,14 @@ pub proof fn lemma_selected_pos_part(v: Seq<real>, b: Seq<real>, q: Seq<real>, v
         mmul(mmul(cm_view(q, dim), diag_view(masked_r(lam, sel)), dim), mtr(cm_view(q, dim)), dim), dim, dim);
 }
 
-/// The positive spectral part is symmetric and positive semidefinite.
+/// The positive spectral part is a packed matrix of order dim, symmetric and positive
+/// semidefinite.
 pub proof fn lemma_pos_part_psd_sym(v: Seq<real>, s: Seq<real>, dim: int)
     requires
         dim >= 0,
         is_pos_part(v, s, dim),
     ensures
+        s.len() == pk_len(dim),
         is_symmetric(sym_view(s), dim),
         is_psd(sym_view(s), dim),
 {
@@ -537,6 +567,236 @@ pub proof fn lemma_pos_part_psd_sym(v: Seq<real>, s: Seq<real>, dim: int)
     let rec = mmul(mmul(cm_view(q, dim), diag_view(masked_r(vals, pos_sel(vals))), dim), mtr(cm_view(q, dim)), dim);
     lemma_meq_sym(sym_view(s), rec, dim, dim);
     lemma_psd_shifted_meq(rec, sym_view(s), dim, 0.0real);
+}
+
+/* ---------- residuals and KKT quantities ---------- */
+
+/// The primal infeasibility ||A(Z) - b|| / (1 + ||b||).
+pub open spec fn pinf_r(s: &SdpadSetup, z: Seq<real>) -> real {
+    let b = rvs(s.point@);
+    dist_r(setup_action_r(s, z), b) / (1.0real + norm_r(b))
+}
+
+/// The dual infeasibility ||diff - S||_F / (1 + ||C||_1) for the dual slack diff = C - A*(y).
+pub open spec fn dinf_r(s: &SdpadSetup, diff: Seq<real>, sm: Seq<real>) -> real {
+    let d = s.var_dim as int;
+    frob_norm_r(vsub_r(diff, sm), d) / (1.0real + sym_one_norm_r(rvs(s.obj_frob@), d))
+}
+
+/// The primal objective value <C, Z>_F.
+pub open spec fn prim_val_r(s: &SdpadSetup, z: Seq<real>) -> real {
+    frob_r(rvs(s.obj_frob@), z, s.var_dim as int)
+}
+
+/// The dual objective value b . y.
+pub open spec fn dual_val_r(s: &SdpadSetup, y: Seq<real>) -> real {
+    dot_r(rvs(s.point@), y)
+}
+
+/// The relative duality gap |dual - prim| / (1 + |dual| + |prim|).
+pub open spec fn gap_r(prim: real, dual: real) -> real {
+    abs_r(dual - prim) / (1.0real + abs_r(dual) + abs_r(prim))
+}
+
+/// The accuracy measure max(pinf, dinf, gap).
+pub open spec fn delta_r(pinf: real, dinf: real, gap: real) -> real {
+    max_r(max_r(pinf, dinf), gap)
+}
+
+/// The residuals, objective values, gap and delta of the iterate st.
+pub open spec fn kkt_ok(s: &SdpadSetup, st: &WgyState, pinf: real, dinf: real, prim: real, dual: real, gap: real, delta: real) -> bool {
+    &&& pinf == pinf_r(s, rvs(st.prim_z@))
+    &&& dinf == dinf_r(s, rvs(st.diff@), rvs(st.dual_s@))
+    &&& prim == prim_val_r(s, rvs(st.prim_z@))
+    &&& dual == dual_val_r(s, rvs(st.dual_y@))
+    &&& gap == gap_r(prim, dual)
+    &&& delta == delta_r(pinf, dinf, gap)
+}
+
+/// The objective of the user's problem at the standard-form variable z: C(Z) for the single
+/// variable without LMIs, C_1(Z_1) + .. + C_n(Z_n) with LMIs (obj_r).
+pub open spec fn objective_r(sdp: &SDP, z: Seq<real>) -> real {
+    if sdp.lmi@.len() == 0 {
+        dot_r(part_r(sdp.objective@[0]@, sdp.objective@[0]@.len() as int), z)
+    } else {
+        obj_r(sdp.objective@, block_sum(bdims_r(sdp.lmi@)), vdims_r(sdp.lmi@, n_vars(sdp)), z)
+    }
+}
+
+/// The primal objective value is the user's objective (lemma_frob_half_dot and the
+/// standard-form contract).
+pub proof fn lemma_objective_value(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+        z.len() == pk_len(s.var_dim as int),
+    ensures
+        prim_val_r(s, z) == objective_r(sdp, z),
+{
+    let d = s.var_dim as int;
+    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
+        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    lemma_frob_half_dot(rvs(s.obj_frob@), rvs(obj0@), z, d);
+    if sdp.lmi@.len() == 0 {
+        assert(rvs(obj0@) == part_r(sdp.objective@[0]@, sdp.objective@[0]@.len() as int));
+    } else {
+        assert(dot_r(rvs(obj0@), z) == obj_r(sdp.objective@, block_sum(bdims_r(sdp.lmi@)), vdims_r(sdp.lmi@, n_vars(sdp)), z));
+    }
+}
+
+/* ---------- the solution ---------- */
+
+/// result is the user's solution read from the standard-form variable z: z itself without
+/// LMIs, otherwise Z_n = B_{s+2n} - B_{s+2n+1}, the difference of the two diagonal blocks of
+/// variable n after the LMI blocks (zvar_r).
+pub open spec fn solution_ok(s: &SdpadSetup, z: Seq<real>, result: Seq<SymMatrix>) -> bool {
+    let vd = dims_of(s.symm_dims@);
+    let bsum = s.block_size_sum as int;
+    if s.block_size_sum == 0 {
+        result.len() == 1 && rvs(result[0]@) == z
+    } else {
+        &&& result.len() == vd.len()
+        &&& forall|n: int| 0 <= n < vd.len() ==> rvs(#[trigger] result[n]@) == zvar_r(z, var_off(bsum, vd, n), vd[n])
+    }
+}
+
+/// The packed diagonal block that sym_matrix_diag_block reads from zf is blk_r of its view.
+pub proof fn lemma_diag_block_view(b: Seq<f64>, zf: Seq<f64>, st: int, dn: int)
+    requires
+        st >= 0,
+        dn >= 0,
+        b.len() == pk_len(dn),
+        zf.len() >= pk_len(st + dn),
+        forall|r: int, c: int| 0 <= r <= c < dn ==> rv(#[trigger] b[pk_idx(r, c)]) == rv(zf[pk_idx(st + r, st + c)]),
+    ensures
+        rvs(b) == blk_r(rvs(zf), st, dn),
+{
+    assert forall|t: int| 0 <= t < pk_len(dn) implies rvs(b)[t] == #[trigger] blk_r(rvs(zf), st, dn)[t] by {
+        lemma_pk_idx_surjective(t, dn);
+        let (r, c) = choose|r: int, c: int| 0 <= r <= c < dn && #[trigger] pk_idx(r, c) == t;
+        lemma_pk_unpack_idx(r, c);
+        lemma_pk_idx_bound(st + r, st + c, st + dn);
+        assert(rvs(zf)[pk_idx(st + r, st + c)] == rv(zf[pk_idx(st + r, st + c)]));
+    }
+    assert(rvs(b) =~= blk_r(rvs(zf), st, dn));
+}
+
+/* ---------- the termination of the loop ---------- */
+
+/// Every block of the PSD partition of z passed the check: B >= -eps I (block_psd_ok, L07).
+pub open spec fn psd_blocks_ok(s: &SdpadSetup, z: Seq<real>) -> bool {
+    forall|b: int| 0 <= b < s.psd_blocks@.len()
+        ==> #[trigger] block_psd_ok(z, s.psd_blocks@[b].0 as int, s.psd_blocks@[b].1 as int)
+}
+
+/// st is an iterate: the Wen-Goldfarb-Yin update of some iterate for a penalty in
+/// [PEN_MIN, PEN_MAX] and the step STEP.
+pub open spec fn iterate_ok(s: &SdpadSetup, check: bool, st: WgyState) -> bool {
+    exists|mu: real, st0: WgyState| rv(PEN_MIN) <= mu <= rv(PEN_MAX)
+        && #[trigger] wgy_update_ok(s, check, mu, rv(STEP), &st0, &st)
+}
+
+/// The stagnation bookkeeping over the deltas of the iterations so far: best bounds every
+/// delta from below, the last it_stag deltas lie strictly above best, and the one before them
+/// equals best (when there is one; initially best is the sentinel +infinity, which the model
+/// leaves unconstrained).
+pub open spec fn stagnation_ok(deltas: Seq<real>, best: real, it_stag: int) -> bool {
+    let n = deltas.len() as int;
+    &&& 0 <= it_stag <= n
+    &&& forall|k: int| 0 <= k < n ==> #[trigger] deltas[k] >= best
+    &&& forall|k: int| n - it_stag <= k < n ==> #[trigger] deltas[k] > best
+    &&& it_stag < n ==> deltas[n - 1 - it_stag] == best
+}
+
+/// One step of the bookkeeping: a delta above best is a stagnating iteration, any other delta
+/// becomes the best.
+pub open spec fn stag_step(delta: real, best: real, it_stag: int) -> (real, int) {
+    if delta > best { (best, it_stag + 1) } else { (delta, 0) }
+}
+
+/// The bookkeeping is preserved by a step.
+pub proof fn lemma_stag_step(deltas: Seq<real>, best: real, it_stag: int, delta: real)
+    requires
+        stagnation_ok(deltas, best, it_stag),
+    ensures
+        stagnation_ok(deltas.push(delta), stag_step(delta, best, it_stag).0, stag_step(delta, best, it_stag).1),
+{
+}
+
+/// best_feas bounds the deltas of the candidate iterations (feasible) from below and, once a
+/// solution has been recorded, is attained by one of them.
+pub open spec fn best_feasible_ok(deltas: Seq<real>, feasible: Seq<bool>, best_feas: real, recorded: bool) -> bool {
+    let n = deltas.len() as int;
+    &&& feasible.len() == n
+    &&& forall|k: int| 0 <= k < n && feasible[k] ==> #[trigger] deltas[k] >= best_feas
+    &&& recorded ==> exists|k: int| 0 <= k < n && feasible[k] && #[trigger] deltas[k] == best_feas
+}
+
+/// The candidate bookkeeping is preserved by an iteration: a recorded candidate (delta not
+/// above the best) becomes the best.
+pub proof fn lemma_best_feasible_step(deltas: Seq<real>, feasible: Seq<bool>, best_feas: real, recorded: bool, delta: real, record: bool)
+    requires
+        best_feasible_ok(deltas, feasible, best_feas, recorded),
+        record ==> delta <= best_feas,
+    ensures
+        best_feasible_ok(deltas.push(delta), feasible.push(record), if record { delta } else { best_feas }, recorded || record),
+{
+    let n = deltas.len() as int;
+    let (d2, f2) = (deltas.push(delta), feasible.push(record));
+    let b2 = if record { delta } else { best_feas };
+    assert forall|k: int| 0 <= k < n + 1 && f2[k] implies #[trigger] d2[k] >= b2 by {
+        if k < n {
+            assert(deltas[k] >= best_feas);
+        }
+    }
+    if record {
+        assert(f2[n] && d2[n] == b2);
+    } else if recorded {
+        let k = choose|k: int| 0 <= k < n && feasible[k] && #[trigger] deltas[k] == best_feas;
+        assert(f2[k] && d2[k] == b2);
+    }
+}
+
+/// The recorded best solution: an iterate zb whose PSD block check succeeded, with its KKT
+/// quantities.
+pub open spec fn best_record_ok(s: &SdpadSetup, check: bool, zb: Seq<f64>, pinf: real, dinf: real, gap: real, val: real, delta: real) -> bool {
+    exists|st: WgyState| #[trigger] iterate_ok(s, check, st)
+        && st.prim_z@ == zb
+        && psd_blocks_ok(s, rvs(zb))
+        && kkt_ok(s, &st, pinf, dinf, val, dual_val_r(s, rvs(st.dual_y@)), gap, delta)
+}
+
+/// The stagnation stopping rule: more than STAG1 (STAG2, STAG3) iterations without improving
+/// the best delta, and the current delta below 1e-5 (1e-4, 1e-3).
+pub open spec fn stagnation_stop(delta: real, it_stag: int) -> bool {
+    ||| it_stag > STAG1 as int && delta < 0.00001real
+    ||| it_stag > STAG2 as int && delta < 0.0001real
+    ||| it_stag > STAG3 as int && delta < 0.001real
+}
+
+/// The outcome of the loop: the solution read from an iterate, with that iterate's KKT
+/// quantities and objective value; the deltas of the n iterations run, which candidates were
+/// recorded, and the stagnation bookkeeping after the last iteration; and the termination
+/// reason: Accuracy (the last iterate, with delta < TOL and PSD-verified blocks), Stagnation
+/// (a PSD-verified candidate attaining the least recorded delta, after the stopping rule fired
+/// on the last iterate), or MaxIter (the last of TOTAL_STEPS iterates).
+pub open spec fn outcome_ok(sdp: &SDP, s: &SdpadSetup, check: bool, o: SdpadOutcome) -> bool {
+    let deltas = rvs(o.deltas@);
+    let n = deltas.len() as int;
+    let delta = delta_r(rv(o.pinf), rv(o.dinf), rv(o.gap));
+    &&& 1 <= n <= TOTAL_STEPS
+    &&& o.feasible@.len() == n
+    &&& stagnation_ok(deltas, rv(o.best_delta@), o.it_stag@ as int)
+    &&& exists|st: WgyState| #[trigger] iterate_ok(s, check, st)
+            && solution_ok(s, rvs(st.prim_z@), o.result@)
+            && kkt_ok(s, &st, rv(o.pinf), rv(o.dinf), rv(o.value), dual_val_r(s, rvs(st.dual_y@)), rv(o.gap), delta)
+            && rv(o.value) == objective_r(sdp, rvs(st.prim_z@))
+            && match o.termination {
+                Termination::Accuracy => psd_blocks_ok(s, rvs(st.prim_z@)) && delta < rv(TOL) && delta == deltas[n - 1],
+                Termination::Stagnation => psd_blocks_ok(s, rvs(st.prim_z@))
+                    && best_feasible_ok(deltas, o.feasible@, delta, true)
+                    && stagnation_stop(deltas[n - 1], o.it_stag@ as int),
+                Termination::MaxIter => n == TOTAL_STEPS && delta == deltas[n - 1],
+            }
 }
 
 /* ---------- the penalty update ---------- */

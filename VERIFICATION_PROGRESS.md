@@ -35,13 +35,36 @@ Runtime checks: `cargo build`, `cargo test`.
 | L16 standard-form conversion | done | `src/sdp_spec.rs` (new spec/proof module); `SDP` struct, `sdp_to_standard` and seven helpers in the first `verus!` block of `src/sdp.rs`. Public API: `SDP` fields are now `pub`; `sdp_to_standard` has shape preconditions (`sdp_single_input_ok` / `sdp_lmi_input_ok`). |
 | L12 PSD spectral operations | done | `src/lin_alg/spectral_spec.rs` (new spec/proof module); `JacobiVariant`, the helper `select_eigenpairs`, `poseigendecomp`, `negeigendecomp` in the `verus!` block of `src/lin_alg/jacobi.rs`; `pivot_scale` (L05) is now `pub(crate)`. |
 | L17 solver linear-system setup | done | `src/sdpad_spec.rs` (new spec/proof module); `SdpadSetup`, `sdpad_setup`, `psd_block_list`, `dual_solve`, `initial_iterates` in a `verus!` block of `src/sdp_altdir.rs`; `sdpad` itself stays outside `verus!` and calls them (L18/L19). **One executable correction** (empty PSD block list for single-variable problems), see the L17 architecture decisions and `EXPOSED_BUGS.md`. |
-| L18 Wen-Goldfarb-Yin iteration | done | `WgyState`, `wgy_update` (one update of the iterates), `penalty_update`, the helper `setup_action` and the tuning constants in the `verus!` block of `src/sdp_altdir.rs`; iteration specs in `src/sdpad_spec.rs`; `sdpad` itself stays outside `verus!` and calls them (L19). |
-| L19 .. L20 | not started | |
+| L18 Wen-Goldfarb-Yin iteration | done | `WgyState`, `wgy_update` (one update of the iterates), `penalty_update`, the helper `setup_action` and the tuning constants in the `verus!` block of `src/sdp_altdir.rs`; iteration specs in `src/sdpad_spec.rs`. |
+| L19 residuals and KKT quantities | done | `sdpad_loop` (the whole loop, contract `outcome_ok`), `kkt_quantities`, `read_solution`, `SdpadOutcome`, `Termination` in the `verus!` block of `src/sdp_altdir.rs`; residual, bookkeeping and outcome specs in `src/sdpad_spec.rs`; `sdpad` is the unverified wrapper setup / loop / `println!` report. The rank bound `rank >= 1` of a nonzero input was added to `gauss_elim` and `reduced_with` (no abort). |
+| L20 final audit | not started | |
 
 ## Verified-function count
 
-Last full run: **852 verified, 0 errors** (Verus `--time`: 24 s SMT time; no slow
-proofs; the whole run takes 28 s).
+Last full run: **866 verified, 0 errors** (Verus `--time`: 27 s SMT time; no slow
+proofs; the whole run takes 27 s).
+
+- 1 public and 2 private executable functions, 1 struct, 1 enum, 1 const and 1 lemma
+  (`src/sdp_altdir.rs`, `verus!` block) (L19): `sdpad_loop(sdp, s, check, var)` requires
+  `sdpad_setup_ok` and returns an `SdpadOutcome` with `outcome_ok` (below); `kkt_quantities(s, st)`
+  returns `(pinf, dinf, prim_val, gap, delta)` with `kkt_ok`; `read_solution(s, z)` returns the
+  user's solution with `solution_ok`; `Termination` (`Accuracy`, `Stagnation`, `MaxIter`),
+  `TOTAL_STEPS` (moved into `verus!`), `lemma_setup_wgy` (`sdpad_setup_ok ==> wgy_setup_ok`).
+- 17 spec functions and 4 lemmas in `src/sdpad_spec.rs` (L19): `pinf_r` (`||A(Z) - b|| /
+  (1 + ||b||)`), `dinf_r` (`||diff - S||_F / (1 + ||C_F||_1)`), `prim_val_r` (`<C_F, Z>_F`),
+  `dual_val_r` (`b . y`), `gap_r`, `delta_r`, `kkt_ok`, `objective_r` (the user's objective
+  `C(Z)` or `sum_n C_n(Z_n)`), `solution_ok` (`Z_n = zvar_r` of the two blocks of variable `n`,
+  or `Z` itself without LMIs), `psd_blocks_ok`, `iterate_ok` (a `wgy_update_ok` image for a
+  penalty in `[PEN_MIN, PEN_MAX]`), `stagnation_ok`, `stag_step`, `best_feasible_ok`,
+  `best_record_ok`, `stagnation_stop`, `outcome_ok`; `lemma_objective_value` (`prim_val_r ==
+  objective_r`), `lemma_diag_block_view`, `lemma_stag_step`, `lemma_best_feasible_step`.
+- 3 lemmas elsewhere (L19): `lemma_abs_max_prefix_attained`, `lemma_abs_max_attained`
+  (`src/lin_alg/solve_spec.rs`), `lemma_sym_one_norm_nonneg` (`src/lin_alg/sym_spec.rs`).
+  Extended contracts: `gauss_elim` ensures `abs_max_r(input) > 0 ==> rank >= 1`; `reduced_with`
+  has `rank >= 1`; `lemma_reduced_rows` gives `rows >= 1` with reduction and `rows == total`
+  without; `lemma_std_form_facts` gives `rows == 0 ==> no zero constraints` and `block_sum == 0
+  <==> no LMIs`; `sdpad_setup_ok` includes both facts; `lemma_pos_part_psd_sym` also gives the
+  packed length.
 
 - 2 public and 1 private executable functions, 1 struct and 1 lemma (`src/sdp_altdir.rs`,
   `verus!` block) (L18): `wgy_update(s, check, var, penalty, step, st)` requires `wgy_setup_ok(s)`
@@ -586,6 +609,51 @@ proofs; the whole run takes 28 s).
   `jacobi_eigen_cyc` must ensure (with `a = rvs(old(a)@)`, `b = rvs(final(a)@)`): it is the
   common eigensolver interface used by L12.
 
+## Architecture decisions (L19)
+
+- The loop of `sdpad` is the verified `sdpad_loop` (contract `outcome_ok`); `sdpad` stays
+  outside `verus!` as the wrapper "setup, loop, print the report", because `println!` cannot be
+  used inside `verus!` (the std print hook has no vstd contract, an `assume_specification` for it
+  needs the unstable `print_internals` feature, and an `external_body` wrapper per message would
+  have added trusted items). The `SdpadOutcome` record carries what the report prints (the
+  solution, the objective value, `pinf`, `dinf`, `gap` of the returned iterate) and the
+  termination reason. The three copies of the solution reconstruction became the helper
+  `read_solution`, and the residual computation the helper `kkt_quantities`.
+- `outcome_ok` states, for every termination: the returned solution is read from an iterate
+  (`iterate_ok`: a `wgy_update_ok` image, so every verified update property applies to it), the
+  returned value and residual quantities are that iterate's `kkt_ok` quantities, and the value is
+  the user's objective (`objective_r`, via `lemma_frob_half_dot` and the standard-form contract).
+  `Accuracy`: the last iterate, `delta < TOL`, every PSD block passed (`block_psd_ok`, i.e.
+  `B >= -eps I`). `Stagnation`: a PSD-verified candidate attaining the least recorded delta
+  (`best_feasible_ok`), after the stopping rule (`stagnation_stop`) fired on the last iterate;
+  nothing relates the candidate's delta to the last iterate's. `MaxIter`: the last of
+  `TOTAL_STEPS` iterates.
+- The bookkeeping is specified over ghost histories: `deltas` (one per iteration) and
+  `feasible` (whether the iteration was recorded as a candidate: delta not above the best and
+  PSD check successful; the check is still only run in that case, so the executable
+  short-circuits are unchanged). `stagnation_ok(deltas, best_delta, it_stag)`: `best_delta` is
+  a lower bound of all deltas, the last `it_stag` deltas exceed it, and the one before them
+  attains it (when `it_stag < n`). The histories and the final `best_delta`, `it_stag` are
+  zero-sized `Ghost` fields of the outcome. The sentinel `+infinity` (T7) is unconstrained in the
+  model; all invariants hold for any sentinel value (the attainment clauses are conditional), so
+  no claim about infinities was needed.
+- `kkt_quantities` divides by `1 + ||b||`, `1 + ||C_F||_1` and `1 + |dual| + |prim|`, each
+  proved `>= 1` (so T3 applies) from `lemma_dot_self_nonneg` with T1, `lemma_sym_one_norm_nonneg`
+  and `abs_r >= 0`.
+- The shape fact `c_len == 0 ==> zeros.len() == 0` of L18 is now proved (user decision: no
+  abort): `gauss_elim` ensures `rank >= 1` for a nonzero input (before the first pivot the matrix
+  is unchanged, and `skipped_bounded` with no pivots would bound every entry by
+  `TOL * max |entry|`, contradicting `lemma_abs_max_attained`); `reduced_with` carries
+  `rank >= 1`; `lemma_reduced_rows`/`lemma_std_form_facts` turn it into `rows >= 1` with LMIs,
+  and `sdpad_setup_ok` now includes the fact together with `block_size_sum == 0 <==> no LMIs`
+  (used by `solution_ok`).
+- Executable changes besides the split: `best_prim_z.clone_from(prim_z)` is `clear` +
+  `extend_from_slice` (same buffer reuse; `clone_from` is unsupported); the `for &d in symm_dims`
+  loop is an index loop; the `if let .. && ..` let-chain is nested `if`s; `f64::INFINITY` is
+  `pos_infinity()`; the unused `dual_val` is not returned by `kkt_quantities`. At the stagnation
+  exit of a single-block problem the solution is now cloned from `best_prim_z` instead of moved
+  (one allocation at termination).
+
 ## Architecture decisions (L18)
 
 - The loop body of `sdpad` is split along CLAUDE.md's list: the update of the iterates is the
@@ -943,6 +1011,11 @@ proofs; the whole run takes 28 s).
 | `let (mut block_size, mut symm_size);` and other uninitialized tuple `let`s | initialized bindings inside the loops | `lmi_dims`, `sdp_to_standard` |
 | `first` flag and `map_len_old: Option<usize>` | `i == 0` and a `usize` | `lmi_dims` |
 | `Vec::with_capacity(mat.len() * (dim_c * (dim_c + 1)) / 2)` | `Vec::with_capacity(mat.len() * ((dim_c * (dim_c + 1)) / 2))` (weaker overflow precondition) | `matrixsym_flatten` |
+| `println!` inside the solver loop (no vstd contract for the print hook) | the loop is `sdpad_loop`, returning `SdpadOutcome` (solution, value, residuals, `Termination`); `sdpad` prints outside `verus!` | `sdpad`, `sdpad_loop` |
+| `best_prim_z.clone_from(prim_z)` (unsupported) | `best_prim_z.clear(); best_prim_z.extend_from_slice(..)` (same buffer reuse) | `sdpad_loop` |
+| `if let Some(v) = opt && cond` (let-chains unsupported) | nested `if let` / `if` | `sdpad_loop` |
+| `for &d in symm_dims` (ref patterns unsupported) | index loop in the helper `read_solution` | `read_solution` |
+| `f64::INFINITY` sentinels | `pos_infinity()` (T7) | `sdpad_loop` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
 
@@ -1201,6 +1274,22 @@ Proof-engineering notes (L04, closure matching; probed 2026-10-17):
   `&v[j * n..(j + 1) * n]` (one nonlinear fact `j * n + n == (j + 1) * n` suffices, and the
   `subrange` indices are linear).
 
+Proof-engineering notes (L19):
+
+- A ghost expression `if delta > best_delta { .. }` on `f64` values (e.g. inside a `Ghost(..)`
+  field initializer) is NOT the exact-real comparison: the T4 hooks only interpret executable
+  comparisons. Compare `rv(delta) > rv(best_delta)` in ghost code.
+- `let ghost st0: WgyState = st;` snapshots a whole non-`Copy` record before a `&mut` call, and
+  `wgy_update_ok(.., &st0, &st)` then matches the callee's `old(st)`/`final(st)` contract.
+- A `pub` spec-only parameter of an executable function (`sdp` of `sdpad_loop`) is unused under
+  `cargo`; `#[allow(unused_variables)]` on the function is the least intrusive fix (a `Ghost<&T>`
+  parameter warns the same way).
+- `Ghost<Seq<f64>>` / `Ghost<f64>` / `Ghost<i32>` fields in an executable struct compile under
+  both Verus and `cargo` (zero-sized); fields of type `Seq<real>` or `int` would not build under
+  `cargo`, so the histories hold `f64` values and the specification applies `rvs`.
+- `exists` witnesses for `outcome_ok` are the current iterate (`assert(iterate_ok(s, check, st)
+  && solution_ok(..))` suffices) and, at the stagnation exit, the `choose` of `best_record_ok`.
+
 Proof-engineering notes (L03):
 
 - Associativity/commutativity of real products inside closure applications is not found by
@@ -1261,19 +1350,15 @@ Proof-engineering notes (L01):
   Frobenius norm of the row's symmetric matrix. Both changes are documented in the L14
   architecture decisions.
 
-- L17 changed the solver interface: `sdpad` now requires (informally, it is still outside
-  `verus!`) `sdpad_input_ok`, i.e. additionally `dim_fits(total_rows(sdp))`; `sdpad_setup`,
-  `SdpadSetup` and `sdpad_setup_ok` are public. Two executable changes: the single-variable
+- L17 changed the solver interface: `sdpad` now requires (informally, see L19) `sdpad_input_ok`,
+  i.e. additionally `dim_fits(total_rows(sdp))`; `sdpad_setup`, `SdpadSetup`, `sdpad_setup_ok`,
+  `sdpad_loop`, `SdpadOutcome`, `Termination` and `TOTAL_STEPS` are public. Two executable changes: the single-variable
   PSD block (`EXPOSED_BUGS.md`) and the always-full-length `dual_y` (L17 architecture
   decisions).
-- L18: `sdpad` (still outside `verus!`) calls `wgy_update` and `penalty_update`; it must
-  (informally) provide `wgy_setup_ok(&setup)`, i.e. additionally `c_len == 0 ==> zeros.len() ==
-  0`, and `penalty != 0`. L19 should move the remaining loop into `verus!`, carrying the loop
-  invariants `prim_z.len() == dual_s.len() == pk_len(d)`, `PEN_MIN <= penalty <= PEN_MAX`, the
-  counter bounds of `penalty_update`, and `dual_y.len() == point.len()` (from `dual_solve_ok`
-  and the `wgy_setup_ok` shape fact) for `dot_prod(point, dual_y)`; the residual `dinf` uses
-  `is_dual_slack`, `pinf` uses `setup_action_r`, and the best-solution bookkeeping needs
-  `lemma_pos_part_psd_sym` only for documentation (the PSD test is `psd_block_check`).
+- L19: the only unverified solver code is the wrapper `sdpad` (outside `verus!` because of
+  `println!`): it must (informally) provide `sdpad_input_ok(sdp, check)` to `sdpad_setup`, whose
+  contract `sdpad_setup_ok` is the precondition of the verified `sdpad_loop`. `SdpadOutcome`
+  carries zero-sized `Ghost` fields (the delta history and the bookkeeping) for the contract.
 - The full-verification command in CLAUDE.md needs `-V no-solver-version-check` on
   this machine (Z3 4.16.0 with build hashcode); without it Verus panics as soon as any
   function is verified.

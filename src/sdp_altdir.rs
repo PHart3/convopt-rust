@@ -1,7 +1,7 @@
 pub use crate::lin_alg::jacobi::*;
 use crate::sdp::*;
 use crate::lin_alg::comparison::{relative_residual_is_small, residual_is_small};
-use crate::trusted::abort;
+use crate::trusted::{abort, pos_infinity};
 use vstd::prelude::*;
 use vstd::slice::slice_to_vec;
 #[cfg(verus_keep_ghost)]
@@ -21,18 +21,20 @@ use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::ldlt_spec::blocks_fit;
 #[cfg(verus_keep_ghost)]
+use crate::lin_alg::solve_spec::abs_max_r;
+#[cfg(verus_keep_ghost)]
 use crate::lin_alg::spectral_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::sdp_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::sdpad_spec::*;
 
-// maximum number of iterations to run
-const TOTAL_STEPS: usize = 5000;
-
 verus! {
 
 broadcast use crate::trusted::group_real_model;
+
+// maximum number of iterations to run
+pub const TOTAL_STEPS: usize = 5000;
 
 // tuning parameters: the penalty interval and scaling factor, the step of the primal update,
 // the stagnation thresholds, and the consecutive-iteration count and ratio thresholds of the
@@ -66,8 +68,9 @@ pub struct SdpadSetup {
 /// The contract of the setup: the data (with the objective obj0 before reweighting) is the
 /// standard form of sdp, obj_frob is obj0 with halved off-diagonal entries, c_len is the number
 /// of dense constraint rows (followed by the zero constraints in point, whose right-hand sides
-/// are zero), gram_small is the packed Gram matrix of the dense rows, and psd_blocks lists the
-/// diagonal-block partition of the variable.
+/// are zero; there are dense rows whenever there are zero constraints), gram_small is the packed
+/// Gram matrix of the dense rows, block_size_sum is the total LMI block size (zero exactly
+/// without LMIs), and psd_blocks lists the diagonal-block partition of the variable.
 pub open spec fn sdpad_setup_ok(sdp: &SDP, check: bool, s: SdpadSetup) -> bool {
     let d = s.var_dim as int;
     let cols = pk_len(d);
@@ -86,7 +89,9 @@ pub open spec fn sdpad_setup_ok(sdp: &SDP, check: bool, s: SdpadSetup) -> bool {
     &&& s.mat_dense@.len() == rows * cols
     &&& valid_zero_list(s.zeros@, d)
     &&& forall|q: int| rows <= q < s.point@.len() ==> rv(#[trigger] s.point@[q]) == 0.0real
+    &&& rows == 0 ==> nz == 0
     &&& s.block_size_sum as int == block_sum(bd)
+    &&& (s.block_size_sum == 0) == (sdp.lmi@.len() == 0)
     &&& rows > 0 ==> is_constraint_gram(rvs(s.gram_small@), rvs(s.mat_dense@), rows, d)
     &&& rows == 0 ==> s.gram_small@.len() == 0
     &&& block_list_ok(s.psd_blocks@, bs)
@@ -707,117 +712,317 @@ pub fn penalty_update(penalty: f64, pinf: f64, dinf: f64, it_pinf: i32, it_dinf:
     res
 }
 
-} // verus!
+/* ---------- residuals, KKT quantities and termination ---------- */
 
-// the alternating direction dual augmented Lagrangian method
-pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant) -> (Vec<SymMatrix>, f64) {
-    let setup = sdpad_setup(sdp, check_constraints);
-    let obj_frob = &setup.obj_frob;
-    let constr_mat = (&setup.mat_dense, &setup.zeros);
-    let (point, var_dim, c_len, block_size_sum) = (&setup.point, setup.var_dim, setup.c_len, setup.block_size_sum);
-    let (symm_dims, psd_blocks) = (&setup.symm_dims, &setup.psd_blocks);
-    let (mut it_stag, mut it_pinf, mut it_dinf) = (0, 0, 0);
+/// Why the loop stopped.
+pub enum Termination {
+    Accuracy,
+    Stagnation,
+    MaxIter,
+}
+
+/// The outcome of the loop (outcome_ok, sdpad_spec.rs): the user's solution read from an
+/// iterate, that iterate's objective value and residual quantities, the termination reason,
+/// and (ghost) the deltas of all iterations, which of them were recorded as candidates, and the
+/// stagnation bookkeeping.
+pub struct SdpadOutcome {
+    pub result: Vec<SymMatrix>,
+    pub value: f64,
+    pub pinf: f64,
+    pub dinf: f64,
+    pub gap: f64,
+    pub termination: Termination,
+    pub deltas: Ghost<Seq<f64>>,
+    pub feasible: Ghost<Seq<bool>>,
+    pub best_delta: Ghost<f64>,
+    pub it_stag: Ghost<i32>,
+}
+
+/// The setup contract contains the shape facts of the update.
+pub proof fn lemma_setup_wgy(sdp: &SDP, check: bool, s: &SdpadSetup)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+    ensures
+        wgy_setup_ok(s),
+{
+}
+
+// the residuals and KKT quantities of the iterate st (contract: kkt_ok): the primal
+// infeasibility ||A(Z) - b|| / (1 + ||b||), the dual infeasibility
+// ||(C - A*(y)) - S||_F / (1 + ||C||_1), the objective values <C, Z>_F and b . y, the relative
+// duality gap, and delta = max(pinf, dinf, gap)
+fn kkt_quantities(s: &SdpadSetup, st: &WgyState) -> (q: (f64, f64, f64, f64, f64))
+    requires
+        wgy_setup_ok(s),
+        st.prim_z@.len() == pk_len(s.var_dim as int),
+        st.dual_s@.len() == pk_len(s.var_dim as int),
+        st.diff@.len() == pk_len(s.var_dim as int),
+        st.dual_y@.len() == s.point@.len(),
+    ensures
+        kkt_ok(s, st, rv(q.0), rv(q.1), rv(q.2), dual_val_r(s, rvs(st.dual_y@)), rv(q.3), rv(q.4)),
+{
+    let var_dim = s.var_dim;
+    let ghost d = var_dim as int;
+    let ghost b = rvs(s.point@);
+    let ghost cf = rvs(s.obj_frob@);
+    proof {
+        // the denominators are at least 1
+        lemma_dot_self_nonneg(b);
+        assert(norm_r(b) >= 0.0real);
+        lemma_sym_one_norm_nonneg(cf, d);
+    }
+    let action = setup_action(s, &st.prim_z);
+    let pinf = euclid_distance(&action, &s.point) / (1.0 + euclid_norm(&s.point));
+    let dinf = frob_dist_sym(&st.diff, &st.dual_s, var_dim) / (1.0 + sym_mat_one_norm(&s.obj_frob, var_dim));
+    let prim_val = frob_prod_sym(&s.obj_frob, &st.prim_z, var_dim);
+    let dual_val = dot_prod(&s.point, &st.dual_y);
+    let gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
+    let delta = pinf.max(dinf).max(gap);
+    (pinf, dinf, prim_val, gap, delta)
+}
+
+// the user's solution read from the standard-form variable z (contract: solution_ok): z itself
+// without LMIs, otherwise the difference of the two diagonal blocks of every user variable,
+// which follow the LMI blocks
+fn read_solution(s: &SdpadSetup, z: &SymMatrix) -> (result: Vec<SymMatrix>)
+    requires
+        dim_fits(s.var_dim as int),
+        z@.len() == pk_len(s.var_dim as int),
+        s.block_size_sum as int == block_sum(dims_of(s.block_dims@)),
+        s.block_size_sum > 0 ==> std_dim(dims_of(s.block_dims@), dims_of(s.symm_dims@)) == s.var_dim as int,
+    ensures
+        solution_ok(s, rvs(z@), result@),
+{
+    let ghost d = s.var_dim as int;
+    let ghost vd = dims_of(s.symm_dims@);
+    let ghost bsum = s.block_size_sum as int;
+    let mut result: Vec<SymMatrix> = Vec::new();
+    if s.block_size_sum == 0 {
+        result.push(z.clone());
+        return result;
+    }
+    let nv = s.symm_dims.len();
+    let mut symm_offset: usize = 0;
+    proof {
+        assert forall|i: int| 0 <= i < vd.len() implies #[trigger] vd[i] >= 0 by {}
+    }
+    for n in 0..nv
+        invariant
+            nv == s.symm_dims@.len(),
+            vd == dims_of(s.symm_dims@),
+            bsum == s.block_size_sum as int,
+            bsum > 0,
+            d == s.var_dim as int,
+            dim_fits(d),
+            z@.len() == pk_len(d),
+            forall|i: int| 0 <= i < vd.len() ==> #[trigger] vd[i] >= 0,
+            bsum + 2 * sum_upto(vd, nv as int) == d,
+            symm_offset as int == 2 * sum_upto(vd, n as int),
+            result@.len() == n,
+            forall|k: int| 0 <= k < n ==> rvs(#[trigger] result@[k]@) == zvar_r(rvs(z@), var_off(bsum, vd, k), vd[k]),
+    {
+        let dn = s.symm_dims[n];
+        proof {
+            assert(sum_upto(vd, n as int + 1) == sum_upto(vd, n as int) + vd[n as int]);
+            lemma_sum_upto_monotone(vd, n as int + 1, nv as int);
+            lemma_dim_fits_monotone(bsum + symm_offset + dn, d);
+            lemma_dim_fits_monotone(bsum + symm_offset + 2 * dn, d);
+            lemma_pk_col_start_monotone(bsum + symm_offset + dn, d);
+            lemma_pk_col_start_monotone(bsum + symm_offset + 2 * dn, d);
+        }
+        let start = s.block_size_sum + symm_offset;
+        let b1 = sym_matrix_diag_block(start, dn, z);
+        let b2 = sym_matrix_diag_block(start + dn, dn, z);
+        proof {
+            lemma_diag_block_view(b1@, z@, start as int, dn as int);
+            lemma_diag_block_view(b2@, z@, start as int + dn as int, dn as int);
+        }
+        result.push(vect_subt(&b1, &b2));
+        symm_offset = symm_offset + 2 * dn;
+    }
+    result
+}
+
+// the solver loop (contract: outcome_ok): Wen-Goldfarb-Yin updates with the penalty
+// adaptation until the current iterate has delta < TOL and PSD-verified blocks, the stagnation
+// rule fires (the best PSD-verified candidate is returned), or TOTAL_STEPS iterations were run
+// (the problem sdp is used by the specification only)
+#[allow(unused_variables)]
+pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -> (o: SdpadOutcome)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+    ensures
+        outcome_ok(sdp, s, check, o),
+{
+    let ghost d = s.var_dim as int;
+    let ghost cols = pk_len(d);
+    proof {
+        lemma_setup_wgy(sdp, check, s);
+        lemma_dim_fits_idx(d, d);
+    }
+    let var_dim = s.var_dim;
+    let (mut it_stag, mut it_pinf, mut it_dinf): (i32, i32, i32) = (0, 0, 0);
     let mut penalty = 5.0;
     let var_dim_tot = (var_dim * (var_dim + 1)) / 2;
-    let (prim_z, dual_s) : (SymMatrix, SymMatrix) = initial_iterates(var_dim);
+    let (prim_z, dual_s): (SymMatrix, SymMatrix) = initial_iterates(var_dim);
     let mut st = WgyState {
-	prim_z, dual_s, dual_y: Vec::new(), diff: Vec::new(), dual_sfull: Vec::with_capacity(var_dim),
-	inverse_y: Vec::with_capacity(c_len), dual_sfull_temp: Vec::with_capacity(var_dim),
+        prim_z, dual_s, dual_y: Vec::new(), diff: Vec::new(), dual_sfull: Vec::with_capacity(var_dim),
+        inverse_y: Vec::with_capacity(s.c_len), dual_sfull_temp: Vec::with_capacity(var_dim),
     };
-    let (mut pinf, mut dinf, mut gap) : (f64, f64, f64);
-    let mut delta : f64;
-    let mut best_delta = f64::INFINITY;
-    let (mut symm_offset, mut result) : (usize, Vec<SymMatrix>) = (0, Vec::new());
-    let (mut prim_val, mut dual_val) : (f64, f64);
-    let mut best_prim_z : SymMatrix = Vec::with_capacity(var_dim_tot);
-    let (mut best_feas_delta, mut best_pinf, mut best_dinf, mut best_gap, mut best_prim_val) : (f64, f64, f64, f64, Option<f64>) =
-	(f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::INFINITY, None);
+    let mut best_delta = pos_infinity();
+    let mut best_prim_z: SymMatrix = Vec::with_capacity(var_dim_tot);
+    let (mut best_feas_delta, mut best_pinf, mut best_dinf, mut best_gap): (f64, f64, f64, f64) =
+        (pos_infinity(), pos_infinity(), pos_infinity(), pos_infinity());
+    let mut best_prim_val: Option<f64> = None;
+    // the deltas of the iterations so far and which of them were recorded as candidates
+    let ghost mut deltas: Seq<f64> = Seq::empty();
+    let ghost mut feasible: Seq<bool> = Seq::empty();
 
     // begin main computation
-    let mut count = 0;
-    loop {
-	count += 1;
+    let mut count: usize = 0;
+    loop
+        invariant
+            sdpad_setup_ok(sdp, check, *s),
+            wgy_setup_ok(s),
+            d == s.var_dim as int,
+            cols == pk_len(d),
+            st.prim_z@.len() == cols,
+            st.dual_s@.len() == cols,
+            rv(PEN_MIN) <= rv(penalty) <= rv(PEN_MAX),
+            0 <= it_pinf < PEN_COUNT,
+            0 <= it_dinf < PEN_COUNT,
+            count < TOTAL_STEPS,
+            deltas.len() == count,
+            feasible.len() == count,
+            it_stag <= count,
+            stagnation_ok(rvs(deltas), rv(best_delta), it_stag as int),
+            best_feasible_ok(rvs(deltas), feasible, rv(best_feas_delta), best_prim_val is Some),
+            best_prim_val matches Some(v)
+                ==> best_record_ok(s, check, best_prim_z@, rv(best_pinf), rv(best_dinf), rv(best_gap), rv(v), rv(best_feas_delta)),
+        decreases TOTAL_STEPS - count,
+    {
+        count += 1;
 
-	wgy_update(&setup, check_constraints, jac_variant, penalty, STEP, &mut st);
-	let (prim_z, dual_s, dual_y, diff) = (&st.prim_z, &st.dual_s, &st.dual_y, &st.diff);
+        let ghost st0: WgyState = st;
+        let ghost mu = rv(penalty);
+        wgy_update(s, check, var, penalty, STEP, &mut st);
+        proof {
+            assert(wgy_update_ok(s, check, mu, rv(STEP), &st0, &st));
+            assert(iterate_ok(s, check, st));
+            lemma_pos_part_psd_sym(rvs(st.dual_sfull@), rvs(st.dual_s@), d);
+        }
+        let (pinf, dinf, prim_val, gap, delta) = kkt_quantities(s, &st);
+        let ghost deltas0 = deltas;
+        proof {
+            deltas = deltas.push(delta);
+            assert(rvs(deltas) =~= rvs(deltas0).push(rv(delta)));
+            lemma_stag_step(rvs(deltas0), rv(best_delta), it_stag as int, rv(delta));
+        }
 
-	pinf = euclid_distance(&constraint_action(&constr_mat, prim_z), point) / (1.0 + euclid_norm(point));
-	dinf = frob_dist_sym(diff, dual_s, var_dim) / (1.0 + sym_mat_one_norm(obj_frob, var_dim));
+        if residual_is_small(delta, TOL) && psd_block_check(&st.prim_z, &s.psd_blocks) {
+            let result = read_solution(s, &st.prim_z);
+            let o = SdpadOutcome {
+                result, value: prim_val, pinf, dinf, gap, termination: Termination::Accuracy,
+                deltas: Ghost(deltas), feasible: Ghost(feasible.push(true)),
+                best_delta: Ghost(if rv(delta) > rv(best_delta) { best_delta } else { delta }),
+                it_stag: Ghost(if rv(delta) > rv(best_delta) { (it_stag + 1) as i32 } else { 0 }),
+            };
+            proof {
+                lemma_objective_value(sdp, check, s, rvs(st.prim_z@));
+                assert(iterate_ok(s, check, st) && solution_ok(s, rvs(st.prim_z@), o.result@));
+            }
+            return o;
+        }
 
-	(prim_val, dual_val) = (frob_prod_sym(obj_frob, prim_z, var_dim), dot_prod(point, dual_y));
-	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
-	delta = pinf.max(dinf).max(gap);
+        // record best solution so far
+        let record = !(delta > best_feas_delta) && psd_block_check(&st.prim_z, &s.psd_blocks);
+        proof {
+            lemma_best_feasible_step(rvs(deltas0), feasible, rv(best_feas_delta), best_prim_val is Some, rv(delta), record);
+            feasible = feasible.push(record);
+        }
+        if record {
+            best_feas_delta = delta;
+            best_pinf = pinf;
+            best_dinf = dinf;
+            best_gap = gap;
+            best_prim_z.clear();
+            best_prim_z.extend_from_slice(st.prim_z.as_slice());
+            best_prim_val = Some(prim_val);
+            proof {
+                assert(best_prim_z@ =~= st.prim_z@);
+                assert(best_record_ok(s, check, best_prim_z@, rv(best_pinf), rv(best_dinf), rv(best_gap), rv(prim_val), rv(best_feas_delta)));
+            }
+        }
 
-	if residual_is_small(delta, TOL) &&
-	    psd_block_check(prim_z, psd_blocks) {
-		if block_size_sum == 0 {
-		    result.push(prim_z.clone());
-		} else {
-		    for &d in symm_dims {
-			result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, prim_z),
-					      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, prim_z)));
-			symm_offset += 2 * d
-		    }
-		}
-		println!("\nsdpad terminated with desired accuracy\n");
-		return (result, prim_val);
-	    }
+        // record general stagnation
+        if delta > best_delta {
+            it_stag += 1;
+        } else {
+            best_delta = delta;
+            it_stag = 0;
+        }
+        if let Some(best_val) = best_prim_val {
+            if (it_stag > STAG1 && residual_is_small(delta, 1e-5)) ||
+                (it_stag > STAG2 && residual_is_small(delta, 1e-4)) ||
+                (it_stag > STAG3 && residual_is_small(delta, 1e-3)) {
+                let result = read_solution(s, &best_prim_z);
+                let o = SdpadOutcome {
+                    result, value: best_val, pinf: best_pinf, dinf: best_dinf, gap: best_gap, termination: Termination::Stagnation,
+                    deltas: Ghost(deltas), feasible: Ghost(feasible), best_delta: Ghost(best_delta), it_stag: Ghost(it_stag),
+                };
+                proof {
+                    let stb = choose|stb: WgyState| #[trigger] iterate_ok(s, check, stb)
+                        && stb.prim_z@ == best_prim_z@
+                        && psd_blocks_ok(s, rvs(best_prim_z@))
+                        && kkt_ok(s, &stb, rv(best_pinf), rv(best_dinf), rv(best_val), dual_val_r(s, rvs(stb.dual_y@)), rv(best_gap), rv(best_feas_delta));
+                    lemma_objective_value(sdp, check, s, rvs(stb.prim_z@));
+                    assert(iterate_ok(s, check, stb) && solution_ok(s, rvs(stb.prim_z@), o.result@));
+                }
+                return o;
+            }
+        }
 
-	// record best solution so far
-	if !(delta > best_feas_delta) && psd_block_check(prim_z, psd_blocks) {
-	    best_feas_delta = delta;
-	    best_pinf = pinf;
-	    best_dinf = dinf;
-	    best_gap = gap;
-	    best_prim_z.clone_from(prim_z);
-	    best_prim_val = Some(prim_val);
-	}
-	
-	// record general stagnation
-	if delta > best_delta {
-	    it_stag += 1;
-	} else {
-	    best_delta = delta;
-	    it_stag = 0;
-	}
-	if let Some(best_prim_val) = best_prim_val &&
-	    ((it_stag > STAG1 && residual_is_small(delta, 1e-5)) ||
-	     (it_stag > STAG2 && residual_is_small(delta, 1e-4)) ||
-	     (it_stag > STAG3 && residual_is_small(delta, 1e-3))) {
-		if block_size_sum == 0 {
-		    result.push(best_prim_z);
-		} else {
-		    for &d in symm_dims {
-			result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &best_prim_z),
-					      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &best_prim_z)));
-			symm_offset += 2 * d
-		    }
-		}
-		println!("\nsdpad terminated due to stagnation but with reasonable accuracy");
-		println!("solution quality of best solution found: pinf={:.3e} dinf={:.3e} gap={:.3e}", best_pinf, best_dinf, best_gap);
-		return (result, best_prim_val);
-	    }
+        if count == TOTAL_STEPS {
+            let result = read_solution(s, &st.prim_z);
+            let o = SdpadOutcome {
+                result, value: prim_val, pinf, dinf, gap, termination: Termination::MaxIter,
+                deltas: Ghost(deltas), feasible: Ghost(feasible), best_delta: Ghost(best_delta), it_stag: Ghost(it_stag),
+            };
+            proof {
+                lemma_objective_value(sdp, check, s, rvs(st.prim_z@));
+                assert(iterate_ok(s, check, st) && solution_ok(s, rvs(st.prim_z@), o.result@));
+            }
+            return o;
+        }
 
-	if count == TOTAL_STEPS {
-	    if block_size_sum == 0 {
-		result.push(prim_z.clone());
-	    } else {
-		for &d in symm_dims {
-		    result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, prim_z),
-					  &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, prim_z)));
-		    symm_offset += 2 * d
-		}
-	    }
-	    println!("\nsdpad terminated after {} iterations", TOTAL_STEPS);
-	    println!("solution quality of final iteration: pinf={:.3e} dinf={:.3e} gap={:.3e}", pinf, dinf, gap);
-	    return (result, prim_val);
-	}
-
-	let (p, ip, id) = penalty_update(penalty, pinf, dinf, it_pinf, it_dinf);
-	penalty = p;
-	it_pinf = ip;
-	it_dinf = id;
+        let (p, ip, id) = penalty_update(penalty, pinf, dinf, it_pinf, it_dinf);
+        penalty = p;
+        it_pinf = ip;
+        it_dinf = id;
     }
+}
+
+} // verus!
+
+// the alternating direction dual augmented Lagrangian method: the setup, the verified loop,
+// and the report of how it terminated
+pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant) -> (Vec<SymMatrix>, f64) {
+    let setup = sdpad_setup(sdp, check_constraints);
+    let o = sdpad_loop(sdp, &setup, check_constraints, jac_variant);
+    match o.termination {
+        Termination::Accuracy => {
+            println!("\nsdpad terminated with desired accuracy\n");
+        }
+        Termination::Stagnation => {
+            println!("\nsdpad terminated due to stagnation but with reasonable accuracy");
+            println!("solution quality of best solution found: pinf={:.3e} dinf={:.3e} gap={:.3e}", o.pinf, o.dinf, o.gap);
+        }
+        Termination::MaxIter => {
+            println!("\nsdpad terminated after {} iterations", TOTAL_STEPS);
+            println!("solution quality of final iteration: pinf={:.3e} dinf={:.3e} gap={:.3e}", o.pinf, o.dinf, o.gap);
+        }
+    }
+    (o.result, o.value)
 }
 
 // testing

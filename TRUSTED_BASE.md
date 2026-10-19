@@ -122,3 +122,12 @@ constants `PEN_MIN = 1e-4`, `PEN_MAX = 1e4`, `PEN_FACT = 0.5`, `PEN_RATIO1 = PEN
 covered by T3 only when `dinf != 0`, and the contract `penalty_update_ok` claims the ratio's
 value only in that case; the division by `PEN_FACT` is by a nonzero constant. The spec module
 `src/sdpad_spec.rs` remains spec- and proof-only.
+L19 added no trusted items. `sdpad_loop`, `kkt_quantities` and `read_solution` use the literals
+`0.0`, `1.0`, `5.0`, `1e-3`, `1e-4`, `1e-5` and `TOL` (T5), the `abs`, `max` contracts (T6), the
+comparisons of T4, and `pos_infinity` (T7) for the four bookkeeping sentinels (unconstrained; the
+bookkeeping contracts `stagnation_ok`, `best_feasible_ok` hold for any sentinel value). The three
+divisions of `kkt_quantities` are covered by T3 because each denominator is `1 + x` with `x >= 0`
+(a Euclidean norm, T1; a matrix 1-norm; absolute values). The best-solution copy uses vstd's
+`extend_from_slice` contract (a library specification). `sdpad` itself stays outside `verus!`: it
+only runs the verified setup and loop and prints the termination report (`println!` has no vstd
+contract and cannot be given one without an unstable feature; no trusted wrapper was added).

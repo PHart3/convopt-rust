@@ -96,7 +96,7 @@ status: done
 L19 | Residuals and KKT quantities: primal residual pinf, dual residual dinf, objective values, duality gap, delta, feasibility check, stagnation/best-solution bookkeeping, final result reconstruction; correspondence with mathematical definitions and tolerance contracts |
 deps: L18 |
 targets: sdpad (termination section) |
-status: not started
+status: done
 
 L20 | Final audit: full-crate verification, cargo build/test pass, TRUSTED_BASE.md audit of every external_body/assume, VERIFICATION_PROGRESS.md final counts |
 deps: L19 |

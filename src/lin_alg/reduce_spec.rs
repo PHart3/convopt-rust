@@ -324,13 +324,15 @@ pub proof fn lemma_dropped_row_residual(e: Seq<real>, row_dim: int, col_dim: int
 /* ---------- the result of the reduction ---------- */
 
 /// The reduced system res (rank rows) obtained from the input a0 through the echelon form e
-/// with pivot sequence pivots: res row i is echelon row i divided by its Frobenius norm.
+/// with pivot sequence pivots: res row i is echelon row i divided by its Frobenius norm. The
+/// rank is positive (the input of the reduction is nonzero).
 pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>) -> bool {
     let cd = red_col_dim(dim);
     let rd = a0.len() as int / cd;
     let rank = pivots.len() as int;
     let eps = gauss_eps_r(a0);
     &&& e.len() == a0.len()
+    &&& rank >= 1
     &&& res.len() == cd * rank
     &&& same_solutions(a0, e, rd, cd)
     &&& echelon_form(e, rd, cd, pivots, eps)

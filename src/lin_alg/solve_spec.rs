@@ -46,6 +46,34 @@ pub proof fn lemma_abs_max_prefix_step(v: Seq<real>, n: nat)
 {
 }
 
+/// A positive prefix maximum is attained by some entry.
+pub proof fn lemma_abs_max_prefix_attained(v: Seq<real>, n: nat)
+    requires
+        abs_max_prefix_r(v, n) > 0.0real,
+    ensures
+        exists|t: int| 0 <= t < n && abs_r(#[trigger] v[t]) == abs_max_prefix_r(v, n),
+    decreases n,
+{
+    if n > 0 {
+        lemma_abs_max_prefix_step(v, (n - 1) as nat);
+        if abs_r(v[n - 1]) == abs_max_prefix_r(v, n) {
+            assert(abs_r(v[n - 1]) == abs_max_prefix_r(v, n));
+        } else {
+            lemma_abs_max_prefix_attained(v, (n - 1) as nat);
+        }
+    }
+}
+
+/// A positive largest magnitude is attained by some entry.
+pub proof fn lemma_abs_max_attained(v: Seq<real>)
+    requires
+        abs_max_r(v) > 0.0real,
+    ensures
+        exists|t: int| 0 <= t < v.len() && abs_r(#[trigger] v[t]) == abs_max_r(v),
+{
+    lemma_abs_max_prefix_attained(v, v.len());
+}
+
 /* ---------- partial row sums ---------- */
 
 /// sum_{k < n} A_ik x_k: row i of A against the first n entries of x.
