@@ -61,7 +61,7 @@ status: done
 L12 | PSD spectral operations via the common eigensolver interface: poseigendecomp selects eigenpairs with lambda > 0, negeigendecomp selects lambda < -1e-8 * scale; outputs are the selected columns of Q and diagonal of B; reconstruction diag_scale_gram(vals, vects) = sum lambda_i q_i q_i^T; positivity of selected values gives PSD reconstruction |
 deps: L10, L11, L04 |
 targets: poseigendecomp, negeigendecomp |
-status: not started
+status: done
 
 L13 | Gaussian elimination: row-echelon invariants, partial-pivot selection correctness (chosen pivot has maximal magnitude in remaining rows of the column), tolerance-based skip rule, row operations preserve row space / solution set, rank and consistency outputs |
 deps: L02 |
@@ -86,7 +86,7 @@ status: done
 L17 | Solver linear-system setup: Frobenius-weighted objective (scale_off_diag), Gram matrix of constraints, regularized Gram solve with relative-residual contract, psd_blocks partition, initial iterates |
 deps: L16, L04, L06 |
 targets: sdpad (setup section) |
-status: not started
+status: done
 
 L18 | Wen-Goldfarb-Yin iteration: formalize the executable iteration spec (y from (A A^*) y = A(C - S) + penalty (b - A(Z)); W = C - A^*(y) - penalty Z; S = Pi_pos(W) via poseigendecomp thresholds; Z <- (1 - step) Z + (step / penalty)(S - W); penalty updates) and prove each executable iteration matches it |
 deps: L17, L12, L07 |

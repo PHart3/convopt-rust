@@ -1640,6 +1640,14 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
             blocks.push((sum, lmis[b].1.clone()));
             block_offset += block_size;
         }
+        proof {
+            assert forall|n: int| 0 <= n < sdp.objective@.len()
+                implies part_shape((#[trigger] sdp.objective@[n])@, symm_dims@[n] as int) && symm_dims@[n] >= 1 by {
+                assert(part_shape(sdp.objective@[n]@, vd[n]));
+                assert(vd[n] >= 1);
+                assert(vd[n] == symm_dims@[n] as int);
+            }
+        }
         let obj_sum = objective_sum(&sdp.objective, &symm_dims, block_size_sum, total_dim);
         let constr_len = sdp.constraint.1.len();
         let constr_sum: Matrix = if sdp.constraint.0.is_empty() {

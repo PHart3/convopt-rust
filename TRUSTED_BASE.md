@@ -102,3 +102,16 @@ The constraint reduction's nonzero-input precondition is discharged from the `-1
 the LMI rows (with LMIs) and from the precondition `single_constraint_nonzero` (without). The
 runtime `assert_eq!` checks of the original (`start == total_dim`, `zeros.len() == zeros_len`)
 are now static assertions.
+L12 added no trusted items. `poseigendecomp`, `negeigendecomp` and their helper use the
+literals `0.0` and `1e-8` (T5), the comparison `> 0.0` (T4), `is_significantly_negative`
+(T4 and the `neg` wrapper, T7) and the L05 helper `pivot_scale` (`abs`, `max` contracts, T6).
+`src/lin_alg/spectral_spec.rs` is spec- and proof-only over Verus reals; its threshold `1e-8`
+appears as the real constant `0.00000001real`, matching the T5 literal.
+L17 added no trusted items. The setup helpers of `src/sdp_altdir.rs` use the literals `0.0`,
+`0.5`, `1.0`, `1e-9` and `TOL` (T5), the `max` contract (T6), the comparison
+`relative_residual_is_small` (T4; its division is covered by T3 only when the denominator is
+nonzero, which is exactly the case in which the contract `dual_solve_ok` claims the bound) and
+`abort` (T8) for the data-dependent failure of the residual test of the regularized Gram solve
+(the original `panic!`). `src/sdpad_spec.rs` is spec- and proof-only; its threshold `1e-9`
+appears as the real constant `0.000000001real`.
+

@@ -33,12 +33,64 @@ Runtime checks: `cargo build`, `cargo test`.
 | L10 cached Jacobi | done | `index_max_in_col`, `cached_pivot_col` (new helper), `jacobi_eigen_cach` in the `verus!` block of `src/lin_alg/jacobi.rs`; cache specs there, `offdiag_max_at` in `eigen_spec.rs`, `same_outside` in `jacobi_spec.rs`. **Two executable corrections** (stale `biggest`, out-of-column cache read), see the L10 architecture decisions and `EXPOSED_BUGS.md`. |
 | L11 column-cyclic Jacobi | done | `jacobi_eigen_cyc` in the `verus!` block of `src/lin_alg/jacobi.rs`; column-cyclic order `cyc_order`/`visits_each_pair_once` in `eigen_spec.rs`. |
 | L16 standard-form conversion | done | `src/sdp_spec.rs` (new spec/proof module); `SDP` struct, `sdp_to_standard` and seven helpers in the first `verus!` block of `src/sdp.rs`. Public API: `SDP` fields are now `pub`; `sdp_to_standard` has shape preconditions (`sdp_single_input_ok` / `sdp_lmi_input_ok`). |
-| L12, L17 .. L20 | not started | |
+| L12 PSD spectral operations | done | `src/lin_alg/spectral_spec.rs` (new spec/proof module); `JacobiVariant`, the helper `select_eigenpairs`, `poseigendecomp`, `negeigendecomp` in the `verus!` block of `src/lin_alg/jacobi.rs`; `pivot_scale` (L05) is now `pub(crate)`. |
+| L17 solver linear-system setup | done | `src/sdpad_spec.rs` (new spec/proof module); `SdpadSetup`, `sdpad_setup`, `psd_block_list`, `dual_solve`, `initial_iterates` in a `verus!` block of `src/sdp_altdir.rs`; `sdpad` itself stays outside `verus!` and calls them (L18/L19). **One executable correction** (empty PSD block list for single-variable problems), see the L17 architecture decisions and `EXPOSED_BUGS.md`. |
+| L18 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **778 verified, 0 errors** (Verus `--time`: 20 s SMT time; no slow
+Last full run: **825 verified, 0 errors** (Verus `--time`: 22 s SMT time; no slow
 proofs; the whole run takes 26 s).
+
+- 1 public and 3 private executable functions (`src/sdp_altdir.rs`, `verus!` block) (L17):
+  `sdpad_setup(sdp, check)` requires `sdpad_input_ok` (the `sdp_to_standard` preconditions plus
+  `dim_fits(total_rows)`, the number of stacked constraint rows) and returns the `SdpadSetup`
+  record with `sdpad_setup_ok`: for some packed objective `obj0`, the record's data is the
+  standard form (`std_form_ok`, L16), `obj_frob` is `obj0` with halved off-diagonal entries
+  (`half_off_diag`), `c_len` is the number of dense rows (the zero-constraint rows follow, with
+  zero right-hand sides), `mat_dense` has `c_len * pk_len(d)` entries, `gram_small` is the
+  packed Gram matrix of the dense rows (`is_constraint_gram`, L04; empty when `c_len == 0`),
+  `block_size_sum` is the total LMI block size, and `psd_blocks` is the block list of the
+  partition `psd_partition` of the variable (`block_list_ok`, sizes summing to `d`,
+  `blocks_fit`); also `d >= 1`, `dim_fits(d)`, `dim_fits(c_len)`. `psd_block_list` builds that
+  list; `dual_solve(gram, rhs, c_len, check)` ensures `dual_solve_ok`; `initial_iterates`
+  ensures `initial_iterates_ok` (`Z = I`, `S = 0`).
+- 11 spec functions and 9 lemmas in `src/sdpad_spec.rs` (L17): `std_form_ok` (dispatch on
+  the two conversion contracts), `total_rows`, `sdpad_input_ok`, `lemma_reduced_rows` (the
+  reduced system has at most `total_rows` rows: the result length is `rank * (cols + 1)` and
+  the echelon form has `rank <= rows`), `lemma_std_form_facts` (the facts of the standard form
+  the setup relies on); `half_off_diag` with `lemma_frob_half_dot` (`<cf, z>_F = c . z`,
+  through `lemma_frob_tri` and `lemma_tri_sum_packed` of L04); `psd_partition`,
+  `block_list_ok`, `lemma_block_sizes_entry`, `lemma_block_list_fits`; `reg_shift_r` (`0`
+  with reduced constraints, else `TOL * max(max_i |G_ii|, 1)`), `residual_ok`,
+  `dual_solve_ok` (`(G + s I) y_top = b_top`, `y_bottom = b_bottom`, and for the regularized
+  solve `||G y_top - b_top|| / (||G||_F ||y_top|| + ||b_top||) < 1e-9` whenever the denominator
+  is nonzero), `lemma_block_ident_solve_inv` (the converse of L06's block solve lemma),
+  `lemma_shift_zero_meq`, `diag_shifted` with `lemma_diag_shifted_view`; `initial_iterates_ok`.
+
+- 3 executable functions (`src/lin_alg/jacobi.rs`, `verus!` block) (L12): `poseigendecomp` and
+  `negeigendecomp` require the eigensolver preconditions (`dim >= 1`, `dim_fits(dim)`, a packed
+  input of length `>= pk_len(dim)`) and ensure `exists q: spectral_part_ok(A, B, q, sel, vals,
+  vects, dim)`: `eigensolver_ok(A, B, q, diag(B), dim)` (L09) for the final content `B` of the
+  input and some accumulated `q`, and `selected_pairs`: the returned values and columns are the
+  pairs `(B_kk, column k of q)` at the indices `sel_indices(sel, dim)` (increasing order), with
+  `sel = pos_sel(diag(B))` (`B_kk > 0`) resp. `neg_sel(diag(B), pivot_scale_r(A))` (`B_kk <
+  -1e-8 * max(max_t |A_t|, 1)`, the scale of the *input*). The shared helper
+  `select_eigenpairs(vals, vects, dim, negative, scale)` runs the one selection loop (invariant
+  `selected_pairs(.., i, ..)` over the processed indices).
+- 10 spec functions and 7 lemmas in `src/lin_alg/spectral_spec.rs` (L12): the index list
+  `sel_indices(sel, n)` with `lemma_sel_indices` (exactly the selected `k < n`, increasing) and
+  `lemma_sel_indices_empty`; the tests `pos_sel`, `neg_sel`, `neg_tol_r = 1e-8 * scale`; the masked
+  values `masked_r(vals, sel)` (unselected entries 0); `lemma_sum_selected` (a sum over the
+  selected indices is the masked sum over all indices, via `sel_terms`/`masked_terms`); the
+  predicates `selected_pairs`, `spectral_part_ok`, `sel_count`; `lemma_selected_reconstruction`
+  (`Q_sel D_sel Q_sel^T = Q diag(masked vals) Q^T`, the matrix `diag_scale_gram` computes from the
+  returned pairs); `lemma_pos_part_psd` (that matrix is PSD for the positive part);
+  `lemma_no_negative_part` (an empty negative part gives `B_kk >= -1e-8 * scale` for all `k` and
+  `Q diag(B) Q^T >= -1e-8 * scale I`); `lemma_rows_of_product` (the `diag_scale_gram`
+  preconditions for `m > 0` selected columns). Plus, in `mat_spec.rs`, `lemma_orthogonal_norm`
+  (`|Q^T x| = |x|`) and `lemma_diag_congruence_psd_shifted` (`Q D Q^T >= -eps I` for orthogonal
+  `Q` and `d_k >= -eps`).
 
 - 1 public and 9 private executable functions (`src/sdp.rs`, first `verus!` block) (L16):
   `sdp_to_standard` dispatches to `standard_single` (no LMI) and `standard_lmi`; it requires
@@ -511,6 +563,74 @@ proofs; the whole run takes 26 s).
   `jacobi_eigen_cyc` must ensure (with `a = rvs(old(a)@)`, `b = rvs(final(a)@)`): it is the
   common eigensolver interface used by L12.
 
+## Architecture decisions (L17)
+
+- **Bug found and fixed** (details in `EXPOSED_BUGS.md`): for a problem without LMIs the
+  block list `psd_blocks` was empty, so the termination test never checked `Z >= 0`. The
+  partition is now `psd_partition(bd, vd, d)`: `block_sizes(bd, vd)` (L16) when there are
+  blocks, else the single block `[d]`; `psd_block_list` lists `(sum_upto(bs, j), bs[j])` and
+  is computed once before the loop (the original rebuilt the same list every iteration with
+  an iterator chain).
+- `sdpad` is split along the DAG layers: the setup is the verified `sdpad_setup`, returning the
+  public record `SdpadSetup` (the former locals), and the equality-system solve of each
+  iteration is the verified `dual_solve`; `sdpad` itself remains outside `verus!` until the
+  iteration (L18) and termination (L19) are verified, and calls the verified helpers. The
+  contract `sdpad_setup_ok` carries the standard form through an existential packed objective
+  `obj0` (the vector before `scale_off_diag` rewrote it in place), so that L18/L19 can use the
+  objective identity `<obj_frob, z>_F = <obj0, z> = sum_n C_n(Z_n)` via `lemma_frob_half_dot`
+  and `std_form_ok`.
+- The solver's precondition `sdpad_input_ok` adds `dim_fits(total_rows(sdp))` to the
+  conversion's requirements: `constraint_gram` and the solvers need `dim_fits(c_len)`, and
+  `c_len <= total_rows` is all the reduction contract gives (`lemma_reduced_rows`); the bound
+  is not derivable from the `usize` fit of the stacked matrix alone.
+- `dual_solve` states what both branches establish uniformly as `(G + s I) y_top = b_top`
+  with the shift `s = reg_shift_r` (`0` or `TOL * max(max_i |G_ii|, 1)`), extracted from the
+  block-solve contract of `pos_def_solver_upperleft` by `lemma_block_ident_solve_inv`; the
+  residual test is reported exactly as the executable check reads
+  (`relative_residual_is_small`), i.e. only when the denominator is nonzero. The right-hand
+  side is saved before the solve (`slice_to_vec(&rhs[..c_len])`), as the original did, because
+  the forward substitution overwrites it.
+- **Second executable change:** without constraint reduction and with `c_len == 0`, the
+  original left `dual_y` empty although `point` may hold zero-constraint rows; `dual_solve`
+  now runs the block solve in that case too (it returns `b_bottom`), so `dual_y.len() ==
+  point.len()` always holds (needed by `dot_prod(&point, &dual_y)` in L19). The case cannot
+  arise for the standard forms produced (LMI rows are never all eliminated; without LMIs there
+  are no zero constraints), so no test is affected.
+- The regularization loop writes `gram_reg[(i * i + 3 * i) / 2] += shift` with the invariant
+  "diagonal entries `< i` shifted, everything else equal to `G`" (`diag_shifted` after the
+  loop), and `lemma_diag_shifted_view` turns it into `G + s I` on the block.
+
+## Architecture decisions (L12)
+
+- The spectral operations are specified through the eigensolver interface only
+  (`src/lin_alg/spectral_spec.rs`): `spectral_part_ok(A, B, q, sel, vals, vects, dim)` is
+  `eigensolver_ok` (L09) plus the selection `selected_pairs`, which says that `(vals, vects)` lists
+  the pairs `(B_kk, q e_k)` for `k` in `sel_indices(sel, dim)`, the increasing list of indices
+  passing the test `sel`. The accumulated `q` is not returned by the executable functions, so it
+  is existential in the postcondition; `B` is the final content of the input vector, hence
+  `diag(B)`, the eigenvalue vector, is nameable by the caller (L18 needs the thresholds on it).
+- The selection tests are the spec closures `pos_sel(vals) = (vals[k] > 0)` and
+  `neg_sel(vals, scale) = (vals[k] < -1e-8 * scale)`, returned by named spec functions so that
+  they match across call sites (closure-matching rule of L04); the implementation-specific
+  `eig_sel(vals, negative, scale)` of `jacobi.rs` dispatches between them for the shared loop.
+  The scale of the negative part is `pivot_scale_r` of the *input* matrix (the original fold
+  over `a` before the eigensolver overwrites it), computed by the L05 helper `pivot_scale`.
+- What the reconstruction is: `lemma_selected_reconstruction` identifies the matrix
+  `Q_sel D_sel Q_sel^T` with inner dimension `m` (the `diag_scale_gram` contract of L04) with
+  `Q diag(masked_r(vals, sel)) Q^T` with inner dimension `dim`, where `masked_r` zeroes the
+  unselected values; the proof is one sum identity (`lemma_sum_selected`) applied entrywise
+  through `lemma_mul_diag_transpose`. This is the "spectral operation actually computed":
+  `S = Q diag(max-selected B_kk) Q^T` with `A = Q B Q^T` and `||B - diag(B)||_F <= eps`; no claim
+  relates it to the exact PSD projection of `A` (CLAUDE.md, section 7).
+- PSD facts: `lemma_pos_part_psd` (positive part, via `lemma_diag_congruence_psd`); for PSD
+  detection (`negeigendecomp(..).0.is_empty()` in the tests), `lemma_no_negative_part` gives
+  `B_kk >= -1e-8 * scale` for every `k` and `Q diag(B) Q^T >= -1e-8 * scale I` (the new
+  `lemma_diag_congruence_psd_shifted`, proved through `|Q^T x| = |x|`); `A` itself differs from
+  `Q diag(B) Q^T` by `Q (B - diag(B)) Q^T`, which is only bounded in Frobenius norm.
+- The two near-identical selection loops of the original are one helper `select_eigenpairs`
+  with a `negative` flag (one branch per entry, same pushes); column `k` of `vects` is appended
+  with `extend_from_slice(&vects[lo..lo + dim])`, `lo = k * dim`, as before.
+
 ## Architecture decisions (L16)
 
 - The contract is stated on the user data directly (`SDP` fields made `pub`; Verus treats a
@@ -745,6 +865,13 @@ proofs; the whole run takes 26 s).
 | `if vals[..] == 0.0 { continue; }` (unsupported in `for`) | `if vals[..] != 0.0 { .. }` | `jacobi_eigen_cyc` |
 | `panic!("jacobi_eigen_cyc failed .."), `return` inside `loop`, `&mut ident_mat(dim)`, `.to_vec()`, destructuring assignments | as for `jacobi_eigen_cach` | `jacobi_eigen_cyc` |
 | scan variables `n`, `m` and double reads `vals[..].abs()` in both branches | `c`, `r` (`n` is the ghost dimension) and one `let off = ..` / `let diag = ..` per entry | `jacobi_eigen_cyc` |
+| `block_dims.iter().copied().scan(..).chain(symm_dims.iter().copied().scan(..).flatten()).collect()` (per iteration) | the helper `psd_block_list` (two index loops), called once before the loop | `sdpad` |
+| `block_dims.iter().sum()` | index loop | `sdpad_setup` |
+| `let (c_len, block_size_sum) = (..)`, `(mut prim_z, mut dual_s) = (ident_sym_mat(var_dim), vec![0.0; var_dim_tot])` | the `SdpadSetup` record and the helper `initial_iterates` | `sdpad` |
+| `inverse_y_old = (inverse_y[..c_len]).to_vec()`, `gram_small_reg[k] += x`, `panic!(..)` | `slice_to_vec(&rhs[..c_len])`, `gram_reg[k] = old_entry + shift`, `abort(..)` (T8), all inside the helper `dual_solve` | `sdpad` |
+| `for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim))` (two copies) | the helper `select_eigenpairs` with an index loop `for i in 0..dim` and `extend_from_slice(&vects[lo..lo + dim])` | `poseigendecomp`, `negeigendecomp` |
+| `a.iter().map(abs).fold(0.0, f64::max).max(1.0)` | `pivot_scale(a)` (the L05 helper, now `pub(crate)`) | `negeigendecomp` |
+| `match var { Cached => .., Cyclic => .. }` with `use JacobiVariant::*` | qualified patterns `JacobiVariant::Cached`; the enum moved inside `verus!` | `poseigendecomp`, `negeigendecomp` |
 | `struct SDP` with private fields outside `verus!` | the struct and its `impl` inside `verus!`, fields `pub` | `sdp.rs` |
 | `assert!(..)`, `assert_eq!(..)`, `panic!(..)`, `expect(..)`, `unwrap_or_else(|| panic!(..))` | `abort(..)` (T8) on the data-dependent checks; the internal consistency checks (`start == total_dim`, `zeros.len() == zeros_len`) are static `assert`s | `sdp_to_standard` |
 | `obj.concat()` (no vstd spec) | `part_concat(obj, dim)` (same push loop) | `sdp_to_standard` |
@@ -774,6 +901,41 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Before rewriting a construct, probe it in a scratch file: every entry in the table above
   was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
   `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L17; probed 2026-10-19):
+
+- `let ghost obj0: SymMatrix = obj;` snapshots an exec `Vec` as a spec value before an in-place
+  update; a tuple of such snapshots can be passed to a predicate expecting the function's
+  result tuple (`std_form_ok(sdp, res0, check)`), and tuple projections of the constructed
+  tuple reduce.
+- A returned `&mut` that is only read in ghost code (`let _obj_ref = scale_off_diag(..); let
+  ghost cf = rvs(_obj_ref@);`) must carry a leading underscore, or `cargo` (where ghost code is
+  erased) warns about an unused variable; the value of `obj` after the borrow ends is `cf`
+  without any extra step.
+- `v[k] = v[k] + x` on a `Vec<f64>`: bind the read first (`let old_entry = v[k];`) and state
+  `rvs(v@)[k] == rv(old_entry) + rv(x)` explicitly; the untouched entries follow from
+  `rvs(v@)[j] == rv(v@[j])` plus the `update` axiom when `j != k` is known via
+  `lemma_pk_idx_injective`.
+- `sum_upto(s, j + 2)` needs both unfolding steps asserted (`sum_upto(s, j + 1) == .. + s[j]`,
+  `sum_upto(s, j + 2) == .. + s[j + 1]`); one level is unfolded automatically.
+- A conjunction required by a callee (`part_shape(..) && symm_dims[n] >= 1` for
+  `objective_sum`) that was previously found by luck in the long `standard_lmi` body stopped
+  being found when unrelated modules were added to the crate; proving it with an explicit
+  `assert forall` before the call made the proof stable.
+
+Proof-engineering notes (L12; probed 2026-10-19):
+
+- `-eps * d` and `eps * d` are different monomials for the linear solver; bridge with
+  `assert(-eps * d == -(eps * d)) by (nonlinear_arith)` (function applications such as
+  `dot_r(x, x)` may be written inside the `nonlinear_arith` assertion).
+- After `v.extend_from_slice(&w[lo..lo + n])`, the entries of the real view are related to the
+  snapshot `prev = rvs(old(v)@)` by stating `rvs(v@)[j] == prev[j]` (old part) and
+  `rvs(v@)[j] == rv(w@[lo + r])` (new part) directly; an f64 equality `v@[j] == w@[..]` is not
+  derivable from a snapshot of the real view.
+- `match` on a `&Enum` parameter with qualified variant patterns verifies inside `verus!`; the
+  enum must be declared inside `verus!` to be used in verified code.
+- A spec function returning a closure (`pos_sel(vals)`) is applied as `pos_sel(vals)(k)` and
+  reduces; `#[trigger] sel(k)` with `sel` a closure parameter is matched by such applications.
 
 Proof-engineering notes (L16; probed 2026-10-18):
 
@@ -1020,13 +1182,23 @@ Proof-engineering notes (L01):
 - L10 changed the executable cache update of `jacobi_eigen_cach` (two corrections, see
   `EXPOSED_BUGS.md`); the cached pivot is now provably the position of maximal off-diagonal
   magnitude. `src/sdp_tests.rs` gained the regression test `test_jacobi_cach_cache_update`.
-- L12 must establish the common preconditions of both eigensolvers: `dim >= 1`, `dim_fits(dim)`
-  and an input of length `>= pk_len(dim)`.
+- `poseigendecomp`/`negeigendecomp` (L12) inherit the eigensolver preconditions `dim >= 1`,
+  `dim_fits(dim)` and an input of length `>= pk_len(dim)`; `sdpad_setup_ok` (L17) provides
+  `d >= 1` and `dim_fits(d)` for L18. The L18 specification of the dual update should use `spectral_part_ok` with
+  `pos_sel`, `lemma_selected_reconstruction` for the `diag_scale_gram` result (with
+  `lemma_rows_of_product` for its preconditions when the positive part is nonempty) and
+  `lemma_pos_part_psd`.
 - L14 changed the executable row scaling of `linear_remove_redundant_sym` twice (packed-column
   start, and the off-diagonal factor `sqrt(2)` requested by the user); the scale is now the
   Frobenius norm of the row's symmetric matrix. Both changes are documented in the L14
   architecture decisions.
 
+- L17 changed the solver interface: `sdpad` now requires (informally, it is still outside
+  `verus!`) `sdpad_input_ok`, i.e. additionally `dim_fits(total_rows(sdp))`; `sdpad_setup`,
+  `SdpadSetup` and `sdpad_setup_ok` are public. Two executable changes: the single-variable
+  PSD block (`EXPOSED_BUGS.md`) and the always-full-length `dual_y` (L17 architecture
+  decisions). L18 should verify the loop body as a helper taking `&SdpadSetup` and the iteration
+  state, reusing `dual_solve_ok`, `spectral_part_ok` (L12) and the L04 operator contracts.
 - The full-verification command in CLAUDE.md needs `-V no-solver-version-check` on
   this machine (Z3 4.16.0 with build hashcode); without it Verus panics as soon as any
   function is verified.

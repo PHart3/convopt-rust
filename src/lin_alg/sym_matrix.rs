@@ -2152,7 +2152,7 @@ verus! {
 
 // Pivot scale of the solvers: max(max_t |mat[t]|, 1) over the whole stored matrix.
 #[inline]
-fn pivot_scale(mat: &[f64]) -> (scale: f64)
+pub(crate) fn pivot_scale(mat: &[f64]) -> (scale: f64)
     ensures
         rv(scale) == pivot_scale_r(rvs(mat@)),
 {

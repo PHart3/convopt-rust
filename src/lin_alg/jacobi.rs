@@ -21,6 +21,10 @@ use crate::lin_alg::jacobi_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::eigen_spec::*;
 #[cfg(verus_keep_ghost)]
+use crate::lin_alg::spectral_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::solve_spec::pivot_scale_r;
+#[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::lemma_pk_idx_injective;
 
 verus! {
@@ -944,39 +948,152 @@ pub fn jacobi_eigen_cyc(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix)
     (eigenvals, q0)
 }
 
-} // verus!
-
 pub enum JacobiVariant {
     Cached,
     Cyclic,
 }
-use JacobiVariant::*;
+
+/// The selection test of the two spectral parts: vals[k] < -1e-8 * scale for the negative
+/// part, vals[k] > 0 for the positive part.
+pub open spec fn eig_sel(vals: Seq<real>, negative: bool, scale: real) -> spec_fn(int) -> bool {
+    if negative { neg_sel(vals, scale) } else { pos_sel(vals) }
+}
+
+// the eigenpairs (vals[k], column k of vects) passing the selection test `eig_sel`, in index
+// order: the selected values, and their columns stacked column-major
+fn select_eigenpairs(vals: &Vector, vects: &Matrix, dim: usize, negative: bool, scale: f64) -> (res: (Vector, Matrix))
+    requires
+        dim >= 1,
+        dim_fits(dim as int),
+        vals@.len() == dim,
+        vects@.len() == dim * dim,
+    ensures
+        selected_pairs(rvs(vects@), rvs(vals@), eig_sel(rvs(vals@), negative, rv(scale)), dim as int, rvs(res.0@), rvs(res.1@), dim as int),
+{
+    let mut sel_vals: Vector = Vec::new();
+    let mut sel_vects: Matrix = Vec::new();
+    let ghost vs = rvs(vals@);
+    let ghost qv = rvs(vects@);
+    let ghost sel = eig_sel(vs, negative, rv(scale));
+    let ghost n = dim as int;
+    proof {
+        assert(0 * n == 0) by (nonlinear_arith);
+        lemma_dim_fits_idx(n, n);
+        assert(n * n <= n * (n + 1)) by (nonlinear_arith)
+            requires n >= 0;
+    }
+    for i in 0..dim
+        invariant
+            dim >= 1,
+            dim_fits(n),
+            n == dim,
+            dim * dim <= usize::MAX,
+            vals@.len() == dim,
+            vects@.len() == dim * dim,
+            vs == rvs(vals@),
+            qv == rvs(vects@),
+            sel == eig_sel(vs, negative, rv(scale)),
+            selected_pairs(qv, vs, sel, i as int, rvs(sel_vals@), rvs(sel_vects@), n),
+    {
+        let ghost idx = sel_indices(sel, i as nat);
+        let ghost m = idx.len() as int;
+        proof {
+            lemma_sel_indices(sel, i as nat);
+            assert((i + 1) * dim <= dim * dim && (i + 1) * dim == i * dim + dim) by (nonlinear_arith)
+                requires i < dim;
+            assert(m * n <= i * n) by (nonlinear_arith)
+                requires m <= i, n >= 0;
+        }
+        let v = vals[i];
+        let keep = if negative { is_significantly_negative(v, scale, 1e-8) } else { v > 0.0 };
+        if keep {
+            let lo = i * dim;
+            let ghost prev_vals = rvs(sel_vals@);
+            let ghost prev_vects = rvs(sel_vects@);
+            sel_vals.push(v);
+            sel_vects.extend_from_slice(&vects[lo..lo + dim]);
+            proof {
+                assert(sel(i as int));
+                let idx2 = idx.push(i as int);
+                assert(sel_indices(sel, (i + 1) as nat) == idx2);
+                assert(rvs(sel_vals@) =~= prev_vals.push(rv(v)));
+                assert((m + 1) * n == m * n + n) by (nonlinear_arith);
+                assert forall|t: int| 0 <= t < idx2.len() implies #[trigger] rvs(sel_vals@)[t] == vs[idx2[t]] by {
+                    if t < m {
+                        assert(prev_vals[t] == vs[idx[t]]);
+                    }
+                }
+                assert forall|t: int, r: int| 0 <= t < idx2.len() && 0 <= r < n
+                    implies #[trigger] cm_entry(rvs(sel_vects@), n, r, t) == cm_entry(qv, n, r, idx2[t]) by {
+                    lemma_cm_idx_bound(n, r, t, m + 1);
+                    if t < m {
+                        lemma_cm_idx_bound(n, r, t, m);
+                        assert(cm_entry(prev_vects, n, r, t) == cm_entry(qv, n, r, idx[t]));
+                        assert(rvs(sel_vects@)[cm_idx(n, r, t)] == prev_vects[cm_idx(n, r, t)]);
+                    } else {
+                        assert(cm_idx(n, r, t) == m * n + r);
+                        assert(rvs(sel_vects@)[cm_idx(n, r, t)] == rv(vects@[lo + r]));
+                        assert(lo + r == cm_idx(n, r, i as int));
+                    }
+                }
+            }
+        } else {
+            proof {
+                assert(!sel(i as int));
+                assert(sel_indices(sel, (i + 1) as nat) == idx);
+            }
+        }
+    }
+    (sel_vals, sel_vects)
+}
 
 // extracting the positive part of the above spectral decomposition
-pub fn poseigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> (Vector, Matrix) {
-    let (mut pos_eigenvals, mut pos_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
-    let (eigenvals, eigenvects) =
-	match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
-    for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
-	if *val > 0.0 {
-	    pos_eigenvals.push(*val);
-	    pos_eigenvects.extend_from_slice(vect);
-	}
+// (the eigenpairs with value > 0; see spectral_spec.rs for the reconstruction they define)
+pub fn poseigendecomp(a: &mut SymMatrix, dim: usize, var: &JacobiVariant) -> (res: (Vector, Matrix))
+    requires
+        dim >= 1,
+        dim_fits(dim as int),
+        old(a)@.len() >= pk_len(dim as int),
+    ensures
+        final(a)@.len() == old(a)@.len(),
+        exists|q: Seq<real>| #[trigger] spectral_part_ok(rvs(old(a)@), rvs(final(a)@), q,
+            pos_sel(sym_diag_r(rvs(final(a)@), dim as int)), rvs(res.0@), rvs(res.1@), dim as int),
+{
+    let (vals, vects) = match var {
+        JacobiVariant::Cached => jacobi_eigen_cach(a, dim),
+        JacobiVariant::Cyclic => jacobi_eigen_cyc(a, dim),
+    };
+    let res = select_eigenpairs(&vals, &vects, dim, false, 0.0);
+    proof {
+        assert(spectral_part_ok(rvs(old(a)@), rvs(a@), rvs(vects@),
+            pos_sel(sym_diag_r(rvs(a@), dim as int)), rvs(res.0@), rvs(res.1@), dim as int));
     }
-    (pos_eigenvals, pos_eigenvects)
+    res
 }
 
 // extracting the negative part of the above spectral decomposition
-pub fn negeigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> (Vector, Matrix) {
-    let (mut neg_eigenvals, mut neg_eigenvects) : (Vector, Matrix) = (Vec::new(), Vec::new());
-    let scale = a.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1.0);
-    let (eigenvals, eigenvects) =
-        match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
-    for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
-	if is_significantly_negative(*val, scale, 1e-8) {
-	    neg_eigenvals.push(*val);
-	    neg_eigenvects.extend_from_slice(vect);
-	}
+// (the eigenpairs with value < -1e-8 * scale, scale = max(max_t |a_t|, 1) of the input)
+pub fn negeigendecomp(a: &mut SymMatrix, dim: usize, var: &JacobiVariant) -> (res: (Vector, Matrix))
+    requires
+        dim >= 1,
+        dim_fits(dim as int),
+        old(a)@.len() >= pk_len(dim as int),
+    ensures
+        final(a)@.len() == old(a)@.len(),
+        exists|q: Seq<real>| #[trigger] spectral_part_ok(rvs(old(a)@), rvs(final(a)@), q,
+            neg_sel(sym_diag_r(rvs(final(a)@), dim as int), pivot_scale_r(rvs(old(a)@))), rvs(res.0@), rvs(res.1@), dim as int),
+{
+    let scale = pivot_scale(a);
+    let (vals, vects) = match var {
+        JacobiVariant::Cached => jacobi_eigen_cach(a, dim),
+        JacobiVariant::Cyclic => jacobi_eigen_cyc(a, dim),
+    };
+    let res = select_eigenpairs(&vals, &vects, dim, true, scale);
+    proof {
+        assert(spectral_part_ok(rvs(old(a)@), rvs(a@), rvs(vects@),
+            neg_sel(sym_diag_r(rvs(a@), dim as int), pivot_scale_r(rvs(old(a)@))), rvs(res.0@), rvs(res.1@), dim as int));
     }
-    (neg_eigenvals, neg_eigenvects)
+    res
 }
+
+} // verus!

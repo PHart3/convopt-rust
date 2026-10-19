@@ -1,19 +1,403 @@
 pub use crate::lin_alg::jacobi::*;
 use crate::sdp::*;
 use crate::lin_alg::comparison::{relative_residual_is_small, residual_is_small};
+use crate::trusted::abort;
+use vstd::prelude::*;
+use vstd::slice::slice_to_vec;
+#[cfg(verus_keep_ghost)]
+use vstd::arithmetic::div_mod::{lemma_mod_multiples_basic, lemma_div_multiples_vanish, lemma_div_multiples_vanish_fancy};
+#[cfg(verus_keep_ghost)]
+use crate::trusted::rv;
+#[cfg(verus_keep_ghost)]
+use crate::real_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::vec_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::sym_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::mat_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::constr_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::ldlt_spec::blocks_fit;
+#[cfg(verus_keep_ghost)]
+use crate::sdp_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::sdpad_spec::*;
 
 // maximum number of iterations to run
 const TOTAL_STEPS: usize = 5000;
 
+verus! {
+
+broadcast use crate::trusted::group_real_model;
+
+/// The standard-form problem prepared for the iteration (see sdpad_spec.rs).
+pub struct SdpadSetup {
+    pub obj_frob: SymMatrix,
+    pub mat_dense: Matrix,
+    pub zeros: Vec<(usize, usize)>,
+    pub point: Vector,
+    pub var_dim: usize,
+    pub symm_dims: Vec<usize>,
+    pub block_dims: Vec<usize>,
+    pub c_len: usize,
+    pub block_size_sum: usize,
+    pub gram_small: SymMatrix,
+    pub psd_blocks: Vec<(usize, usize)>,
+}
+
+/// The contract of the setup: the data (with the objective obj0 before reweighting) is the
+/// standard form of sdp, obj_frob is obj0 with halved off-diagonal entries, c_len is the number
+/// of dense constraint rows (followed by the zero constraints in point, whose right-hand sides
+/// are zero), gram_small is the packed Gram matrix of the dense rows, and psd_blocks lists the
+/// diagonal-block partition of the variable.
+pub open spec fn sdpad_setup_ok(sdp: &SDP, check: bool, s: SdpadSetup) -> bool {
+    let d = s.var_dim as int;
+    let cols = pk_len(d);
+    let nz = s.zeros@.len() as int;
+    let rows = s.c_len as int;
+    let bd = dims_of(s.block_dims@);
+    let vd = dims_of(s.symm_dims@);
+    let bs = psd_partition(bd, vd, d);
+    &&& exists|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
+            && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d)
+    &&& d >= 1
+    &&& dim_fits(d)
+    &&& dim_fits(rows)
+    &&& s.obj_frob@.len() == cols
+    &&& s.point@.len() == rows + nz
+    &&& s.mat_dense@.len() == rows * cols
+    &&& valid_zero_list(s.zeros@, d)
+    &&& forall|q: int| rows <= q < s.point@.len() ==> rv(#[trigger] s.point@[q]) == 0.0real
+    &&& s.block_size_sum as int == block_sum(bd)
+    &&& rows > 0 ==> is_constraint_gram(rvs(s.gram_small@), rvs(s.mat_dense@), rows, d)
+    &&& rows == 0 ==> s.gram_small@.len() == 0
+    &&& block_list_ok(s.psd_blocks@, bs)
+    &&& sum_upto(bs, bs.len() as int) == d
+    &&& blocks_fit(s.psd_blocks@, pk_len(d) as nat)
+}
+
+// the (start, size) list of the diagonal blocks of the standard-form variable (psd_partition):
+// the LMI blocks, then the two blocks of each user variable; the whole variable if there are none
+fn psd_block_list(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, var_dim: usize) -> (list: Vec<(usize, usize)>)
+    requires
+        block_dims@.len() + symm_dims@.len() > 0
+            ==> std_dim(dims_of(block_dims@), dims_of(symm_dims@)) == var_dim,
+    ensures
+        block_list_ok(list@, psd_partition(dims_of(block_dims@), dims_of(symm_dims@), var_dim as int)),
+{
+    let ghost bd = dims_of(block_dims@);
+    let ghost vd = dims_of(symm_dims@);
+    let ghost bs = block_sizes(bd, vd);
+    let nb = block_dims.len();
+    let nv = symm_dims.len();
+    let mut list: Vec<(usize, usize)> = Vec::new();
+    if nb == 0 && nv == 0 {
+        list.push((0, var_dim));
+        return list;
+    }
+    proof {
+        lemma_block_sizes_sum(bd, vd, nv as int);
+        assert forall|j: int| 0 <= j < bs.len() implies #[trigger] bs[j] >= 0 by {
+            lemma_block_sizes_entry(bd, vd, j);
+        }
+    }
+    let mut start: usize = 0;
+    for i in 0..nb
+        invariant
+            nb == block_dims@.len(),
+            nv == symm_dims@.len(),
+            bd == dims_of(block_dims@),
+            vd == dims_of(symm_dims@),
+            bs == block_sizes(bd, vd),
+            bs.len() == nb + 2 * nv,
+            forall|j: int| 0 <= j < bs.len() ==> #[trigger] bs[j] >= 0,
+            sum_upto(bs, bs.len() as int) == var_dim,
+            list@.len() == i,
+            start as int == sum_upto(bs, i as int),
+            forall|j: int| 0 <= j < i ==> (#[trigger] list@[j]).0 as int == sum_upto(bs, j) && list@[j].1 as int == bs[j],
+    {
+        let dim = block_dims[i];
+        proof {
+            lemma_block_sizes_entry(bd, vd, i as int);
+            lemma_sum_upto_monotone(bs, i as int + 1, bs.len() as int);
+        }
+        list.push((start, dim));
+        start = start + dim;
+    }
+    for n in 0..nv
+        invariant
+            nb == block_dims@.len(),
+            nv == symm_dims@.len(),
+            bd == dims_of(block_dims@),
+            vd == dims_of(symm_dims@),
+            bs == block_sizes(bd, vd),
+            bs.len() == nb + 2 * nv,
+            forall|j: int| 0 <= j < bs.len() ==> #[trigger] bs[j] >= 0,
+            sum_upto(bs, bs.len() as int) == var_dim,
+            list@.len() == nb + 2 * n,
+            start as int == sum_upto(bs, nb + 2 * n),
+            forall|j: int| 0 <= j < nb + 2 * n ==> (#[trigger] list@[j]).0 as int == sum_upto(bs, j) && list@[j].1 as int == bs[j],
+    {
+        let d = symm_dims[n];
+        proof {
+            let j = nb + 2 * n;
+            lemma_block_sizes_entry(bd, vd, j);
+            lemma_block_sizes_entry(bd, vd, j + 1);
+            lemma_div_multiples_vanish(n as int, 2);
+            lemma_div_multiples_vanish_fancy(n as int, 1, 2);
+            assert(bs[j] == d && bs[j + 1] == d);
+            assert(sum_upto(bs, j + 1) == sum_upto(bs, j) + bs[j]);
+            assert(sum_upto(bs, j + 2) == sum_upto(bs, j + 1) + bs[j + 1]);
+            lemma_sum_upto_monotone(bs, j + 2, bs.len() as int);
+            assert(start + 2 * d <= var_dim);
+        }
+        list.push((start, d));
+        list.push((start + d, d));
+        start = start + 2 * d;
+    }
+    list
+}
+
+// the equality-system solve of one iteration (dual_solve_ok): with reduced constraints the
+// block system (G, I) y = rhs is solved directly; otherwise G is regularized by
+// TOL * max(max_i |G_ii|, 1) on its diagonal, and the solution must have a small residual
+// relative to the original system (aborts otherwise)
+fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> (y: Vector)
+    requires
+        c_len <= old(rhs)@.len(),
+        dim_fits(c_len as int),
+        gram@.len() >= pk_len(c_len as int),
+    ensures
+        dual_solve_ok(rvs(gram@), rvs(old(rhs)@), c_len as int, check, rvs(y@)),
+{
+    let ghost g = rvs(gram@);
+    let ghost b = rvs(old(rhs)@);
+    let ghost cl = c_len as int;
+    let n = rhs.len();
+    let nz = n - c_len;
+    if n == 0 {
+        let y: Vector = vec![];
+        proof {
+            assert(mat_vec(madd(sym_view(g), mscale(reg_shift_r(g, cl, check), mident())), cl, rvs(y@).subrange(0, cl))
+                =~= b.subrange(0, cl));
+        }
+        return y;
+    }
+    if check || c_len == 0 {
+        let y = pos_def_solver_upperleft(gram, rhs, nz);
+        proof {
+            lemma_block_ident_solve_inv(sym_view(g), cl, n as int, rvs(y@), b);
+            let yt = rvs(y@).subrange(0, cl);
+            if check {
+                lemma_shift_zero_meq(sym_view(g), cl);
+                lemma_mat_vec_meq(madd(sym_view(g), mscale(0.0real, mident())), sym_view(g), cl, yt);
+            } else {
+                assert(mat_vec(madd(sym_view(g), mscale(reg_shift_r(g, cl, check), mident())), cl, yt) =~= b.subrange(0, cl));
+            }
+        }
+        return y;
+    }
+    // the right-hand side of the dense rows, kept for the residual (the solver overwrites rhs)
+    let rhs_top = slice_to_vec(&rhs[..c_len]);
+    let ghost bt = b.subrange(0, cl);
+    proof {
+        assert(rvs(rhs_top@) =~= bt);
+    }
+    // regularize the Gram matrix so that it can be fed to the solver
+    let reg = max_diag_sym(gram, c_len);
+    let shift = TOL * reg.max(1.0);
+    let ghost sh = reg_shift_r(g, cl, check);
+    let mut gram_reg = gram.clone();
+    proof {
+        lemma_dim_fits_idx(cl, cl);
+    }
+    for i in 0..c_len
+        invariant
+            cl == c_len,
+            dim_fits(cl),
+            gram_reg@.len() == gram@.len(),
+            gram@.len() >= pk_len(cl),
+            g == rvs(gram@),
+            rv(shift) == sh,
+            forall|r: int, k: int| 0 <= r <= k < cl
+                ==> #[trigger] rvs(gram_reg@)[pk_idx(r, k)] == g[pk_idx(r, k)] + (if r == k && r < i { sh } else { 0.0real }),
+    {
+        proof {
+            lemma_dim_fits_idx(cl, i as int);
+            lemma_pk_idx_bound(i as int, i as int, cl);
+            assert((i * i + 3 * i) / 2 == pk_idx(i as int, i as int)) by (nonlinear_arith);
+        }
+        let k = (i * i + 3 * i) / 2;
+        let ghost ki = pk_idx(i as int, i as int);
+        let ghost prev = rvs(gram_reg@);
+        let old_entry = gram_reg[k];
+        gram_reg[k] = old_entry + shift;
+        proof {
+            assert(k == ki);
+            assert(rv(old_entry) == prev[ki]);
+            assert(prev[ki] == g[ki] + 0.0real);
+            assert(rvs(gram_reg@)[ki] == rv(old_entry) + sh);
+            assert forall|r: int, c: int| 0 <= r <= c < cl
+                implies #[trigger] rvs(gram_reg@)[pk_idx(r, c)] == g[pk_idx(r, c)] + (if r == c && r < i + 1 { sh } else { 0.0real }) by {
+                lemma_pk_idx_bound(r, c, cl);
+                lemma_pk_idx_injective(r, c, i as int, i as int);
+                if pk_idx(r, c) == ki {
+                    assert(r == i && c == i);
+                } else {
+                    assert(rvs(gram_reg@)[pk_idx(r, c)] == rv(gram_reg@[pk_idx(r, c)]));
+                    assert(rvs(gram_reg@)[pk_idx(r, c)] == prev[pk_idx(r, c)]);
+                }
+            }
+        }
+    }
+    let y = pos_def_solver_upperleft(&gram_reg, rhs, nz);
+    let ghost gr = rvs(gram_reg@);
+    proof {
+        lemma_block_ident_solve_inv(sym_view(gr), cl, n as int, rvs(y@), b);
+        assert(diag_shifted(gr, g, cl, sh));
+        lemma_diag_shifted_view(gr, g, cl, sh);
+        lemma_mat_vec_meq(sym_view(gr), madd(sym_view(g), mscale(sh, mident())), cl, rvs(y@).subrange(0, cl));
+    }
+    // the residual of the regularized solution with respect to the original system
+    let y_top = &y[..c_len];
+    let ghost yt = rvs(y@).subrange(0, cl);
+    proof {
+        assert(rvs(y_top@) =~= yt);
+    }
+    let resid_top = euclid_distance(&sym_mat_act(gram, y_top), &rhs_top);
+    let resid_bottom = frob_norm_sym(gram, c_len) * euclid_norm(y_top) + euclid_norm(&rhs_top);
+    if !relative_residual_is_small(resid_top, resid_bottom, 1e-9) {
+        abort("regularized Gram solve is not an accurate solution to original system");
+    }
+    y
+}
+
+// the initial iterates Z = I, S = 0
+fn initial_iterates(var_dim: usize) -> (res: (SymMatrix, SymMatrix))
+    requires
+        dim_fits(var_dim as int),
+    ensures
+        res.0@.len() == pk_len(var_dim as int),
+        res.1@.len() == pk_len(var_dim as int),
+        initial_iterates_ok(rvs(res.0@), rvs(res.1@), var_dim as int),
+{
+    proof {
+        lemma_dim_fits_idx(var_dim as int, var_dim as int);
+    }
+    let var_dim_tot = (var_dim * (var_dim + 1)) / 2;
+    let prim_z = ident_sym_mat(var_dim);
+    let dual_s: SymMatrix = vec![0.0; var_dim_tot];
+    proof {
+        assert forall|t: int| 0 <= t < dual_s@.len() implies #[trigger] rvs(dual_s@)[t] == 0.0real by {
+            assert(rv(dual_s@[t]) == 0.0real);
+        }
+    }
+    (prim_z, dual_s)
+}
+
+// conversion to standard form, reweighting of the objective for the Frobenius product, Gram
+// matrix of the dense constraint rows, and the PSD block partition (contract: sdpad_setup_ok)
+pub fn sdpad_setup(sdp: &SDP, check_constraints: bool) -> (s: SdpadSetup)
+    requires
+        sdpad_input_ok(sdp, check_constraints),
+    ensures
+        sdpad_setup_ok(sdp, check_constraints, s),
+{
+    let (mut obj, (mat_dense, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp, check_constraints);
+    let ghost obj0: SymMatrix = obj;
+    let ghost res0 = (obj0, (mat_dense, zeros), point, var_dim, symm_dims, block_dims);
+    let ghost d = var_dim as int;
+    let ghost cols = pk_len(d);
+    let ghost nz = zeros@.len() as int;
+    let ghost bd = dims_of(block_dims@);
+    let ghost vd = dims_of(symm_dims@);
+    proof {
+        assert(std_form_ok(sdp, res0, check_constraints));
+        lemma_std_form_facts(sdp, res0, check_constraints);
+        lemma_pk_col_start_zero();
+        lemma_pk_col_start_step(0);
+        lemma_pk_col_start_monotone(1, d);
+    }
+    let c_len = point.len() - zeros.len();
+    let ghost rows = c_len as int;
+    // the total size of the LMI blocks
+    let nb = block_dims.len();
+    let mut block_size_sum: usize = 0;
+    proof {
+        assert forall|i: int| 0 <= i < bd.len() implies #[trigger] bd[i] >= 0 by {}
+        lemma_sum_upto_monotone(bd, 0, nb as int);
+    }
+    for i in 0..nb
+        invariant
+            nb == block_dims@.len(),
+            bd == dims_of(block_dims@),
+            forall|i: int| 0 <= i < bd.len() ==> #[trigger] bd[i] >= 0,
+            block_sum(bd) <= d,
+            d == var_dim,
+            block_size_sum as int == sum_upto(bd, i as int),
+    {
+        proof {
+            lemma_sum_upto_monotone(bd, i as int + 1, nb as int);
+        }
+        block_size_sum = block_size_sum + block_dims[i];
+    }
+    // adjust objective function so that it acts via the Frobenius product instead of packed dot product
+    let _obj_ref = scale_off_diag(0.5, var_dim, &mut obj);
+    let ghost cf = rvs(_obj_ref@);
+    // form the Gram matrix for the linear constraints (excluding the zero constraints)
+    proof {
+        if rows > 0 {
+            lemma_mod_multiples_basic(rows, cols);
+            lemma_div_multiples_vanish(rows, cols);
+            assert(rows * cols == cols * rows) by (nonlinear_arith);
+        } else {
+            assert(0 * cols == 0) by (nonlinear_arith);
+        }
+    }
+    let gram_small = constraint_gram(var_dim, &mat_dense);
+    let psd_blocks = psd_block_list(&block_dims, &symm_dims, var_dim);
+    let s = SdpadSetup { obj_frob: obj, mat_dense, zeros, point, var_dim, symm_dims, block_dims, c_len, block_size_sum, gram_small, psd_blocks };
+    proof {
+        let bs = psd_partition(bd, vd, d);
+        assert(rvs(s.obj_frob@) == cf);
+        assert forall|r: int, k: int| 0 <= r <= k < d
+            implies #[trigger] cf[pk_idx(r, k)] == (if r == k { rvs(obj0@)[pk_idx(r, k)] } else { 0.5real * rvs(obj0@)[pk_idx(r, k)] }) by {
+            lemma_pk_idx_bound(r, k, d);
+            assert(rv(_obj_ref@[pk_idx(r, k)]) == (if r == k { rv(obj0@[pk_idx(r, k)]) } else { rv(0.5) * rv(obj0@[pk_idx(r, k)]) }));
+        }
+        assert(half_off_diag(cf, rvs(obj0@), d));
+        assert(std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check_constraints));
+        if nb + symm_dims@.len() == 0 {
+            assert(bs =~= seq![d]);
+            assert(sum_upto(bs, 0) == 0);
+            assert(sum_upto(bs, 1) == sum_upto(bs, 0) + bs[0]);
+        } else {
+            assert(bs == block_sizes(bd, vd));
+            assert(bs.len() == bd.len() + 2 * vd.len());
+            lemma_block_sizes_sum(bd, vd, vd.len() as int);
+            assert(sum_upto(bs, bs.len() as int) == std_dim(bd, vd));
+        }
+        assert(sum_upto(bs, bs.len() as int) == d);
+        assert forall|j: int| 0 <= j < bs.len() implies #[trigger] bs[j] >= 0 by {
+            if nb + symm_dims@.len() > 0 {
+                lemma_block_sizes_entry(bd, vd, j);
+            }
+        }
+        lemma_block_list_fits(s.psd_blocks@, bs, d);
+    }
+    s
+}
+
+} // verus!
+
 // the alternating direction dual augmented Lagrangian method
 pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant) -> (Vec<SymMatrix>, f64) {
-    let (mut obj, (mat_dense, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp, check_constraints);
-    let (c_len, block_size_sum) : (usize, usize) = (point.len() - zeros.len(), block_dims.iter().sum());
-    // adjust objective function so that it acts via the Frobenius product instead of packed dot product
-    let obj_frob = scale_off_diag(0.5, var_dim, &mut obj);
+    let SdpadSetup { obj_frob, mat_dense, zeros, point, var_dim, symm_dims, c_len, block_size_sum, gram_small, psd_blocks, .. } =
+	sdpad_setup(sdp, check_constraints);
+    let obj_frob = &obj_frob;
     let constr_mat = (&mat_dense, &zeros);
-    // form the Gram matrix for the linear constraints (excluding the zero constraints)
-    let gram_small : SymMatrix = constraint_gram(var_dim, &mat_dense);
     let (mut it_stag, mut it_pinf, mut it_dinf) = (0, 0, 0);
     // tuning parameters
     let (mut penalty, pen_min, pen_max, pen_fact, step) = (5.0, 1e-4, 1e4, 0.5, 1.6);
@@ -21,7 +405,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
     let mut i_ratio : f64;
     let mut dual_y : Vector;
     let var_dim_tot = (var_dim * (var_dim + 1)) / 2;
-    let (mut prim_z, mut dual_s) : (SymMatrix, SymMatrix) = (ident_sym_mat(var_dim), vec![0.0; var_dim_tot]);
+    let (mut prim_z, mut dual_s) : (SymMatrix, SymMatrix) = initial_iterates(var_dim);
     let (mut pinf, mut dinf, mut gap) : (f64, f64, f64);
     let mut delta : f64;
     let mut best_delta = f64::INFINITY;
@@ -45,35 +429,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	for (i, a) in constraint_action(&constr_mat, &vect_subt(obj_frob, &dual_s)).iter().enumerate() {
 	    inverse_y.push(penalty * (point[i] - action[i]) + a);
 	}
-	let mut inverse_y_old : Vector = Vec::new();
-	if !(check_constraints) {
-	    inverse_y_old = (inverse_y[..c_len]).to_vec();
-	}
-	dual_y = if point.is_empty() {
-	    vec![]
-	} else {
-	    let mut solved : Vector = Vec::with_capacity(c_len + zeros.len());
-	    if check_constraints {
-		solved = pos_def_solver_upperleft(&gram_small, &mut inverse_y, zeros.len());
-	    } else if c_len > 0 {
-		// if we did not remove redundant constraints during sdp_to_standard,
-		// we must regularize the Gram matrix so that it can be fed to the solver
-		let reg : f64 = max_diag_sym(&gram_small, c_len);
-		let mut gram_small_reg = gram_small.clone();
-		for i in 0..c_len {
-		    gram_small_reg[(i * i + 3 * i) / 2] += TOL * reg.max(1.0);
-		}
-		solved = pos_def_solver_upperleft(&gram_small_reg, &mut inverse_y, zeros.len());
-		// compute the residual of the regularized system
-		let solved_pre = &solved[..c_len];
-		let resid_top = euclid_distance(&sym_mat_act(&gram_small, solved_pre), &inverse_y_old);
-		let resid_bottom = frob_norm_sym(&gram_small, c_len) * euclid_norm(solved_pre) + euclid_norm(&inverse_y_old);
-		if !relative_residual_is_small(resid_top, resid_bottom, 1e-9) {
-		    panic!("regularized Gram solve is not an accurate solution to original system");
-		}
-	    };
-	    solved
-	};
+	dual_y = dual_solve(&gram_small, &mut inverse_y, c_len, check_constraints);
 	lin_comb = constraint_lin_comb(var_dim, &constr_mat, &dual_y);
 	diff = vect_subt(obj_frob, &lin_comb);
 	dual_sfull.clear();
@@ -100,18 +456,6 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	(prim_val, dual_val) = (frob_prod_sym(obj_frob, &prim_z, var_dim), dot_prod(&point, &dual_y));
 	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
 	delta = pinf.max(dinf).max(gap);
-
-	let psd_blocks = block_dims.iter().copied().
-	    scan(0, |start, dim| {
-		let block = (*start, dim);
-		*start += dim;
-		Some(block)
-	    }).chain(
-		symm_dims.iter().copied().
-		    scan(0, |start, dim| {
-			let block = [(block_size_sum + *start, dim), (block_size_sum + *start + dim, dim)];
-			*start += 2 * dim;
-			Some(block)}).flatten()).collect();
 
 	if residual_is_small(delta, TOL) &&
 	    psd_block_check(&prim_z, &psd_blocks) {

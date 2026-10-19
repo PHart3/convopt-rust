@@ -91,3 +91,31 @@ was rotated, and it replaces the cached row only if it now exceeds the cached en
 after the update every `maxima[m - 1]` is a maximal row of column `m`, and the pivot
 search then returns a position of maximal off-diagonal magnitude. `cargo test` passes,
 including the new regression test.
+
+## The solver never checked positive semidefiniteness for single-variable problems
+
+**Where:** `src/sdp_altdir.rs`, the list `psd_blocks` of diagonal blocks that
+`psd_block_check` examines before `sdpad` returns a solution (layer L17,
+2026-10-19).
+
+**What was wrong.** The termination test accepts an iterate `Z` only when
+`psd_block_check(&prim_z, &psd_blocks)` succeeds, and `psd_blocks` was built from
+the LMI block sizes and the user-variable block sizes returned by
+`sdp_to_standard`. For a problem without LMIs, both lists are empty (the user's
+single variable *is* the standard-form variable), so `psd_blocks` was empty and
+the check was vacuously true. The solver could therefore return, and record as
+"best feasible", an iterate that is not positive semidefinite, although `Z >= 0`
+is a constraint of the standard form in that case too (test problem 5 relies on
+the returned `X` being PSD).
+
+**How Verus exposed it.** The contract of the setup (`sdpad_setup_ok`) states that
+`psd_blocks` lists a partition of the standard-form variable: consecutive diagonal
+blocks whose sizes sum to the order of `Z`. Writing that partition
+(`psd_partition` in `src/sdpad_spec.rs`) for the no-LMI case left no block to
+list, which contradicts the required sum and showed that nothing was checked.
+
+**What was changed.** `psd_block_list` now returns the single block `(0, var_dim)`
+when there are neither LMI blocks nor user-variable blocks, so the whole variable
+is checked. The list is also built once before the main loop instead of on every
+iteration (it never changes). `cargo test` passes with the change.
+

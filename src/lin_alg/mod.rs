@@ -6,6 +6,7 @@ pub mod solve_spec;
 pub mod ldlt_spec;
 pub mod jacobi_spec;
 pub mod eigen_spec;
+pub mod spectral_spec;
 pub mod gauss_spec;
 pub mod reduce_spec;
 pub mod matrix;
