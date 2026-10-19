@@ -76,7 +76,7 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     }
     let (mut eigenvals_new, mut eigenvects_new) = (a, &mut ident_mat(dim));
     let (mut eigenvals, mut eigenvects) : (&mut SymMatrix, &mut Matrix);
-    let mut biggest = f64::NEG_INFINITY;
+    let mut biggest = 0.0;
     let mut max : (usize, f64) = (1, eigenvals_new[1 + maxima[0]]);
     let mut m1;
     let mut m2 = 2;
@@ -91,8 +91,6 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     // pivot position (j, k)
     let mut k = max.0;
     let mut j = maxima[k - 1];
-    ind = (k * (k + 1)) / 2 + j;
-    let mut biggest_new = eigenvals_new[ind].abs();
     let (mut count, mut first1, mut first2) = (0, true, true);
     let max_rotations = MAX_SWEEPS * dim * (dim - 1) / 2;
     loop {
@@ -152,8 +150,8 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 	if eigenvals_new[(k * (k + 1)) / 2 + j].abs() < 1e-12 * 1.0_f64.max(max_diag) {
 	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
 	} else {
-	    (eigenvals, eigenvects, biggest) = (eigenvals_new, eigenvects_new, biggest_new);
-	    (eigenvals_new, eigenvects_new, biggest_new) = jacobi_rot(eigenvals, eigenvects, dim, k, j);
+	    (eigenvals, eigenvects) = (eigenvals_new, eigenvects_new);
+	    (eigenvals_new, eigenvects_new, biggest) = jacobi_rot(eigenvals, eigenvects, dim, k, j);
 	}
     }
 }
