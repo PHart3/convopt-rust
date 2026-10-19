@@ -1802,7 +1802,7 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
                 lemma_mod_multiples_basic(rr, cols + 1);
                 assert(aug.len() == rr * cols + rr);
                 assert(rr >= 1);
-                assert(0 * rr == 0) by (nonlinear_arith);
+                assert(0 * rr == 0);
                 assert(cm_idx(rr, 0, 0) == 0);
                 assert(aug[cm_idx(rr, 0, 0)] == -1.0real);
                 lemma_abs_max_entry(aug, cm_idx(rr, 0, 0));

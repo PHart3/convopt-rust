@@ -43,7 +43,7 @@ All 21 layers (L00-L20) are done.
 
 ## Verified-function count
 
-Last full run: **867 verified, 0 errors** (about 27 s wall clock, 15 threads;
+Last full run: **866 verified, 0 errors** (about 27 s wall clock, 15 threads;
 `--time` reports no slow proof; no `rlimit` is raised anywhere).
 
 Per module (Verus counts executable functions, lemmas, recursive spec
@@ -70,9 +70,9 @@ functions and loop bodies; `external_body` items are not counted):
 | `lin_alg::jacobi` | 41 | L08, L10-L12 |
 | `sdp_spec` | 62 | L16 |
 | `sdpad_spec` | 23 | L17-L19 |
-| `sdp` | 114 | L15, L16 |
+| `sdp` | 113 | L15, L16 |
 | `sdp_altdir` | 37 | L17-L19 |
-| **total** | **867** | |
+| **total** | **866** | |
 
 Executable functions verified (contract summary):
 
@@ -234,6 +234,8 @@ None. The final audit (L20) found no trusted construct outside
 `src/trusted.rs`, no raised `rlimit`, no slow proof, and no warning from
 `cargo build` or `cargo test`. It removed the unused literal axioms `1e3`,
 `1e-6` and the unused wrapper `neg_infinity` from the trusted base, annotated
-one low-confidence trigger in `part_concat`, and made one assertion of
-`standard_lmi` (`0 * rr == 0`) explicit after it stopped being found
-automatically when the trusted axioms changed.
+one low-confidence trigger in `part_concat`, and added the intermediate
+assertion `0 * rr == 0` in `standard_lmi`: the following assertion
+`cm_idx(rr, 0, 0) == 0` verifies in isolation but stopped verifying in the
+full-crate context after the trusted axioms changed (proof instability, not
+a nonlinear-arithmetic gap); the explicit step makes the proof robust.
