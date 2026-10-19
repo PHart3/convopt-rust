@@ -234,7 +234,7 @@ pub fn mat_sym_diagonal_mult_sym(sym_dim : usize, mat : &SymMatrix, start : usiz
 
 // removes redundant constraints from an augmented matrix [A | b] where rows of A represent symmetric matrices
 // also preconditions resulting constraint matrix by normalizing rows
-use std::f64::consts::FRAC_1_SQRT_2;
+use std::f64::consts::SQRT_2;
 pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
     let col_dim = (dim * (dim + 1)) / 2 + 1;
     let row_dim = mat.len() / col_dim;
@@ -251,10 +251,10 @@ pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
 	for k in 1..dim {
 	    let diag = (k * k + 3 * k) / 2;
 	    for col in start..diag {
-		scale = scale.hypot(echelon[col * row_dim + i] * FRAC_1_SQRT_2);
+		scale = scale.hypot(echelon[col * row_dim + i] * SQRT_2);
 	    }
 	    scale = scale.hypot(echelon[diag * row_dim + i]);
-	    start += k;
+	    start = diag + 1;
 	}
 	assert!(scale.is_finite(), "linear_remove_redundant_sym: row has non-finite packed norm");
 	for j in 0..col_dim {
