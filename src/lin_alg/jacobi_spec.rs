@@ -519,4 +519,33 @@ pub proof fn lemma_jacobi_step_similar(b: Seq<real>, b2: Seq<real>, dim: int, j:
     }
 }
 
+/* ---------- what a rotation leaves unchanged ---------- */
+
+/// The entries outside rows and columns j, k of cur agree with those of prev.
+pub open spec fn same_outside(prev: Seq<real>, cur: Seq<real>, dim: int, j: int, k: int) -> bool {
+    forall|r: int, l: int| 0 <= r < dim && 0 <= l < dim && r != j && r != k && l != j && l != k
+        ==> #[trigger] sym_entry(cur, r, l) == sym_entry(prev, r, l)
+}
+
+/// A rotation at (j, k) (given by the existential postcondition of `jacobi_rot`)
+/// changes only rows and columns j and k.
+pub proof fn lemma_jacobi_step_same_outside(b: Seq<real>, q: Seq<real>, b2: Seq<real>, q2: Seq<real>, dim: int, j: int, k: int)
+    requires
+        0 <= j < k < dim,
+        exists|c: real, s: real| jacobi_step(b, q, b2, q2, dim, j, k, c, s),
+    ensures
+        same_outside(b, b2, dim, j, k),
+{
+    let (c, s) = choose|c: real, s: real| jacobi_step(b, q, b2, q2, dim, j, k, c, s);
+    let jm = rot_mat(j, k, c, s);
+    let rotated = mmul(mmul(mtr(jm), sym_view(b), dim), jm, dim);
+    lemma_rot_congruence(sym_view(b), dim, j, k, c, s);
+    assert forall|r: int, l: int| 0 <= r < dim && 0 <= l < dim && r != j && r != k && l != j && l != k
+        implies #[trigger] sym_entry(b2, r, l) == sym_entry(b, r, l) by {
+        assert(sym_view(b2)(r, l) == rotated(r, l));
+        assert(rotated(r, l) == rot_target(sym_view(b), j, k, c, s)(r, l));
+        assert(rot_entry(sym_view(b), j, k, c, s, r, l) == sym_view(b)(r, l));
+    }
+}
+
 } // verus!

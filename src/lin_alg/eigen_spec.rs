@@ -239,6 +239,132 @@ pub proof fn lemma_offdiag_norm_bound(b: Seq<real>, dim: int, thr: real)
     lemma_sqrt_square(thr);
 }
 
+/* ---------- the maximal off-diagonal position ---------- */
+
+/// (j, k) with j < k is a position of maximal off-diagonal magnitude of B.
+pub open spec fn offdiag_max_at(b: Seq<real>, dim: int, j: int, k: int) -> bool {
+    &&& 0 <= j < k < dim
+    &&& forall|r: int, c: int| 0 <= r < c < dim
+            ==> abs_r(#[trigger] sym_entry(b, r, c)) <= abs_r(sym_entry(b, j, k))
+}
+
+/// If the maximal off-diagonal magnitude is below thr, so is every off-diagonal entry.
+pub proof fn lemma_offdiag_max_below(b: Seq<real>, dim: int, j: int, k: int, thr: real)
+    requires
+        offdiag_max_at(b, dim, j, k),
+        abs_r(sym_entry(b, j, k)) < thr,
+    ensures
+        offdiag_below(b, dim, thr),
+{
+    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim && r != c
+        implies #[trigger] abs_r(sym_entry(b, r, c)) < thr by {
+        if r > c {
+            assert(sym_entry(b, r, c) == sym_entry(b, c, r));
+        }
+    }
+}
+
+/* ---------- the column-cyclic pivot order ---------- */
+
+/// The pivot positions (j, k) of one column-cyclic sweep: column by column k = 1, .., dim - 1,
+/// and within column k the rows j = 0, .., k - 1.
+pub open spec fn cyc_order(dim: int) -> Seq<(int, int)>
+    decreases dim,
+{
+    if dim <= 1 {
+        Seq::empty()
+    } else {
+        cyc_order(dim - 1) + Seq::new((dim - 1) as nat, |j: int| (j, dim - 1))
+    }
+}
+
+/// The position of (j, k) in the sweep: the k (k - 1) / 2 pairs of the columns before k, then j.
+pub open spec fn cyc_pos(j: int, k: int) -> int {
+    k * (k - 1) / 2 + j
+}
+
+/// A sweep of order dim lists dim (dim - 1) / 2 positions.
+pub proof fn lemma_cyc_order_len(dim: int)
+    requires
+        dim >= 1,
+    ensures
+        cyc_order(dim).len() == cyc_pos(0, dim),
+    decreases dim,
+{
+    if dim > 1 {
+        lemma_cyc_order_len(dim - 1);
+        assert((dim - 1) * (dim - 2) / 2 + (dim - 1) == dim * (dim - 1) / 2) by (nonlinear_arith);
+    }
+}
+
+/// Every listed position is a pair j < k < dim, and it is listed at its own position cyc_pos(j, k).
+pub proof fn lemma_cyc_order_entries(dim: int)
+    requires
+        dim >= 1,
+    ensures
+        forall|t: int| 0 <= t < cyc_order(dim).len()
+            ==> 0 <= (#[trigger] cyc_order(dim)[t]).0 < cyc_order(dim)[t].1 < dim
+                && t == cyc_pos(cyc_order(dim)[t].0, cyc_order(dim)[t].1),
+    decreases dim,
+{
+    if dim > 1 {
+        lemma_cyc_order_len(dim - 1);
+        lemma_cyc_order_entries(dim - 1);
+        let prev = cyc_order(dim - 1);
+        let col = Seq::new((dim - 1) as nat, |j: int| (j, dim - 1));
+        assert forall|t: int| 0 <= t < cyc_order(dim).len()
+            implies 0 <= (#[trigger] cyc_order(dim)[t]).0 < cyc_order(dim)[t].1 < dim
+                && t == cyc_pos(cyc_order(dim)[t].0, cyc_order(dim)[t].1) by {
+            if t < prev.len() {
+                assert(cyc_order(dim)[t] == prev[t]);
+            } else {
+                assert(cyc_order(dim)[t] == col[t - prev.len()]);
+            }
+        }
+    }
+}
+
+/// Every pair j < k < dim is listed, at position cyc_pos(j, k).
+pub proof fn lemma_cyc_order_at(dim: int, j: int, k: int)
+    requires
+        0 <= j < k < dim,
+    ensures
+        0 <= cyc_pos(j, k) < cyc_order(dim).len(),
+        cyc_order(dim)[cyc_pos(j, k)] == (j, k),
+    decreases dim,
+{
+    lemma_cyc_order_len(dim);
+    lemma_cyc_order_len(dim - 1);
+    if k == dim - 1 {
+        let col = Seq::new((dim - 1) as nat, |j: int| (j, dim - 1));
+        assert(cyc_order(dim)[cyc_pos(j, k)] == col[j]);
+    } else {
+        lemma_cyc_order_at(dim - 1, j, k);
+        assert(cyc_order(dim)[cyc_pos(j, k)] == cyc_order(dim - 1)[cyc_pos(j, k)]);
+    }
+}
+
+/// A sweep in column-cyclic order visits every pair j < k < dim exactly once.
+pub open spec fn visits_each_pair_once(visited: Seq<(int, int)>, dim: int) -> bool {
+    &&& forall|j: int, k: int| 0 <= j < k < dim
+            ==> 0 <= #[trigger] cyc_pos(j, k) < visited.len() && visited[cyc_pos(j, k)] == (j, k)
+    &&& forall|t: int| 0 <= t < visited.len()
+            ==> 0 <= (#[trigger] visited[t]).0 < visited[t].1 < dim && t == cyc_pos(visited[t].0, visited[t].1)
+}
+
+pub proof fn lemma_cyc_order_visits_each_pair_once(dim: int)
+    requires
+        dim >= 1,
+    ensures
+        visits_each_pair_once(cyc_order(dim), dim),
+{
+    lemma_cyc_order_entries(dim);
+    assert forall|j: int, k: int| 0 <= j < k < dim
+        implies 0 <= #[trigger] cyc_pos(j, k) < cyc_order(dim).len() && cyc_order(dim)[cyc_pos(j, k)] == (j, k) by {
+        lemma_cyc_order_at(dim, j, k);
+    }
+}
+
 /* ---------- the common eigensolver contract ---------- */
 
 /// Approximate eigendecomposition of A: A = Q B Q^T with Q orthogonal and B symmetric,

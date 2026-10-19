@@ -1300,3 +1300,46 @@ fn run_sdp_tests(variant : &JacobiVariant) {
     result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_40, false, variant) });
     assert!(sdp_equality_err(&sdp_test_40, &result_reg, &reference), "test 40 failed under regularization");
 }
+
+// The cached Jacobi solver on a matrix whose first rotation makes the rotated entry of column 2
+// exceed the previous maximal off-diagonal magnitude while the pivot column 4 lies beyond
+// column 2 (the cache update of the original code then read a wrong packed index and later
+// called the rotation with the pivot indices in the wrong order).
+#[test]
+fn test_jacobi_cach_cache_update() {
+    use crate::lin_alg::jacobi::jacobi_eigen_cach;
+    let dim = 5;
+    let pk = |r: usize, c: usize| c * (c + 1) / 2 + r;
+    let mut a = vec![0.0; dim * (dim + 1) / 2];
+    for i in 0..dim {
+        a[pk(i, i)] = 1.0;
+    }
+    a[pk(1, 4)] = 1.0;
+    a[pk(1, 2)] = 0.9;
+    a[pk(2, 4)] = -0.9;
+    a[pk(1, 3)] = 0.95;
+    a[pk(3, 4)] = -0.95;
+    let input = a.clone();
+    let (vals, q) = jacobi_eigen_cach(&mut a, dim);
+    // Q^T Q = I
+    for c1 in 0..dim {
+        for c2 in 0..dim {
+            let mut s = 0.0;
+            for r in 0..dim {
+                s += q[c1 * dim + r] * q[c2 * dim + r];
+            }
+            let expected = if c1 == c2 { 1.0 } else { 0.0 };
+            assert!((s - expected).abs() < 1e-12, "Q is not orthogonal");
+        }
+    }
+    // A = Q diag(vals) Q^T up to the stopping threshold
+    for r in 0..dim {
+        for c in r..dim {
+            let mut s = 0.0;
+            for i in 0..dim {
+                s += vals[i] * q[i * dim + r] * q[i * dim + c];
+            }
+            assert!((s - input[pk(r, c)]).abs() < 1e-10, "A != Q B Q^T at ({}, {})", r, c);
+        }
+    }
+}

@@ -51,12 +51,12 @@ status: done
 L10 | Cached Jacobi: index_max_in_col returns argmax index in column; cache invariant (maxima[n-1] is column index of row-n maximum); cache update after rotation is correct; selected pivot is the cached global maximum; jacobi_eigen_cach satisfies eigen_decomp_approx with the implementation's tolerance |
 deps: L09 |
 targets: index_max_in_col, jacobi_eigen_cach |
-status: not started
+status: done
 
 L11 | Column-cyclic Jacobi: each sweep visits every pair 0 <= j < k < dim exactly once in column-cyclic order; every rotation uses jacobi_rot; final max-off-diagonal scan computes the true maximum; jacobi_eigen_cyc satisfies eigen_decomp_approx |
 deps: L09 |
 targets: jacobi_eigen_cyc |
-status: not started
+status: done
 
 L12 | PSD spectral operations via the common eigensolver interface: poseigendecomp selects eigenpairs with lambda > 0, negeigendecomp selects lambda < -1e-8 * scale; outputs are the selected columns of Q and diagonal of B; reconstruction diag_scale_gram(vals, vects) = sum lambda_i q_i q_i^T; positivity of selected values gives PSD reconstruction |
 deps: L10, L11, L04 |
@@ -81,7 +81,7 @@ status: done
 L16 | Standard-form conversion: sdp_to_standard preserves objective (C(Z_1..Z_n) = <obj_sum, Z>), equality constraints, LMI constraints (block B_i = H_i(...) - M_i on upper triangle), zero-pattern constraints forcing block-diagonal form, and variable reconstruction Z_i = B_{s+2i-1} - B_{s+2i}; both check_constraints branches |
 deps: L15, L14 |
 targets: sdp_to_standard |
-status: not started
+status: done
 
 L17 | Solver linear-system setup: Frobenius-weighted objective (scale_off_diag), Gram matrix of constraints, regularized Gram solve with relative-residual contract, psd_blocks partition, initial iterates |
 deps: L16, L04, L06 |

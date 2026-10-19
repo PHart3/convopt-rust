@@ -5,10 +5,11 @@
 use vstd::prelude::*;
 use crate::lin_alg::sym_matrix::*;
 use crate::lin_alg::comparison::{is_significantly_negative, scaled_near_zero};
+use crate::trusted::{abort, neg_infinity};
 #[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
-use crate::real_spec::abs_r;
+use crate::real_spec::{abs_r, max_r};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -17,6 +18,8 @@ use crate::lin_alg::sym_spec::*;
 use crate::lin_alg::mat_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::jacobi_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::eigen_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::lemma_pk_idx_injective;
 
@@ -283,165 +286,665 @@ fn jacobi_rot<'a>(mat: &'a mut SymMatrix, orth: &'a mut Matrix, dim: usize, k: u
     (mat, orth, val_old.abs())
 }
 
-} // verus!
+/* ---------- cached Jacobi ---------- */
 
 // first Jacobi variant, with each sweep taking cubic time on average by caching maximal element of each row
 
-// given a column in a symmetric matrix, find index of offdiagonal element with largest magnitude
-fn index_max_in_col(a : &SymMatrix, col : usize) -> usize {
-    if col == 0 {
-	panic!("index_max_in_col : column position must be positive");
+/// Row i holds a maximal off-diagonal magnitude of column c (over the rows r < c).
+pub open spec fn col_max_at(b: Seq<real>, c: int, i: int) -> bool {
+    &&& 0 <= i < c
+    &&& forall|r: int| 0 <= r < c ==> abs_r(#[trigger] sym_entry(b, r, c)) <= abs_r(sym_entry(b, i, c))
+}
+
+/// The cache of `jacobi_eigen_cach`: maxima[c - 1] is a maximal row of column c for 1 <= c < dim.
+pub open spec fn cache_ok(b: Seq<real>, maxima: Seq<usize>, dim: int) -> bool {
+    &&& maxima.len() == dim - 1
+    &&& forall|t: int| 0 <= t < dim - 1 ==> col_max_at(b, t + 1, #[trigger] maxima[t] as int)
+}
+
+/// After a rotation at (j, k) with old pivot magnitude big, a column m outside {j, k} keeps its
+/// entries in the unrotated rows, and those are bounded by the old cached entry (i, m) and by big.
+proof fn lemma_col_unrotated(prev: Seq<real>, cur: Seq<real>, dim: int, j: int, k: int, m: int, i: int, big: real)
+    requires
+        offdiag_max_at(prev, dim, j, k),
+        big == abs_r(sym_entry(prev, j, k)),
+        same_outside(prev, cur, dim, j, k),
+        col_max_at(prev, m, i),
+        1 <= m < dim,
+        m != j,
+        m != k,
+    ensures
+        abs_r(sym_entry(prev, i, m)) <= big,
+        i != j && i != k ==> sym_entry(cur, i, m) == sym_entry(prev, i, m),
+        forall|r: int| 0 <= r < m && r != j && r != k
+            ==> abs_r(#[trigger] sym_entry(cur, r, m)) <= abs_r(sym_entry(prev, i, m)),
+{
+    assert forall|r: int| 0 <= r < m && r != j && r != k
+        implies abs_r(#[trigger] sym_entry(cur, r, m)) <= abs_r(sym_entry(prev, i, m)) by {
+        assert(sym_entry(cur, r, m) == sym_entry(prev, r, m));
     }
-    let mut max = a[(col * (col + 1)) / 2];
-    let mut index : usize;
+}
+
+// given a column in a symmetric matrix, find index of offdiagonal element with largest magnitude
+// (the first row attaining the maximum magnitude among the rows 0..col)
+fn index_max_in_col(a: &SymMatrix, col: usize) -> (index_max: usize)
+    requires
+        col >= 1,
+        dim_fits(col as int),
+        a@.len() >= pk_len(col as int + 1),
+    ensures
+        col_max_at(rvs(a@), col as int, index_max as int),
+{
+    if col == 0 {
+        abort("index_max_in_col : column position must be positive");
+    }
+    let ghost b = rvs(a@);
+    let ghost ci = col as int;
+    proof {
+        lemma_dim_fits_idx(ci, ci);
+        lemma_pk_idx_bound(0, ci, ci + 1);
+    }
+    let start = (col * (col + 1)) / 2;
+    let mut max = a[start];
     let mut index_max = 0;
-    for i in 0..col {
-	index = (col * (col + 1)) / 2 + i;
-	if a[index].abs() > max.abs() {
-	    index_max = i;
-	    max = a[index]; 
-	}
+    for i in 0..col
+        invariant
+            b == rvs(a@),
+            ci == col as int,
+            col >= 1,
+            dim_fits(ci),
+            a@.len() >= pk_len(ci + 1),
+            start == pk_col_start(ci),
+            index_max < col,
+            rv(max) == sym_entry(b, index_max as int, ci),
+            forall|r: int| 0 <= r < i ==> abs_r(#[trigger] sym_entry(b, r, ci)) <= abs_r(rv(max)),
+    {
+        proof {
+            assert(a.len() >= pk_len(ci + 1));
+            lemma_pk_idx_bound(i as int, ci, ci + 1);
+        }
+        let index = start + i;
+        if a[index].abs() > max.abs() {
+            index_max = i;
+            max = a[index];
+        }
     }
     index_max
 }
 
+/// The first column k >= 1 whose cached entry has the largest magnitude; with a valid cache,
+/// (maxima[k - 1], k) is then a position of maximal off-diagonal magnitude.
+fn cached_pivot_col(a: &SymMatrix, maxima: &Vec<usize>, dim: usize) -> (k: usize)
+    requires
+        dim >= 2,
+        dim_fits(dim as int),
+        a@.len() >= pk_len(dim as int),
+        cache_ok(rvs(a@), maxima@, dim as int),
+    ensures
+        1 <= k < dim,
+        offdiag_max_at(rvs(a@), dim as int, maxima@[k - 1] as int, k as int),
+{
+    let ghost b = rvs(a@);
+    let ghost n = dim as int;
+    proof {
+        assert(col_max_at(b, 1, maxima@[0] as int));
+        lemma_pk_idx_bound(maxima@[0] as int, 1, n);
+    }
+    let mut max = a[1 + maxima[0]];
+    let mut k = 1;
+    for m in 2..dim
+        invariant
+            b == rvs(a@),
+            n == dim as int,
+            dim >= 2,
+            dim_fits(n),
+            a@.len() >= pk_len(n),
+            cache_ok(b, maxima@, n),
+            1 <= k < m,
+            rv(max) == sym_entry(b, maxima@[k - 1] as int, k as int),
+            forall|t: int| 0 <= t < m - 1
+                ==> abs_r(sym_entry(b, #[trigger] maxima@[t] as int, t + 1)) <= abs_r(rv(max)),
+    {
+        let ghost mi = m as int;
+        let i = maxima[m - 1];
+        proof {
+            assert(col_max_at(b, mi, i as int));
+            lemma_dim_fits_idx(n, mi);
+            lemma_pk_idx_bound(i as int, mi, n);
+        }
+        let ind = (m * (m + 1)) / 2 + i;
+        if a[ind].abs() > max.abs() {
+            max = a[ind];
+            k = m;
+        }
+    }
+    proof {
+        let (ji, ki) = (maxima@[k - 1] as int, k as int);
+        assert forall|r: int, c: int| 0 <= r < c < n
+            implies abs_r(#[trigger] sym_entry(b, r, c)) <= abs_r(sym_entry(b, ji, ki)) by {
+            assert(col_max_at(b, c, maxima@[c - 1] as int));
+            assert(abs_r(sym_entry(b, maxima@[c - 1] as int, (c - 1) + 1)) <= abs_r(rv(max)));
+        }
+    }
+    k
+}
+
 const MAX_SWEEPS: usize = 50;
 
-pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
+// (for symmetric A of order dim, returns (diag(B), Q) with A = Q B Q^T, Q orthogonal and the
+// off-diagonal part of B below the stopping threshold; see eigen_spec.rs. Each rotation pivots
+// on the position of maximal off-diagonal magnitude, found through the per-column cache
+// `maxima`; aborts if MAX_SWEEPS sweeps worth of rotations do not reach the threshold)
+pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix))
+    requires
+        dim >= 1,
+        dim_fits(dim as int),
+        old(a)@.len() >= pk_len(dim as int),
+    ensures
+        final(a)@.len() == old(a)@.len(),
+        res.0@.len() == dim,
+        res.1@.len() == dim * dim,
+        eigensolver_ok(rvs(old(a)@), rvs(final(a)@), rvs(res.1@), rvs(res.0@), dim as int),
+{
+    let ghost a0 = rvs(old(a)@);
+    let ghost n = dim as int;
+    let ghost f = |i: int| abs_r(sym_diag(a0, i));
+    proof {
+        lemma_dim_fits_idx(n, n);
+        assert(dim * dim <= dim * (dim + 1)) by (nonlinear_arith);
+        lemma_pk_idx_bound(0, 0, n);
+    }
     if dim == 1 {
-	return (vec![a[0]], vec![1.0]);
+        let res = (vec![a[0]], vec![1.0]);
+        proof {
+            // Q = I and B = A: an exact eigendecomposition without off-diagonal entries
+            assert(cm_entry(rvs(res.1@), 1, 0, 0) == 1.0real);
+            assert(is_ident_r(rvs(res.1@), 1));
+            lemma_eigen_inv_init(a0, rvs(res.1@), 1);
+            assert(rvs(res.0@) =~= sym_diag_r(a0, 1));
+            lemma_converged_approx(a0, rvs(res.1@), a0, 1);
+        }
+        return res;
     }
-    let mut maxima = Vec::with_capacity(dim - 1);
+    // the cache and the diagonal scale of the input
+    let mut maxima: Vec<usize> = Vec::with_capacity(dim - 1);
     let mut max_diag = a[0].abs();
-    for n in 1..dim {
-	if a[(n * n + 3 * n) / 2].abs() > max_diag {
-	    max_diag = a[(n * n + 3 * n) / 2].abs();
-	}
-	maxima.push(index_max_in_col(a, n));
+    proof {
+        assert(max0_fn_r(f, 0) == 0.0real);
+        assert(max0_fn_r(f, 1) == max_r(0.0real, f(0)));
     }
-    let (mut eigenvals_new, mut eigenvects_new) = (a, &mut ident_mat(dim));
-    let (mut eigenvals, mut eigenvects) : (&mut SymMatrix, &mut Matrix);
-    let mut biggest = f64::NEG_INFINITY;
-    let mut max : (usize, f64) = (1, eigenvals_new[1 + maxima[0]]);
-    let mut m1;
-    let mut m2 = 2;
-    let mut ind : usize;
-    for i in &maxima[1..] {
-	ind = (m2 * (m2 + 1)) / 2 + i;
-	if eigenvals_new[ind].abs() > max.1.abs() {
-	    max = (m2, eigenvals_new[ind]);
-	}
-	m2 += 1;
+    for m in 1..dim
+        invariant
+            a0 == rvs(a@),
+            n == dim as int,
+            dim >= 2,
+            dim_fits(n),
+            a@.len() >= pk_len(n),
+            f == (|i: int| abs_r(sym_diag(a0, i))),
+            maxima@.len() == m - 1,
+            forall|t: int| 0 <= t < m - 1 ==> col_max_at(a0, t + 1, #[trigger] maxima@[t] as int),
+            rv(max_diag) == max0_fn_r(f, m as nat),
+    {
+        let ghost mi = m as int;
+        proof {
+            lemma_dim_fits_idx(n, mi);
+            lemma_pk_diag_idx(mi);
+            lemma_pk_idx_bound(mi, mi, n);
+            lemma_dim_fits_monotone(mi, n);
+            lemma_pk_col_start_monotone(mi + 1, n);
+        }
+        let diag = a[(m * m + 3 * m) / 2].abs();
+        if diag > max_diag {
+            max_diag = diag;
+        }
+        maxima.push(index_max_in_col(a, m));
     }
+    let mut q0 = ident_mat(dim);
+    let mut vals = a;
+    let mut vects = &mut q0;
+    let ghost qf = final(vects)@;
+    // magnitude of the pivot of the last rotation (unread before the first rotation)
+    let mut biggest = neg_infinity();
     // pivot position (j, k)
-    let mut k = max.0;
+    let mut k = cached_pivot_col(vals, &maxima, dim);
     let mut j = maxima[k - 1];
-    ind = (k * (k + 1)) / 2 + j;
-    let mut biggest_new = eigenvals_new[ind].abs();
     let (mut count, mut first1, mut first2) = (0, true, true);
-    let max_rotations = MAX_SWEEPS * dim * (dim - 1) / 2;
-    loop {
-	if count == max_rotations {
-	    panic!("jacobi_eigen_cach failed to converge after {} sweeps", MAX_SWEEPS);
-	}
-	count += 1;
-	if first1 {
-	    first1 = false;
-	} else {
-	    m1 = 1;
-	    max_diag = eigenvals_new[0].abs();
-	    for i in &mut maxima {
-		if eigenvals_new[(m1 * m1 + 3 * m1) / 2].abs() > max_diag {
-		    max_diag = eigenvals_new[(m1 * m1 + 3 * m1) / 2].abs();
-		}
-		ind = (m1 * (m1 + 1)) / 2 + *i;
-		if m1 == k || m1 == j {
-		    *i = index_max_in_col(eigenvals_new, m1);
-		} else if (*i != k && k < m1) && (*i != j && j < m1) {
-		    let (val_j, val_k) =
-			(eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs(), eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs());
-		    let val_ind = eigenvals_new[ind].abs();
-		    if val_j > val_ind {
-			if val_k > val_j {
-			    *i = k;
-			} else {
-			    *i = j;
-			}
-		    } else if val_k > val_ind {
-			*i = k;
-		    }
-		} else if eigenvals_new[ind].abs() < biggest {
-		    *i = index_max_in_col(eigenvals_new, m1);
-		} else if eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs() > eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs() {
-		    *i = j;
-		} else {
-		    *i = k;
-		}
-		m1 += 1;
-	    }
-	}
-	if first2 {
-	    first2 = false
-	} else {
-	    m2 = 1;
-	    for i in &maxima {
-		ind = (m2 * (m2 + 1)) / 2 + *i;
-		if m2 == 1 || eigenvals_new[ind].abs() > (max.1).abs() {
-		    max = (m2, eigenvals_new[ind]);
-		}
-		m2 += 1;
-	    }
-	    k = max.0;
-	    j = maxima[k - 1];
-	}
-	if scaled_near_zero(eigenvals_new[(k * (k + 1)) / 2 + j], 1.0_f64.max(max_diag), 1e-12) {
-	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
-	} else {
-	    (eigenvals, eigenvects, biggest) = (eigenvals_new, eigenvects_new, biggest_new);
-	    (eigenvals_new, eigenvects_new, biggest_new) = jacobi_rot(eigenvals, eigenvects, dim, k, j);
-	}
+    proof {
+        assert(dim * (dim - 1) <= dim * (dim + 1)) by (nonlinear_arith);
     }
+    let max_rotations = (dim * (dim - 1) / 2).saturating_mul(MAX_SWEEPS);
+    // the matrix before the last rotation
+    let ghost mut prev = rvs(vals@);
+    proof {
+        lemma_eigen_inv_init(a0, rvs(vects@), n);
+    }
+    loop
+        invariant_except_break
+            first1 == first2,
+            // before the first rotation: cache, pivot and diagonal scale describe the current matrix
+            first1 ==> cache_ok(rvs(vals@), maxima@, n)
+                && offdiag_max_at(rvs(vals@), n, j as int, k as int)
+                && rv(max_diag) == max_abs_diag_r(rvs(vals@), n),
+            // afterwards: they describe the matrix before the last rotation at (j, k)
+            !first1 ==> cache_ok(prev, maxima@, n)
+                && offdiag_max_at(prev, n, j as int, k as int)
+                && rv(biggest) == abs_r(sym_entry(prev, j as int, k as int))
+                && same_outside(prev, rvs(vals@), n, j as int, k as int),
+        invariant
+            n == dim as int,
+            dim >= 2,
+            dim_fits(n),
+            a0 == rvs(old(a)@),
+            old(a)@.len() >= pk_len(n),
+            vals@.len() == old(a)@.len(),
+            vects@.len() == dim * dim,
+            final(a)@ == final(vals)@,
+            final(vects)@ == qf,
+            eigen_decomp_inv(a0, rvs(vects@), rvs(vals@), n),
+            maxima@.len() == dim - 1,
+            count <= max_rotations,
+            j < k < dim,
+        ensures
+            vals@.len() == old(a)@.len(),
+            vects@.len() == dim * dim,
+            final(a)@ == final(vals)@,
+            final(vects)@ == qf,
+            eigen_decomp_inv(a0, rvs(vects@), rvs(vals@), n),
+            jacobi_converged(rvs(vals@), n),
+        decreases max_rotations - count,
+    {
+        if count == max_rotations {
+            abort("jacobi_eigen_cach failed to converge after 50 sweeps");
+        }
+        count += 1;
+        let ghost cur = rvs(vals@);
+        let ghost fc = |i: int| abs_r(sym_diag(cur, i));
+        if first1 {
+            first1 = false;
+        } else {
+            // update the cache and the diagonal scale after the rotation at (j, k)
+            let ghost mx0 = maxima@;
+            proof {
+                lemma_pk_idx_bound(0, 0, n);
+            }
+            max_diag = vals[0].abs();
+            proof {
+                assert(max0_fn_r(fc, 0) == 0.0real);
+                assert(max0_fn_r(fc, 1) == max_r(0.0real, fc(0)));
+            }
+            for m in 1..dim
+                invariant
+                    n == dim as int,
+                    dim >= 2,
+                    dim_fits(n),
+                    cur == rvs(vals@),
+                    vals@.len() >= pk_len(n),
+                    fc == (|i: int| abs_r(sym_diag(cur, i))),
+                    mx0.len() == dim - 1,
+                    maxima@.len() == dim - 1,
+                    j < k < dim,
+                    cache_ok(prev, mx0, n),
+                    offdiag_max_at(prev, n, j as int, k as int),
+                    rv(biggest) == abs_r(sym_entry(prev, j as int, k as int)),
+                    same_outside(prev, cur, n, j as int, k as int),
+                    forall|t: int| 0 <= t < m - 1 ==> col_max_at(cur, t + 1, #[trigger] maxima@[t] as int),
+                    forall|t: int| m - 1 <= t < dim - 1 ==> #[trigger] maxima@[t] == mx0[t],
+                    rv(max_diag) == max0_fn_r(fc, m as nat),
+            {
+                let ghost (mi, ji, ki) = (m as int, j as int, k as int);
+                proof {
+                    lemma_dim_fits_idx(n, mi);
+                    lemma_pk_diag_idx(mi);
+                    lemma_pk_idx_bound(mi, mi, n);
+                    lemma_dim_fits_monotone(mi, n);
+                    lemma_pk_col_start_monotone(mi + 1, n);
+                }
+                let diag = vals[(m * m + 3 * m) / 2].abs();
+                if diag > max_diag {
+                    max_diag = diag;
+                }
+                let i = maxima[m - 1];
+                let ghost ii = i as int;
+                proof {
+                    assert(col_max_at(prev, mi, ii));
+                    lemma_pk_idx_bound(ii, mi, n);
+                    if j < m {
+                        lemma_pk_idx_bound(ji, mi, n);
+                    }
+                    if k < m {
+                        lemma_pk_idx_bound(ki, mi, n);
+                    }
+                    if m != j && m != k {
+                        lemma_col_unrotated(prev, cur, n, ji, ki, mi, ii, rv(biggest));
+                    }
+                }
+                let col = (m * (m + 1)) / 2;
+                let ind = col + i;
+                if m == k || m == j {
+                    // the whole column was rotated
+                    maxima[m - 1] = index_max_in_col(vals, m);
+                } else if (i != k && k < m) && (i != j && j < m) {
+                    // the cached entry is unrotated and still dominates the other unrotated
+                    // entries; the rotated rows j and k are the only other candidates
+                    let (val_j, val_k) = (vals[col + j].abs(), vals[col + k].abs());
+                    let val_ind = vals[ind].abs();
+                    if val_j > val_ind {
+                        if val_k > val_j {
+                            maxima[m - 1] = k;
+                        } else {
+                            maxima[m - 1] = j;
+                        }
+                    } else if val_k > val_ind {
+                        maxima[m - 1] = k;
+                    }
+                    proof {
+                        let ni = maxima@[mi - 1] as int;
+                        assert forall|r: int| 0 <= r < mi
+                            implies abs_r(#[trigger] sym_entry(cur, r, mi)) <= abs_r(sym_entry(cur, ni, mi)) by {
+                            if r != ji && r != ki {
+                                assert(abs_r(sym_entry(cur, r, mi)) <= abs_r(sym_entry(cur, ii, mi)));
+                            }
+                        }
+                    }
+                } else if vals[ind].abs() < biggest {
+                    // the cached entry was rotated and shrank below the old maximum: rescan
+                    maxima[m - 1] = index_max_in_col(vals, m);
+                } else if k < m {
+                    // j < k < m and the cached entry (in row j or k) is at least the old maximum,
+                    // which bounds every unrotated entry: the maximum is in row j or k
+                    if vals[col + j].abs() > vals[col + k].abs() {
+                        maxima[m - 1] = j;
+                    } else {
+                        maxima[m - 1] = k;
+                    }
+                    proof {
+                        let ni = maxima@[mi - 1] as int;
+                        assert forall|r: int| 0 <= r < mi
+                            implies abs_r(#[trigger] sym_entry(cur, r, mi)) <= abs_r(sym_entry(cur, ni, mi)) by {
+                            if r != ji && r != ki {
+                                assert(abs_r(sym_entry(cur, r, mi)) <= abs_r(sym_entry(prev, ii, mi)));
+                            }
+                        }
+                    }
+                } else if j < m && vals[col + j].abs() > vals[ind].abs() {
+                    // j < m < k: only row j of this column was rotated, and it now exceeds the
+                    // cached entry, which is at least the old maximum
+                    maxima[m - 1] = j;
+                    proof {
+                        assert forall|r: int| 0 <= r < mi
+                            implies abs_r(#[trigger] sym_entry(cur, r, mi)) <= abs_r(sym_entry(cur, ji, mi)) by {
+                            if r != ji {
+                                assert(abs_r(sym_entry(cur, r, mi)) <= abs_r(sym_entry(prev, ii, mi)));
+                            }
+                        }
+                    }
+                } else {
+                    // either j < m < k and the cached entry (at least the old maximum) still
+                    // dominates the rotated row j, or m < j < k and the column is unrotated
+                    proof {
+                        assert forall|r: int| 0 <= r < mi
+                            implies abs_r(#[trigger] sym_entry(cur, r, mi)) <= abs_r(sym_entry(cur, ii, mi)) by {
+                            if r != ji && r != ki {
+                                assert(abs_r(sym_entry(cur, r, mi)) <= abs_r(sym_entry(prev, ii, mi)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if first2 {
+            first2 = false;
+        } else {
+            k = cached_pivot_col(vals, &maxima, dim);
+            j = maxima[k - 1];
+        }
+        proof {
+            lemma_dim_fits_idx(n, k as int);
+            lemma_pk_idx_bound(j as int, k as int, n);
+            assert(vals.len() >= pk_len(n));
+        }
+        let piv = vals[(k * (k + 1)) / 2 + j];
+        if scaled_near_zero(piv, 1.0_f64.max(max_diag), 1e-12) {
+            proof {
+                lemma_offdiag_max_below(cur, n, j as int, k as int, jacobi_thr_r(cur, n));
+            }
+            break;
+        }
+        // the pivot is nonzero: its magnitude is at least 1e-12 * max(1, max_diag)
+        let ghost qprev = rvs(vects@);
+        proof {
+            prev = cur;
+        }
+        let (v, q, b) = jacobi_rot(vals, vects, dim, k, j);
+        vals = v;
+        vects = q;
+        biggest = b;
+        proof {
+            lemma_eigen_inv_step(a0, qprev, prev, rvs(vects@), rvs(vals@), n, j as int, k as int);
+            lemma_jacobi_step_same_outside(prev, qprev, rvs(vals@), rvs(vects@), n, j as int, k as int);
+        }
+    }
+    let eigenvals = diag_of_sym_mat(vals, dim);
+    proof {
+        lemma_converged_approx(a0, rvs(vects@), rvs(vals@), n);
+    }
+    (eigenvals, q0)
 }
 
+/* ---------- column-cyclic Jacobi ---------- */
+
 // second Jacobi variant, with each sweep taking cubic worst-case time by cyclically moving through columns
-pub fn jacobi_eigen_cyc(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
+// (same contract as `jacobi_eigen_cach`; each sweep visits the pairs (j, k), j < k, in
+// column-cyclic order (`visits_each_pair_once`) and rotates at every nonzero one; the stopping
+// test scans all off-diagonal entries for the maximal magnitude)
+pub fn jacobi_eigen_cyc(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix))
+    requires
+        dim >= 1,
+        dim_fits(dim as int),
+        old(a)@.len() >= pk_len(dim as int),
+    ensures
+        final(a)@.len() == old(a)@.len(),
+        res.0@.len() == dim,
+        res.1@.len() == dim * dim,
+        eigensolver_ok(rvs(old(a)@), rvs(final(a)@), rvs(res.1@), rvs(res.0@), dim as int),
+{
+    let ghost a0 = rvs(old(a)@);
+    let ghost n = dim as int;
+    proof {
+        lemma_dim_fits_idx(n, n);
+        assert(dim * dim <= dim * (dim + 1)) by (nonlinear_arith);
+        lemma_pk_idx_bound(0, 0, n);
+    }
     if dim == 1 {
-	return (vec![a[0]], vec![1.0]);
+        let res = (vec![a[0]], vec![1.0]);
+        proof {
+            // Q = I and B = A: an exact eigendecomposition without off-diagonal entries
+            assert(cm_entry(rvs(res.1@), 1, 0, 0) == 1.0real);
+            assert(is_ident_r(rvs(res.1@), 1));
+            lemma_eigen_inv_init(a0, rvs(res.1@), 1);
+            assert(rvs(res.0@) =~= sym_diag_r(a0, 1));
+            lemma_converged_approx(a0, rvs(res.1@), a0, 1);
+        }
+        return res;
     }
-    let (mut eigenvals_new, mut eigenvects_new) = (a, &mut ident_mat(dim));
-    let (mut eigenvals, mut eigenvects) : (&mut SymMatrix, &mut Matrix);
+    let mut q0 = ident_mat(dim);
+    let mut vals = a;
+    let mut vects = &mut q0;
+    let ghost qf = final(vects)@;
     let mut count = 0;
-    loop {
-	if count == MAX_SWEEPS {
-	    panic!("jacobi_eigen_cyc failed to converge after {} sweeps", MAX_SWEEPS);
-	}
-	count += 1;
-	// column-cyclic ordering of pivot positions
-	for k in 1..dim {
-	    for j in 0..k {
-		if eigenvals_new[(k * (k + 1)) / 2 + j] == 0.0 {
-		    continue;
-		}
-		(eigenvals, eigenvects) = (eigenvals_new, eigenvects_new);
-		(eigenvals_new, eigenvects_new, _) = jacobi_rot(eigenvals, eigenvects, dim, k, j)
-	    }
-	}
-	let (mut max_diag, mut max_offdiag) = (eigenvals_new[0].abs(), 0.0);
-	for n in 0..dim {
-	    for m in 0..n {
-		if eigenvals_new[(n * (n + 1)) / 2 + m].abs() > max_offdiag {
-		    max_offdiag = eigenvals_new[(n * (n + 1)) / 2 + m].abs();
-		}
-	    }
-	    if eigenvals_new[(n * n + 3 * n) / 2].abs() > max_diag {
-		max_diag = eigenvals_new[(n * n + 3 * n) / 2].abs();
-	    }
-	} 
-	if scaled_near_zero(max_offdiag, 1.0_f64.max(max_diag), 1e-12) {
-	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
-	}
+    proof {
+        lemma_eigen_inv_init(a0, rvs(vects@), n);
     }
+    loop
+        invariant
+            n == dim as int,
+            dim >= 2,
+            dim_fits(n),
+            a0 == rvs(old(a)@),
+            old(a)@.len() >= pk_len(n),
+            vals@.len() == old(a)@.len(),
+            vects@.len() == dim * dim,
+            final(a)@ == final(vals)@,
+            final(vects)@ == qf,
+            eigen_decomp_inv(a0, rvs(vects@), rvs(vals@), n),
+            count <= MAX_SWEEPS,
+        ensures
+            vals@.len() == old(a)@.len(),
+            vects@.len() == dim * dim,
+            final(a)@ == final(vals)@,
+            final(vects)@ == qf,
+            eigen_decomp_inv(a0, rvs(vects@), rvs(vals@), n),
+            jacobi_converged(rvs(vals@), n),
+        decreases MAX_SWEEPS - count,
+    {
+        if count == MAX_SWEEPS {
+            abort("jacobi_eigen_cyc failed to converge after 50 sweeps");
+        }
+        count += 1;
+        // column-cyclic ordering of pivot positions
+        let ghost mut visited: Seq<(int, int)> = Seq::empty();
+        for k in 1..dim
+            invariant
+                n == dim as int,
+                dim >= 2,
+                dim_fits(n),
+                a0 == rvs(old(a)@),
+                old(a)@.len() >= pk_len(n),
+                vals@.len() == old(a)@.len(),
+                vects@.len() == dim * dim,
+                final(a)@ == final(vals)@,
+                final(vects)@ == qf,
+                eigen_decomp_inv(a0, rvs(vects@), rvs(vals@), n),
+                visited == cyc_order(k as int),
+        {
+            let ghost ki = k as int;
+            proof {
+                lemma_dim_fits_idx(n, ki);
+            }
+            for j in 0..k
+                invariant
+                    n == dim as int,
+                    dim >= 2,
+                    dim_fits(n),
+                    a0 == rvs(old(a)@),
+                    old(a)@.len() >= pk_len(n),
+                    vals@.len() == old(a)@.len(),
+                    vects@.len() == dim * dim,
+                    final(a)@ == final(vals)@,
+                    final(vects)@ == qf,
+                    eigen_decomp_inv(a0, rvs(vects@), rvs(vals@), n),
+                    ki == k as int,
+                    1 <= k < dim,
+                    visited == cyc_order(ki) + Seq::new(j as nat, |t: int| (t, ki)),
+            {
+                let ghost ji = j as int;
+                proof {
+                    lemma_dim_fits_idx(n, ki);
+                    lemma_pk_idx_bound(ji, ki, n);
+                    assert(vals.len() >= pk_len(n));
+                    visited = visited.push((ji, ki));
+                    assert(visited =~= cyc_order(ki) + Seq::new((j + 1) as nat, |t: int| (t, ki)));
+                }
+                if vals[(k * (k + 1)) / 2 + j] != 0.0 {
+                    let ghost (prev, qprev) = (rvs(vals@), rvs(vects@));
+                    let (v, q, _b) = jacobi_rot(vals, vects, dim, k, j);
+                    vals = v;
+                    vects = q;
+                    proof {
+                        lemma_eigen_inv_step(a0, qprev, prev, rvs(vects@), rvs(vals@), n, ji, ki);
+                    }
+                }
+            }
+            proof {
+                assert(cyc_order(ki + 1) == cyc_order(ki) + Seq::new(ki as nat, |j: int| (j, ki + 1 - 1)));
+                assert(visited =~= cyc_order(ki + 1));
+            }
+        }
+        proof {
+            // the sweep visited every pair j < k < dim exactly once, in column-cyclic order
+            assert(visited == cyc_order(n));
+            lemma_cyc_order_visits_each_pair_once(n);
+            assert(visits_each_pair_once(visited, n));
+        }
+        // stopping test: the maximal off-diagonal magnitude against the diagonal scale
+        let ghost cur = rvs(vals@);
+        let ghost fc = |i: int| abs_r(sym_diag(cur, i));
+        proof {
+            lemma_pk_idx_bound(0, 0, n);
+        }
+        let (mut max_diag, mut max_offdiag) = (vals[0].abs(), 0.0);
+        proof {
+            assert(max0_fn_r(fc, 0) == 0.0real);
+        }
+        for c in 0..dim
+            invariant
+                n == dim as int,
+                dim >= 2,
+                dim_fits(n),
+                cur == rvs(vals@),
+                vals@.len() >= pk_len(n),
+                fc == (|i: int| abs_r(sym_diag(cur, i))),
+                rv(max_offdiag) >= 0.0real,
+                forall|r: int, l: int| 0 <= r < l < c ==> abs_r(#[trigger] sym_entry(cur, r, l)) <= rv(max_offdiag),
+                rv(max_diag) == max_r(fc(0), max0_fn_r(fc, c as nat)),
+        {
+            let ghost ci = c as int;
+            proof {
+                lemma_dim_fits_idx(n, ci);
+                lemma_pk_diag_idx(ci);
+                lemma_pk_idx_bound(ci, ci, n);
+            }
+            for r in 0..c
+                invariant
+                    n == dim as int,
+                    dim_fits(n),
+                    cur == rvs(vals@),
+                    vals@.len() >= pk_len(n),
+                    ci == c as int,
+                    c < dim,
+                    rv(max_offdiag) >= 0.0real,
+                    forall|r: int, l: int| 0 <= r < l < c ==> abs_r(#[trigger] sym_entry(cur, r, l)) <= rv(max_offdiag),
+                    forall|r2: int| 0 <= r2 < r ==> abs_r(#[trigger] sym_entry(cur, r2, ci)) <= rv(max_offdiag),
+            {
+                proof {
+                    lemma_dim_fits_idx(n, ci);
+                    lemma_pk_idx_bound(r as int, ci, n);
+                    assert(vals.len() >= pk_len(n));
+                }
+                let off = vals[(c * (c + 1)) / 2 + r].abs();
+                if off > max_offdiag {
+                    max_offdiag = off;
+                }
+            }
+            let diag = vals[(c * c + 3 * c) / 2].abs();
+            if diag > max_diag {
+                max_diag = diag;
+            }
+        }
+        proof {
+            lemma_max0_fn_bound(fc, dim as nat);
+            assert(rv(max_diag) == max_abs_diag_r(cur, n));
+        }
+        if scaled_near_zero(max_offdiag, 1.0_f64.max(max_diag), 1e-12) {
+            proof {
+                assert forall|r: int, l: int| 0 <= r < n && 0 <= l < n && r != l
+                    implies #[trigger] abs_r(sym_entry(cur, r, l)) < jacobi_thr_r(cur, n) by {
+                    if r > l {
+                        assert(sym_entry(cur, r, l) == sym_entry(cur, l, r));
+                    }
+                }
+            }
+            break;
+        }
+    }
+    let eigenvals = diag_of_sym_mat(vals, dim);
+    proof {
+        lemma_converged_approx(a0, rvs(vects@), rvs(vals@), n);
+    }
+    (eigenvals, q0)
 }
+
+} // verus!
 
 pub enum JacobiVariant {
     Cached,

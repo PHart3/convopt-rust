@@ -26,6 +26,7 @@ mode and is never used in this project.
 | T6 | `assume_specification` for `f64::abs`, `max`, `min`, `sqrt`, `mul_add`, `hypot`, `recip`, `signum`, `is_finite` | `abs`, `max`, `min` are exact. `sqrt(x) == sqrt_r(rv(x))` for `rv(x) >= 0`, else unspecified. `mul_add(x,a,b) == x*a + b`. `hypot(x,y) == sqrt_r(x^2 + y^2)`. `recip(x) == 1/x` for `x != 0`, else unspecified. `signum(x)` is `1` or `-1`, matching the sign of a nonzero `x`. `is_finite` is unconstrained. | vstd gives these std methods no specification. Each contract is the exact-real reading of the std documentation. `signum` on zero may return either sign (IEEE: depends on the sign bit), so the contract leaves it open. `is_finite` is a genuine property of floats that the exact-real model cannot express, so nothing is claimed; its one use (an assertion in `linear_remove_redundant_sym`) will be treated as a data-dependent abort. |
 | T7 | `neg`, `pos_infinity`, `neg_infinity` (`external_body`, `inline(always)`) | `rv(neg(x)) == -rv(x)`. The infinities are unconstrained. | Verus rejects unary `-x` on floats and the std float constants. The wrappers are one-instruction inline functions whose bodies are the rejected expressions, so executable code and performance are unchanged. The infinities are only used as initial sentinels in the solver's bookkeeping; the model makes no claim about them. |
 | T8 | `abort(msg) -> !` (`external_body`) | Diverges. No precondition, no postcondition. | The solver panics on data-dependent failures (inconsistent constraints, non-positive-definite systems, non-convergence). vstd forbids `panic!` unless proved unreachable, which is impossible for these data-dependent checks. `abort` makes such exits explicit: a function that aborts establishes nothing, and verified postconditions only cover normal returns. Reachability of aborts is deliberately not analyzed. |
+| T9 | `assume_specification` for `usize::isqrt` | `r * r <= x < (r + 1) * (r + 1)` (integer arithmetic). | vstd gives `isqrt` no specification. The contract is the std documentation ("the square root rounded down"). It is used once, to read the block size `k` of an LMI from the length `k^2` of its constant matrix; the executable check `k * k == len` that follows aborts otherwise, so only the existence of the integer square root is relied upon. |
 
 Items T7 and T8 are counted by Verus as "verified" functions (4 in total)
 because `external_body` functions are reported as such.
@@ -82,3 +83,23 @@ leaves the multiplier unspecified, and the verified postconditions hold for any 
 L15 added no trusted items. The twelve constructors and converters use the literals `0.0`,
 `1.0` (T5) and no method contract; `sym_matrix_proj` replaces its data-dependent `panic!`
 on `row > col` by `abort` (T8).
+L10 added no trusted items. `jacobi_eigen_cach` and its helpers use the literals `0.0`,
+`1.0`, `1e-12` (T5), the `abs` and `max` contracts (T6), `neg_infinity` (T7, the initial
+value of `biggest`, which is never read before the first rotation) and `abort` (T8) for
+the two data-dependent exits (`index_max_in_col` on column 0, unreachable under its
+precondition, and non-convergence after `MAX_SWEEPS` sweeps). The rotation count limit
+is computed with vstd's `usize::saturating_mul` contract (a library specification, not
+part of this project's trusted base). The nonzero-pivot precondition of `jacobi_rot` is
+discharged from the failed stopping test: `|pivot| >= 1e-12 * max(1, max_diag) > 0`.
+L11 added no trusted items. `jacobi_eigen_cyc` uses the literals `0.0`, `1.0`, `1e-12` (T5),
+the `abs`, `max` contracts (T6), the comparison `!= 0.0` (T4, which is exactly the
+nonzero-pivot precondition of `jacobi_rot`) and `abort` (T8) for non-convergence after
+`MAX_SWEEPS` sweeps.
+L16 added the trusted item T9 (`usize::isqrt`). `sdp_to_standard` and its helpers use the
+literals `0.0` and `1.0` (T5) and `abort` (T8) for the data-dependent exits of the original code
+(wrong objective or constraint-map counts, non-square or empty constant matrices, empty map
+rows, map sizes not matching the constant matrix, a nonempty right-hand side without maps).
+The constraint reduction's nonzero-input precondition is discharged from the `-1` entries of
+the LMI rows (with LMIs) and from the precondition `single_constraint_nonzero` (without). The
+runtime `assert_eq!` checks of the original (`start == total_dim`, `zeros.len() == zeros_len`)
+are now static assertions.

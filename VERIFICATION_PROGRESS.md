@@ -30,12 +30,79 @@ Runtime checks: `cargo build`, `cargo test`.
 | L14 constraint reduction | done | `src/lin_alg/reduce_spec.rs` (new spec/proof module); `linear_remove_redundant_sym` in a `verus!` block of `src/lin_alg/sym_matrix.rs`. **Two executable corrections** (packed-column start `start = diag + 1`; off-diagonal factor `sqrt(2)` instead of `1/sqrt(2)`, confirmed by the user), see the L14 architecture decisions. |
 | L13 Gaussian elimination | done | `src/lin_alg/gauss_spec.rs` (new spec/proof module); `gauss_elim` in a second `verus!` block of `src/lin_alg/matrix.rs`. |
 | L15 user-facing symmetric-map representation | done | `matrix_diagonal_mult_sym`, `mat_sym_diagonal_mult_sym` and the six partitioned helpers in two further `verus!` blocks of `src/lin_alg/sym_matrix.rs`; `matrixsym_flatten`, `mk_symmap`, `zero_symmap`, `ident_symmap` in two `verus!` blocks of `src/sdp.rs` (`sdp_to_standard` stays outside, L16). |
-| L10 .. L12, L16 .. L20 | not started | |
+| L10 cached Jacobi | done | `index_max_in_col`, `cached_pivot_col` (new helper), `jacobi_eigen_cach` in the `verus!` block of `src/lin_alg/jacobi.rs`; cache specs there, `offdiag_max_at` in `eigen_spec.rs`, `same_outside` in `jacobi_spec.rs`. **Two executable corrections** (stale `biggest`, out-of-column cache read), see the L10 architecture decisions and `EXPOSED_BUGS.md`. |
+| L11 column-cyclic Jacobi | done | `jacobi_eigen_cyc` in the `verus!` block of `src/lin_alg/jacobi.rs`; column-cyclic order `cyc_order`/`visits_each_pair_once` in `eigen_spec.rs`. |
+| L16 standard-form conversion | done | `src/sdp_spec.rs` (new spec/proof module); `SDP` struct, `sdp_to_standard` and seven helpers in the first `verus!` block of `src/sdp.rs`. Public API: `SDP` fields are now `pub`; `sdp_to_standard` has shape preconditions (`sdp_single_input_ok` / `sdp_lmi_input_ok`). |
+| L12, L17 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **604 verified, 0 errors** (Verus `--time`: 13 s SMT time; no slow
-proofs; the whole run takes 23 s).
+Last full run: **778 verified, 0 errors** (Verus `--time`: 20 s SMT time; no slow
+proofs; the whole run takes 26 s).
+
+- 1 public and 9 private executable functions (`src/sdp.rs`, first `verus!` block) (L16):
+  `sdp_to_standard` dispatches to `standard_single` (no LMI) and `standard_lmi`; it requires
+  `sdp_single_input_ok` (one objective map of order `d >= 1`, at most one constraint map of the
+  same order, sizes fitting; with `check_constraints` a nonzero constraint system,
+  `single_constraint_nonzero`) resp. `sdp_lmi_input_ok` (`lmi_shapes_ok`: one map per objective
+  entry in every LMI, nonempty square constant matrices, map `n` of every LMI a MatrixSym of the
+  order `vd[n]` read from the first LMI with `k_i^2` rows; objective and constraint maps of the
+  same orders; `dim_fits` and `(pk_len(sd) + 1) * (rows + 1) <= usize::MAX`), and ensures
+  `std_form_single_ok` resp. `std_form_lmi_ok` (see the L16 architecture decisions). Helpers:
+  `part_concat` (a partitioned matrix as a packed vector, `part_r`), `lmi_dims` (block sizes and
+  variable orders with their sums), `maps_sum` (the embedded maps of one LMI or of the
+  constraints: row `e` reads `sum_n maps[n][e](Z_n)`, `maps_row_r`), `lmi_block` (`maps_sum`
+  minus the block entry `B_i[e]`, with the entry `-1` exposed), `objective_sum` (`<obj, Z> =
+  obj_r`), `zero_positions` (`zeros_ok` and the length `zeros_len`), `stack_blocks` (entrywise
+  stacking), plus the `SDP` constructor and accessors. `matrixsym_flatten` (L15) now requires
+  `mat.len() * pk_len(dim) <= usize::MAX` and computes its capacity as `len * pk_len`.
+- 30 spec functions and 24 lemmas in `src/sdp_spec.rs` (L16): packed-index unpacking
+  (`pk_unpack`), the packed views `part_r`/`symrow_r`, the block extraction `blk_r` and the user
+  variable `zvar_r = blk(st) - blk(st + d)`; the embedding identity `lemma_embed_dot`
+  (`<embed(w, st), z> = <w, blk(z, st, d)>`, through `lemma_tri_sum_block`) and its row form
+  `lemma_embed_row_dot`; linearity of row dot products (`lemma_row_dot_add_sub`,
+  `lemma_row_dot_zero`, `lemma_row_dot_update`, `lemma_dot_add_sub`, `lemma_dot_sub_right`,
+  `lemma_stacked_row`); the integer square root (`isqrt_r`, existence and uniqueness); the
+  layout arithmetic (`sum_upto`, `sq_sum_upto`, `block_sizes`, `block_off`, `var_off`,
+  `std_dim`, `row_off`, `lmi_rows`, `rows_upto` with monotonicity, `lemma_block_sizes_sum`,
+  `lemma_pk_len_diff`, `lemma_block_triangles_le`); the zero pattern (`in_zero_region`,
+  `listed`, `zeros_ok`, `zeros_len`); the row predicates (`maps_row_r`, `obj_r`, `std_rows_ok`,
+  `single_rows_ok` with `lemma_single_rows`, `lmi_row_lo/hi` with `lemma_lmi_row_bounds`,
+  `lemma_lmi_row_of`).
+
+- 1 executable function (`src/lin_alg/jacobi.rs`, `verus!` block) (L11): `jacobi_eigen_cyc` has
+  the same contract as `jacobi_eigen_cach` (`eigensolver_ok`). Each sweep carries the ghost
+  sequence `visited` of examined pivot positions with the invariant `visited == cyc_order(k) +
+  [(0, k), .., (j - 1, k)]`, so that after the sweep `visited == cyc_order(dim)` and
+  `visits_each_pair_once(visited, dim)` are asserted; every rotation is the shared `jacobi_rot`
+  (applied iff the entry is nonzero) under `eigen_decomp_inv`; the scan of the off-diagonal
+  entries establishes `|B_rc| <= max_offdiag` for all `r < c` and `max_diag ==
+  max_abs_diag_r`, so the stopping test gives `jacobi_converged`. Termination:
+  `decreases MAX_SWEEPS - count`.
+- 3 spec functions and 5 lemmas in `src/lin_alg/eigen_spec.rs` (L11): `cyc_order(dim)` (the
+  pairs `(j, k)` of a sweep, column by column), `cyc_pos(j, k) = k (k - 1) / 2 + j`,
+  `visits_each_pair_once` (each pair `j < k < dim` is listed at `cyc_pos(j, k)` and every
+  listed position is a pair listed at its own `cyc_pos`), with `lemma_cyc_order_len`,
+  `lemma_cyc_order_entries`, `lemma_cyc_order_at`, `lemma_cyc_order_visits_each_pair_once`.
+
+- 3 executable functions (`src/lin_alg/jacobi.rs`, `verus!` block) (L10): `index_max_in_col`
+  ensures `col_max_at(A, col, r)` (the returned row `r < col` has maximal magnitude in column
+  `col`); the new helper `cached_pivot_col` turns a valid cache (`cache_ok`) into a position of
+  maximal off-diagonal magnitude (`offdiag_max_at(A, dim, maxima[k - 1], k)`);
+  `jacobi_eigen_cach` requires `dim >= 1`, `dim_fits(dim)` and a packed input of length
+  `>= pk_len(dim)`, and ensures the shared contract `eigensolver_ok(A, B, Q, vals, dim)` of L09
+  (`vals = diag(B)`, `A = Q B Q^T`, `Q` orthogonal, `||B - diag(B)||_F <= jacobi_eps_r`), with
+  `B` the final content of the input vector. Its main loop carries `eigen_decomp_inv`, the
+  cache invariant (for the current matrix before the first rotation, for the matrix before the
+  last rotation afterwards), the pivot position, the diagonal scale and `biggest`; the cache
+  update loop proves `col_max_at` for every column through the six branches; termination is
+  proved with `decreases max_rotations - count` (the non-convergence exit aborts, T8).
+- 2 spec functions and 1 lemma in `jacobi.rs` (`col_max_at`, `cache_ok`, `lemma_col_unrotated`:
+  the unrotated entries of a column are bounded by the old cached entry and by the old
+  maximum), `offdiag_max_at` with `lemma_offdiag_max_below` in `eigen_spec.rs` (a maximal
+  off-diagonal magnitude below `thr` gives `offdiag_below`), `same_outside` with
+  `lemma_jacobi_step_same_outside` in `jacobi_spec.rs` (a `jacobi_step` at `(j, k)` changes only
+  rows and columns `j`, `k`).
 
 - 1 executable function (`src/lin_alg/sym_matrix.rs`, own `verus!` block) (L14):
   `linear_remove_redundant_sym` requires `dim >= 1`, `dim_fits(dim)`, an input length that
@@ -444,6 +511,97 @@ proofs; the whole run takes 23 s).
   `jacobi_eigen_cyc` must ensure (with `a = rvs(old(a)@)`, `b = rvs(final(a)@)`): it is the
   common eigensolver interface used by L12.
 
+## Architecture decisions (L16)
+
+- The contract is stated on the user data directly (`SDP` fields made `pub`; Verus treats a
+  datatype with private fields as opaque outside its module, so public specs cannot mention
+  them). All user maps are read through `part_r`/`symrow_r`: the packed vector of a partitioned
+  matrix (entry `t` is `v[c][r]` for `(r, c) = pk_unpack(t)`), applied by the packed dot product
+  `dot_r`. No conversion of the user data is defined beyond this view.
+- Standard-form facts are functional, quantified over the variable `z` (a packed `sd x sd`
+  matrix): `<obj, z> = sum_n C_n(Z_n)` (`obj_r`), LMI row `(i, e)` reads
+  `sum_n L(i)_n[e](Z_n) - z[bo_i + lo(e), bo_i + hi(e)]` with right-hand side `M_i[e]`, and
+  equality row `e` reads `sum_n A_n[e](Z_n)` with right-hand side `b[e]` (`std_rows_ok`), where
+  `Z_n = zvar_r(z, var_off(n), vd[n])` is the difference of the two blocks of variable `n`.
+  These follow from the entrywise contracts of L15's block embeddings through one identity,
+  `lemma_embed_dot`, carried through the accumulation loops with the linearity lemmas (no
+  entrywise description of the final matrices is exported).
+- The layout is a function of the block sizes `bd` (from `isqrt_r` of the constant-matrix
+  lengths) and the variable orders `vd` (columns of the first row of the first LMI's maps):
+  `block_off`, `var_off(bsum, vd, n) = bsum + 2 sum(vd[..n])`, `std_dim`, `row_off`,
+  `lmi_rows`; the returned `block_dims`/`symm_dims` equal them (`dims_of`).
+- The zero pattern is specified as a set with positions: every listed pair is upper
+  off-block-diagonal (`in_zero_region`, with the block list `block_sizes(bd, vd)`), every such
+  pair is listed (`listed`), no pair twice, and the length is `pk_len(sd) - sum_j pk_len(bs[j])`
+  (`zeros_len`, by `lemma_pk_len_diff` block by block). The original runtime `assert_eq!`s on
+  `start` and `zeros.len()` became static assertions.
+- The constraint reduction is exported existentially: the result together with the head of
+  `point` (`result_aug`) is `reduced_from(aug, ..)` for an augmented matrix `aug` satisfying
+  `std_rows_ok` (resp. `single_rows_ok`); without `check_constraints` it equals `aug`. The
+  nonzero-input precondition of `linear_remove_redundant_sym` is discharged from the `-1` entry
+  of the first LMI row (always present with LMIs); without LMIs it is the API precondition
+  `single_constraint_nonzero` (an all-zero constraint system is rejected, as in L14).
+- Helpers were split out of the 200-line original for separate proofs (`part_concat`,
+  `lmi_dims`, `maps_sum`, `lmi_block`, `objective_sum`, `zero_positions`, `stack_blocks`,
+  `standard_single`, `standard_lmi`); the executable work is unchanged except that
+  `isqrt` keeps its documented contract (T9), the objective/constraint accumulation and the two
+  pivot-free loops are index loops, and `with_capacity(len * (d (d + 1)) / 2)` halves first.
+- `maps_sum` handles maps with zero rows (an empty right-hand side): `symmap_dim` is then 0 and
+  every row fact is vacuous; the flatten and embedding calls still type-check through
+  `lemma_mod_multiples_basic`/`lemma_div_multiples_vanish` (vstd `div_mod`).
+
+## Architecture decisions (L11)
+
+- "Every pair visited exactly once in column-cyclic order" is stated on a ghost sequence of the
+  examined positions (`visited`, pushed before the zero test, so skipped and rotated positions
+  are both visits): a sweep produces exactly `cyc_order(dim)` (`eigen_spec.rs`), and
+  `visits_each_pair_once(cyc_order(dim), dim)` says that each pair `j < k < dim` sits at
+  position `cyc_pos(j, k)` and that nothing else is listed. The order is fixed by the
+  positions, not just by membership.
+- The sweep's rotations reuse the L09/L10 machinery unchanged (`lemma_eigen_inv_step` per
+  rotation); no cache reasoning is needed. The convergence scan is specified directly
+  (`|B_rc| <= max_offdiag` for `r < c`), and `max_diag`, which the scan folds from `|B_00|`
+  over all `c`, is `max_r(f(0), max0_fn_r(f, c))` during the scan and `max_abs_diag_r` at the
+  end (`lemma_max0_fn_bound`).
+- The two eigensolvers share the loop skeleton of L10 (`loop` with `ensures`, owned `q0`
+  returned after `break`, `abort` on non-convergence).
+
+## Architecture decisions (L10)
+
+- **Two bugs found and fixed** (details in `EXPOSED_BUGS.md`). (1) `biggest`, the bound used
+  by the cache update, lagged one rotation behind: it is now the value returned by the last
+  `jacobi_rot` call (`biggest_new` and the `eigenvals`/`eigenvects` swap pair are gone; the
+  loop reassigns `vals`, `vects`, `biggest` from the returned tuple). (2) The last update
+  branch read `A[m(m+1)/2 + k]` also when `k > m`, an index outside column `m`, and could
+  store a row index `>= m` (and later call `jacobi_rot` with `j > k`, which crashes the
+  original rotation). The branch is now guarded: `k < m` compares the two rotated entries as
+  before; `j < m < k` replaces the cached row by `j` only if it now exceeds the cached entry;
+  `m < j` keeps the cache.
+- Cache specification (`jacobi.rs`): `col_max_at(B, c, i)` (row `i < c` has maximal magnitude
+  in column `c`) and `cache_ok(B, maxima, dim)` (`maxima[t]` is such a row of column `t + 1`,
+  trigger on `maxima[t]`, since `maxima[c - 1]` contains arithmetic). The pivot is specified by
+  `offdiag_max_at(B, dim, j, k)` (`eigen_spec.rs`), from which the stopping test gives
+  `offdiag_below` (`lemma_offdiag_max_below`) and then `lemma_converged_approx` of L09.
+- The two identical pivot searches of the original (before the loop and inside it) are one
+  helper `cached_pivot_col` (first column attaining the maximal cached magnitude; the in-loop
+  `m2 == 1 ||` initialization is replaced by starting from column 1, same result). The `first1`
+  and `first2` flags are kept; the loop invariant records `first1 == first2`.
+- Main loop invariant: the cache, the pivot `(j, k)` and `max_diag` describe `rvs(vals@)` while
+  `first1` holds, and the ghost matrix `prev` (the matrix before the last rotation) afterwards,
+  together with `biggest == |prev_jk|` and `same_outside(prev, cur, dim, j, k)` from
+  `lemma_jacobi_step_same_outside`. These conditional clauses are `invariant_except_break`;
+  the `ensures` of the loop exports `jacobi_converged` and the decomposition at `break`.
+- The cache update loop proves `col_max_at(cur, m, maxima[m - 1])` column by column with
+  `lemma_col_unrotated` (entries of column `m` outside rows `j`, `k` are unchanged and bounded by
+  the old cached entry, itself bounded by `biggest`); each of the six branches closes with one
+  `assert forall` over the rows of the column.
+- The eigenvector matrix is an owned local `q0` borrowed by `vects` for the loop; after the
+  loop `q0` is returned directly (the original copied it with `to_vec()`), using the ghost
+  `qf == final(vects)@` carried through the reborrow chain.
+- `max_rotations = (dim (dim - 1) / 2).saturating_mul(MAX_SWEEPS)` (vstd contract) replaces
+  `MAX_SWEEPS * dim * (dim - 1) / 2`, which could overflow for large `dim`; the same number of
+  rotations is allowed whenever the product fits.
+
 ## Architecture decisions (L14)
 
 - **Bug found and fixed.** The row-norm loop of `linear_remove_redundant_sym` walks the packed
@@ -575,6 +733,29 @@ proofs; the whole run takes 23 s).
 | `scale.hypot(echelon[..] * ..)` | `let v = echelon[..]; let y = v * f; scale = scale.hypot(y);` (named intermediates for the proof) | `linear_remove_redundant_sym` |
 | `start += k` (bug, see L14 decisions) | `start = diag + 1` | `linear_remove_redundant_sym` |
 | `let (mut diff, mut offset);` | initialized `let` bindings inside the loop | `mk_symmap` |
+| `panic!("index_max_in_col : ..")`, `panic!("jacobi_eigen_cach failed to converge after {} sweeps", ..)` | `abort(..)` (T8; the first is unreachable under the precondition `col >= 1`) | `index_max_in_col`, `jacobi_eigen_cach` |
+| `for i in &maxima[1..]`, `for i in &mut maxima { .. *i = .. }`, `for i in &maxima` with hand-maintained counters `m1`, `m2` | index loops `for m in 1..dim { let i = maxima[m - 1]; .. maxima[m - 1] = ..; }`; the two pivot searches are the helper `cached_pivot_col` | `jacobi_eigen_cach` |
+| `(eigenvals, eigenvects, biggest) = (..)` and `(eigenvals_new, ..) = jacobi_rot(..)` (destructuring assignment is unsupported) | `let (v, q, b) = jacobi_rot(vals, vects, dim, k, j); vals = v; vects = q; biggest = b;` (single reference pair; also the fix of the stale `biggest`) | `jacobi_eigen_cach` |
+| `&mut ident_mat(dim)` (borrowed temporary) and `eigenvects_new.to_vec()` | `let mut q0 = ident_mat(dim); let mut vects = &mut q0;` and returning `q0` after the loop (no copy) | `jacobi_eigen_cach` |
+| `loop { .. return (..) .. }` | `loop { .. break; .. }` with `ensures`, result built after the loop (the owned `q0` is only available once the borrow has ended) | `jacobi_eigen_cach` |
+| `MAX_SWEEPS * dim * (dim - 1) / 2` | `(dim * (dim - 1) / 2).saturating_mul(MAX_SWEEPS)` | `jacobi_eigen_cach` |
+| `f64::NEG_INFINITY` | `crate::trusted::neg_infinity()` (T7) | `jacobi_eigen_cach` |
+| `const MAX_SWEEPS` outside `verus!` | moved inside the `verus!` block (still used by `jacobi_eigen_cyc` outside) | `jacobi.rs` |
+| `let mut index: usize;` declared before the loop | `let index = ..` inside the loop body | `index_max_in_col` |
+| `if vals[..] == 0.0 { continue; }` (unsupported in `for`) | `if vals[..] != 0.0 { .. }` | `jacobi_eigen_cyc` |
+| `panic!("jacobi_eigen_cyc failed .."), `return` inside `loop`, `&mut ident_mat(dim)`, `.to_vec()`, destructuring assignments | as for `jacobi_eigen_cach` | `jacobi_eigen_cyc` |
+| scan variables `n`, `m` and double reads `vals[..].abs()` in both branches | `c`, `r` (`n` is the ghost dimension) and one `let off = ..` / `let diag = ..` per entry | `jacobi_eigen_cyc` |
+| `struct SDP` with private fields outside `verus!` | the struct and its `impl` inside `verus!`, fields `pub` | `sdp.rs` |
+| `assert!(..)`, `assert_eq!(..)`, `panic!(..)`, `expect(..)`, `unwrap_or_else(|| panic!(..))` | `abort(..)` (T8) on the data-dependent checks; the internal consistency checks (`start == total_dim`, `zeros.len() == zeros_len`) are static `assert`s | `sdp_to_standard` |
+| `obj.concat()` (no vstd spec) | `part_concat(obj, dim)` (same push loop) | `sdp_to_standard` |
+| `obj.last().expect(..).len()`, `map[0].last().unwrap_or_else(..).len()` | `obj[obj.len() - 1].len()` after an emptiness abort | `sdp_to_standard`, `lmi_dims` |
+| `for (maps, mat) in lmis`, `for (n, map) in maps.iter().enumerate()`, `for (n, (obj, constr)) in ..zip(..).enumerate()`, `iter().fold(..)`, `iter().chain(..)`, `iter().map(..).sum()`, `for (mat, vect) in &blocks` | index loops | `sdp_to_standard` and helpers |
+| `for ((s, v1), v2) in obj_sum.iter_mut().zip(db1.iter()).zip(db2.iter()) { *s += *v1 - *v2 }` | `for t in 0..total_size { obj_sum[t] = obj_sum[t] + (db1[t] - db2[t]); }` | `objective_sum` |
+| `sum[idx] -= 1.0` | `sum[idx] = sum[idx] - 1.0` | `lmi_block` |
+| `for _ in 0..2 { .. if count < sequence_len { break; } }` over `block_dims.chain(symm_dims)` | one loop over the block list `j in 0..s + 2 nv` with `k = if j < s { block_dims[j] } else { symm_dims[(j - s) / 2] }` (same pushes in the same order) | `zero_positions` |
+| `let (mut block_size, mut symm_size);` and other uninitialized tuple `let`s | initialized bindings inside the loops | `lmi_dims`, `sdp_to_standard` |
+| `first` flag and `map_len_old: Option<usize>` | `i == 0` and a `usize` | `lmi_dims` |
+| `Vec::with_capacity(mat.len() * (dim_c * (dim_c + 1)) / 2)` | `Vec::with_capacity(mat.len() * ((dim_c * (dim_c + 1)) / 2))` (weaker overflow precondition) | `matrixsym_flatten` |
 
 Known constructs that later layers must rewrite (found during L00 experiments):
 
@@ -593,6 +774,58 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Before rewriting a construct, probe it in a scratch file: every entry in the table above
   was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
   `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L16; probed 2026-10-18):
+
+- A `pub fn` contract cannot mention the fields of a struct with private fields ("field
+  expression for an opaque datatype"); make the fields `pub` or go through `closed spec`
+  views.
+- Closures whose body applies arithmetic to the bound variable (`|j| vd[j / 2]`) do not match
+  across call sites; wrap the body in a named spec function (`var_block_size`).
+- A quantified fact with several conjuncts under one `#[trigger]` is fine to *state*, but when a
+  callee's `requires` repeats the same conjunction, prove it as one named predicate
+  (`maps_shape_ok`) asserted from separately proved single-conjunct `assert forall`s; the
+  conjunction form was not re-derived at the call site.
+- Facts about a `Vec` taken from a function's postcondition refer to that SSA version: prove
+  what is needed about `mat@` *before* a later `extend_from_slice`, or state it on a ghost
+  snapshot (`aug0`), since the old value is no longer nameable afterwards.
+- `nonlinear_arith` with integer `/` or `%` hits the rlimit even for `(a * p) % p == 0`; use
+  vstd's `arithmetic::div_mod` lemmas (`lemma_mod_multiples_basic`, `lemma_div_multiples_vanish`,
+  `lemma_fundamental_div_mod(_converse)`, `lemma_mod_bound`).
+- `assert(x) by (nonlinear_arith)` without `requires` sees nothing, not even facts about the
+  variables in `x`; always pass the needed hypotheses.
+- Very long function bodies exceed the rlimit as a single query; split by control flow
+  (`standard_single`/`standard_lmi`) rather than raising the limit.
+- `Ghost<T>` parameters are erased by Verus but not by `cargo`, which then reports them unused;
+  derive ghost quantities from the data instead (`n_maps`).
+- `usize::isqrt` has no vstd spec (T9); `saturating_mul`/`checked_mul` do.
+
+Proof-engineering notes (L11; probed 2026-10-18):
+
+- A ghost `Seq<(int, int)>` of tuples works as loop bookkeeping (`let ghost mut visited`,
+  `visited = visited.push((ji, ki))` in a proof block); equality with a `Seq::new` closure
+  needs `=~=` (the pushed sequence and `Seq::new(j + 1, ..)` are extensionally equal), and the
+  unfolding `cyc_order(k + 1) == cyc_order(k) + Seq::new(k, |j| (j, k + 1 - 1))` must be
+  asserted with the definition's own closure body before `visited =~= cyc_order(k + 1)`.
+- Facts proved in an outer loop body (`lemma_dim_fits_idx(n, k)`, `pk_len(n) >= 1`) must be
+  re-proved inside the inner loop body (loop isolation also applies between nesting levels).
+
+Proof-engineering notes (L10; probed 2026-10-18):
+
+- Destructuring assignment `(a, b, c) = f(..)` is unsupported ("does not yet support
+  destructuring assignment"); bind `let (x, y, z) = f(..)` and assign the variables.
+  `panic!("..")` with a message is unsupported (`core::panicking::panic_fmt`); use `abort`.
+- `loop` requires a `decreases` clause (or `#[verifier::exec_allows_no_decreases_clause]`);
+  `loop invariant_except_break .. invariant .. ensures .. decreases ..` is the clause order,
+  and the `ensures` facts are available after a `break`.
+- An owned local borrowed for the loop (`let mut vects = &mut q0;`) cannot be mentioned in
+  ghost code while the borrow is live (E0502 on "(Verus spec q0)"). Carry
+  `let ghost qf = final(vects)@;` and the invariant `final(vects)@ == qf` through the
+  reborrow chain (`vects = q` after `let (v, q, b) = jacobi_rot(vals, vects, ..)` keeps
+  `final(vects)@ == final(q)@`); after the last use of `vects`, `q0@ == qf` holds by
+  resolution. Returning `q0` inside the loop does not work (the borrow is still live there);
+  `break` and return after the loop.
+- `usize::saturating_mul` has a vstd contract (`std_specs/num.rs`); `checked_mul` too.
 
 Proof-engineering notes (L15; probed 2026-10-17):
 
@@ -776,15 +1009,23 @@ Proof-engineering notes (L01):
 
 ## Open issues
 
+- L16 changed the public API: the `SDP` fields are `pub`, and `sdp_to_standard` now has the
+  preconditions `sdp_single_input_ok`/`sdp_lmi_input_ok` (shapes and sizes of the user data,
+  one map per objective entry, a nonzero constraint system when `check_constraints` is set
+  without LMIs). `sdpad` (L17/L18) inherits them; the test problems satisfy them.
+- The standard-form contract fixes the row layout of the stacked matrix (LMI rows in LMI
+  order, entry `e = c k + r` of block `i` at row `row_off(i) + e`, then the equality rows) and
+  the zero list order (block by block, column-major within a block); L17 relies on
+  `std_rows_ok`, `zeros_ok` and `reduced_from`.
+- L10 changed the executable cache update of `jacobi_eigen_cach` (two corrections, see
+  `EXPOSED_BUGS.md`); the cached pivot is now provably the position of maximal off-diagonal
+  magnitude. `src/sdp_tests.rs` gained the regression test `test_jacobi_cach_cache_update`.
+- L12 must establish the common preconditions of both eigensolvers: `dim >= 1`, `dim_fits(dim)`
+  and an input of length `>= pk_len(dim)`.
 - L14 changed the executable row scaling of `linear_remove_redundant_sym` twice (packed-column
   start, and the off-diagonal factor `sqrt(2)` requested by the user); the scale is now the
   Frobenius norm of the row's symmetric matrix. Both changes are documented in the L14
   architecture decisions.
-- L16 (`sdp_to_standard`) must establish the preconditions of `linear_remove_redundant_sym`:
-  `total_dim >= 1`, `dim_fits`, a length that is a multiple of `pk_len(dim) + 1`, and a
-  nonzero constraint matrix (`abs_max_r > 0`); the last one is a genuine restriction on the
-  user's problem (an all-zero constraint system is rejected by the specification, and the
-  original code produced `0 / 0` rows for it).
 
 - The full-verification command in CLAUDE.md needs `-V no-solver-version-check` on
   this machine (Z3 4.16.0 with build hashcode); without it Verus panics as soon as any
