@@ -125,10 +125,14 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 		    }
 		} else if eigenvals_new[ind].abs() < biggest {
 		    *i = index_max_in_col(eigenvals_new, m1);
-		} else if eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs() > eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs() {
+		} else if k < m1 {
+		    if eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs() > eigenvals_new[(m1 * (m1 + 1)) / 2 + k].abs() {
+			*i = j;
+		    } else {
+			*i = k;
+		    }
+		} else if j < m1 && eigenvals_new[(m1 * (m1 + 1)) / 2 + j].abs() > eigenvals_new[ind].abs() {
 		    *i = j;
-		} else {
-		    *i = k;
 		}
 		m1 += 1;
 	    }
