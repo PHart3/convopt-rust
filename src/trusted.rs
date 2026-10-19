@@ -144,12 +144,10 @@ pub broadcast axiom fn axiom_literals()
         #[trigger] rv(1.6f64) == 1.6real,
         #[trigger] rv(2.0f64) == 2.0real,
         #[trigger] rv(5.0f64) == 5.0real,
-        #[trigger] rv(1e3f64) == 1000.0real,
         #[trigger] rv(1e4f64) == 10000.0real,
         #[trigger] rv(1e-3f64) == 0.001real,
         #[trigger] rv(1e-4f64) == 0.0001real,
         #[trigger] rv(1e-5f64) == 0.00001real,
-        #[trigger] rv(1e-6f64) == 0.000001real,
         #[trigger] rv(1e-8f64) == 0.00000001real,
         #[trigger] rv(1e-9f64) == 0.000000001real,
         #[trigger] rv(1e-10f64) == 0.0000000001real,
@@ -253,13 +251,6 @@ pub fn neg(x: f64) -> (r: f64)
 #[inline(always)]
 pub fn pos_infinity() -> f64 {
     f64::INFINITY
-}
-
-/// f64::NEG_INFINITY; its real value is unconstrained.
-#[verifier::external_body]
-#[inline(always)]
-pub fn neg_infinity() -> f64 {
-    f64::NEG_INFINITY
 }
 
 /* ---------- T8: program abort ---------- */

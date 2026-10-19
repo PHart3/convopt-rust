@@ -389,7 +389,7 @@ fn part_concat(v: &Vec<Vector>, dim: usize) -> (result: Vector)
         }
     }
     proof {
-        assert forall|t: int| 0 <= t < pk_len(d) implies rvs(result@)[t] == part_r(v@, d)[t] by {
+        assert forall|t: int| 0 <= t < pk_len(d) implies #[trigger] rvs(result@)[t] == part_r(v@, d)[t] by {
             lemma_pk_unpack(t);
             let (r, c) = pk_unpack(t);
             if c >= d {
@@ -1802,6 +1802,7 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
                 lemma_mod_multiples_basic(rr, cols + 1);
                 assert(aug.len() == rr * cols + rr);
                 assert(rr >= 1);
+                assert(0 * rr == 0) by (nonlinear_arith);
                 assert(cm_idx(rr, 0, 0) == 0);
                 assert(aug[cm_idx(rr, 0, 0)] == -1.0real);
                 lemma_abs_max_entry(aug, cm_idx(rr, 0, 0));

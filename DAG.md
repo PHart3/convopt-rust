@@ -101,4 +101,4 @@ status: done
 L20 | Final audit: full-crate verification, cargo build/test pass, TRUSTED_BASE.md audit of every external_body/assume, VERIFICATION_PROGRESS.md final counts |
 deps: L19 |
 targets: (all) |
-status: not started
+status: done
