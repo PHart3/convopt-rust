@@ -215,9 +215,10 @@ pub proof fn lemma_frob_half_dot(cf: Seq<real>, c: Seq<real>, z: Seq<real>, dim:
 
 /// The diagonal-block partition of the standard-form variable that the solver checks for
 /// positive semidefiniteness: the LMI blocks and the two blocks of every user variable
-/// (block_sizes, L16), or the whole variable for a single-variable problem.
+/// (block_sizes, L16), or the whole variable when there are no LMI blocks (a single-variable
+/// problem; user-variable blocks only exist together with LMI blocks).
 pub open spec fn psd_partition(bd: Seq<int>, vd: Seq<int>, dim: int) -> Seq<int> {
-    if bd.len() + vd.len() == 0 { seq![dim] } else { block_sizes(bd, vd) }
+    if block_sum(bd) == 0 { seq![dim] } else { block_sizes(bd, vd) }
 }
 
 /// list is the (start, size) list of the consecutive diagonal blocks of sizes bs.

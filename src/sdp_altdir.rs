@@ -79,11 +79,11 @@ pub open spec fn sdpad_setup_ok(sdp: &SDP, check: bool, s: SdpadSetup) -> bool {
 }
 
 // the (start, size) list of the diagonal blocks of the standard-form variable (psd_partition):
-// the LMI blocks, then the two blocks of each user variable; the whole variable if there are none
-fn psd_block_list(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, var_dim: usize) -> (list: Vec<(usize, usize)>)
+// the LMI blocks, then the two blocks of each user variable; without LMIs, the whole variable
+fn psd_block_list(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, block_size_sum: usize, var_dim: usize) -> (list: Vec<(usize, usize)>)
     requires
-        block_dims@.len() + symm_dims@.len() > 0
-            ==> std_dim(dims_of(block_dims@), dims_of(symm_dims@)) == var_dim,
+        block_size_sum as int == block_sum(dims_of(block_dims@)),
+        block_size_sum > 0 ==> std_dim(dims_of(block_dims@), dims_of(symm_dims@)) == var_dim,
     ensures
         block_list_ok(list@, psd_partition(dims_of(block_dims@), dims_of(symm_dims@), var_dim as int)),
 {
@@ -93,7 +93,7 @@ fn psd_block_list(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, var_dim: usiz
     let nb = block_dims.len();
     let nv = symm_dims.len();
     let mut list: Vec<(usize, usize)> = Vec::new();
-    if nb == 0 && nv == 0 {
+    if block_size_sum == 0 {
         list.push((0, var_dim));
         return list;
     }
@@ -357,7 +357,7 @@ pub fn sdpad_setup(sdp: &SDP, check_constraints: bool) -> (s: SdpadSetup)
         }
     }
     let gram_small = constraint_gram(var_dim, &mat_dense);
-    let psd_blocks = psd_block_list(&block_dims, &symm_dims, var_dim);
+    let psd_blocks = psd_block_list(&block_dims, &symm_dims, block_size_sum, var_dim);
     let s = SdpadSetup { obj_frob: obj, mat_dense, zeros, point, var_dim, symm_dims, block_dims, c_len, block_size_sum, gram_small, psd_blocks };
     proof {
         let bs = psd_partition(bd, vd, d);
@@ -369,11 +369,12 @@ pub fn sdpad_setup(sdp: &SDP, check_constraints: bool) -> (s: SdpadSetup)
         }
         assert(half_off_diag(cf, rvs(obj0@), d));
         assert(std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check_constraints));
-        if nb + symm_dims@.len() == 0 {
+        if block_sum(bd) == 0 {
             assert(bs =~= seq![d]);
             assert(sum_upto(bs, 0) == 0);
             assert(sum_upto(bs, 1) == sum_upto(bs, 0) + bs[0]);
         } else {
+            assert(nb >= 1);
             assert(bs == block_sizes(bd, vd));
             assert(bs.len() == bd.len() + 2 * vd.len());
             lemma_block_sizes_sum(bd, vd, vd.len() as int);
@@ -381,7 +382,7 @@ pub fn sdpad_setup(sdp: &SDP, check_constraints: bool) -> (s: SdpadSetup)
         }
         assert(sum_upto(bs, bs.len() as int) == d);
         assert forall|j: int| 0 <= j < bs.len() implies #[trigger] bs[j] >= 0 by {
-            if nb + symm_dims@.len() > 0 {
+            if block_sum(bd) != 0 {
                 lemma_block_sizes_entry(bd, vd, j);
             }
         }

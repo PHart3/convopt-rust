@@ -567,10 +567,11 @@ proofs; the whole run takes 26 s).
 
 - **Bug found and fixed** (details in `EXPOSED_BUGS.md`): for a problem without LMIs the
   block list `psd_blocks` was empty, so the termination test never checked `Z >= 0`. The
-  partition is now `psd_partition(bd, vd, d)`: `block_sizes(bd, vd)` (L16) when there are
-  blocks, else the single block `[d]`; `psd_block_list` lists `(sum_upto(bs, j), bs[j])` and
-  is computed once before the loop (the original rebuilt the same list every iteration with
-  an iterator chain).
+  partition is now `psd_partition(bd, vd, d)`: `block_sizes(bd, vd)` (L16) when the total LMI
+  block size is positive, else the single block `[d]` (the test `block_size_sum == 0` matches
+  the author's fix on `main`); `psd_block_list` lists `(sum_upto(bs, j), bs[j])` and is
+  computed once before the loop (the original rebuilt the same list every iteration with an
+  iterator chain).
 - `sdpad` is split along the DAG layers: the setup is the verified `sdpad_setup`, returning the
   public record `SdpadSetup` (the former locals), and the equality-system solve of each
   iteration is the verified `dual_solve`; `sdpad` itself remains outside `verus!` until the

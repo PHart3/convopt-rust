@@ -115,7 +115,8 @@ blocks whose sizes sum to the order of `Z`. Writing that partition
 list, which contradicts the required sum and showed that nothing was checked.
 
 **What was changed.** `psd_block_list` now returns the single block `(0, var_dim)`
-when there are neither LMI blocks nor user-variable blocks, so the whole variable
-is checked. The list is also built once before the main loop instead of on every
+when the total LMI block size is zero (no LMIs, hence no user-variable blocks
+either), so the whole variable is checked; this is the same condition as the
+author's own fix on `main`. The list is also built once before the main loop instead of on every
 iteration (it never changes). `cargo test` passes with the change.
 
