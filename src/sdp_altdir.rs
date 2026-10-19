@@ -34,6 +34,23 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
     let (mut best_feas_delta, mut best_pinf, mut best_dinf, mut best_gap, mut best_prim_val) : (f64, f64, f64, f64, Option<f64>) =
 	(f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::INFINITY, None);
 
+    // PSD blocks of prim_z (without LMIs, prim_z itself is the decision variable)
+    let psd_blocks : Vec<(usize, usize)> = if block_size_sum == 0 {
+	vec![(0, var_dim)]
+    } else {
+	block_dims.iter().copied().
+	    scan(0, |start, dim| {
+		let block = (*start, dim);
+		*start += dim;
+		Some(block)
+	    }).chain(
+		symm_dims.iter().copied().
+		    scan(0, |start, dim| {
+			let block = [(block_size_sum + *start, dim), (block_size_sum + *start + dim, dim)];
+			*start += 2 * dim;
+			Some(block)}).flatten()).collect()
+    };
+
     // begin main computation
     let mut count = 0;
     loop {
@@ -99,18 +116,6 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	(prim_val, dual_val) = (frob_prod_sym(obj_frob, &prim_z, var_dim), dot_prod(&point, &dual_y));
 	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
 	delta = pinf.max(dinf).max(gap);
-
-	let psd_blocks = block_dims.iter().copied().
-	    scan(0, |start, dim| {
-		let block = (*start, dim);
-		*start += dim;
-		Some(block)
-	    }).chain(
-		symm_dims.iter().copied().
-		    scan(0, |start, dim| {
-			let block = [(block_size_sum + *start, dim), (block_size_sum + *start + dim, dim)];
-			*start += 2 * dim;
-			Some(block)}).flatten()).collect();
 
 	if delta < TOL &&
 	    psd_block_check(&prim_z, &psd_blocks) {
