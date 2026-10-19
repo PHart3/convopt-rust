@@ -5,7 +5,7 @@
 use vstd::prelude::*;
 use crate::lin_alg::sym_matrix::*;
 use crate::lin_alg::comparison::{is_significantly_negative, scaled_near_zero};
-use crate::trusted::{abort, neg_infinity};
+use crate::trusted::abort;
 #[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
@@ -504,7 +504,7 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
     let mut vects = &mut q0;
     let ghost qf = final(vects)@;
     // magnitude of the pivot of the last rotation (unread before the first rotation)
-    let mut biggest = neg_infinity();
+    let mut biggest = 0.0;
     // pivot position (j, k)
     let mut k = cached_pivot_col(vals, &maxima, dim);
     let mut j = maxima[k - 1];

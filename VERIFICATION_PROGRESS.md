@@ -739,7 +739,7 @@ proofs; the whole run takes 26 s).
 | `&mut ident_mat(dim)` (borrowed temporary) and `eigenvects_new.to_vec()` | `let mut q0 = ident_mat(dim); let mut vects = &mut q0;` and returning `q0` after the loop (no copy) | `jacobi_eigen_cach` |
 | `loop { .. return (..) .. }` | `loop { .. break; .. }` with `ensures`, result built after the loop (the owned `q0` is only available once the borrow has ended) | `jacobi_eigen_cach` |
 | `MAX_SWEEPS * dim * (dim - 1) / 2` | `(dim * (dim - 1) / 2).saturating_mul(MAX_SWEEPS)` | `jacobi_eigen_cach` |
-| `f64::NEG_INFINITY` | `crate::trusted::neg_infinity()` (T7) | `jacobi_eigen_cach` |
+| `let mut biggest = f64::NEG_INFINITY` (never read before the first rotation) | `let mut biggest = 0.0` | `jacobi_eigen_cach` |
 | `const MAX_SWEEPS` outside `verus!` | moved inside the `verus!` block (still used by `jacobi_eigen_cyc` outside) | `jacobi.rs` |
 | `let mut index: usize;` declared before the loop | `let index = ..` inside the loop body | `index_max_in_col` |
 | `if vals[..] == 0.0 { continue; }` (unsupported in `for`) | `if vals[..] != 0.0 { .. }` | `jacobi_eigen_cyc` |

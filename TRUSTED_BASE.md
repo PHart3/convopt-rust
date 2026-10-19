@@ -84,8 +84,7 @@ L15 added no trusted items. The twelve constructors and converters use the liter
 `1.0` (T5) and no method contract; `sym_matrix_proj` replaces its data-dependent `panic!`
 on `row > col` by `abort` (T8).
 L10 added no trusted items. `jacobi_eigen_cach` and its helpers use the literals `0.0`,
-`1.0`, `1e-12` (T5), the `abs` and `max` contracts (T6), `neg_infinity` (T7, the initial
-value of `biggest`, which is never read before the first rotation) and `abort` (T8) for
+`1.0`, `1e-12` (T5), the `abs` and `max` contracts (T6) and `abort` (T8) for
 the two data-dependent exits (`index_max_in_col` on column 0, unreachable under its
 precondition, and non-convergence after `MAX_SWEEPS` sweeps). The rotation count limit
 is computed with vstd's `usize::saturating_mul` contract (a library specification, not
