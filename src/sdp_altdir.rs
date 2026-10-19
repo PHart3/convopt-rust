@@ -21,6 +21,8 @@ use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::ldlt_spec::blocks_fit;
 #[cfg(verus_keep_ghost)]
+use crate::lin_alg::spectral_spec::*;
+#[cfg(verus_keep_ghost)]
 use crate::sdp_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::sdpad_spec::*;
@@ -31,6 +33,20 @@ const TOTAL_STEPS: usize = 5000;
 verus! {
 
 broadcast use crate::trusted::group_real_model;
+
+// tuning parameters: the penalty interval and scaling factor, the step of the primal update,
+// the stagnation thresholds, and the consecutive-iteration count and ratio thresholds of the
+// penalty update
+pub const PEN_MIN: f64 = 1e-4;
+pub const PEN_MAX: f64 = 1e4;
+pub const PEN_FACT: f64 = 0.5;
+pub const STEP: f64 = 1.6;
+pub const STAG1: i32 = 20;
+pub const STAG2: i32 = 150;
+pub const STAG3: i32 = 300;
+pub const PEN_COUNT: i32 = 50;
+pub const PEN_RATIO1: f64 = 1.0;
+pub const PEN_RATIO2: f64 = 1.0;
 
 /// The standard-form problem prepared for the iteration (see sdpad_spec.rs).
 pub struct SdpadSetup {
@@ -391,30 +407,327 @@ pub fn sdpad_setup(sdp: &SDP, check_constraints: bool) -> (s: SdpadSetup)
     s
 }
 
+/* ---------- the Wen-Goldfarb-Yin update ---------- */
+
+/// The iterates of the Wen-Goldfarb-Yin method: Z (prim_z), S (dual_s), y (dual_y), the dual
+/// slack C - A*(y) (diff) and V = C - A*(y) - mu Z (dual_sfull), together with the buffers
+/// every update reuses (the right-hand side of the dual system, overwritten by the solve, and
+/// the eigensolver's working copy of V).
+pub struct WgyState {
+    pub prim_z: SymMatrix,
+    pub dual_s: SymMatrix,
+    pub dual_y: Vector,
+    pub diff: SymMatrix,
+    pub dual_sfull: SymMatrix,
+    pub inverse_y: Vector,
+    pub dual_sfull_temp: SymMatrix,
+}
+
+/// The constraint operator A of the setup applied to the packed matrix x: the dense rows,
+/// then the zero-pattern entries (constraint_action_r, L04).
+pub open spec fn setup_action_r(s: &SdpadSetup, x: Seq<real>) -> Seq<real> {
+    constraint_action_r(rvs(s.mat_dense@), s.c_len as int, s.zeros@, x)
+}
+
+/// The shape facts of the setup the update relies on (those of sdpad_setup_ok), and zero
+/// constraints only together with dense rows (without dense rows constraint_action ignores
+/// the zero pattern).
+pub open spec fn wgy_setup_ok(s: &SdpadSetup) -> bool {
+    let d = s.var_dim as int;
+    let cols = pk_len(d);
+    let rows = s.c_len as int;
+    let nz = s.zeros@.len() as int;
+    &&& d >= 1
+    &&& dim_fits(d)
+    &&& dim_fits(rows)
+    &&& s.obj_frob@.len() == cols
+    &&& s.point@.len() == rows + nz
+    &&& s.mat_dense@.len() == rows * cols
+    &&& valid_zero_list(s.zeros@, d)
+    &&& rows > 0 ==> is_constraint_gram(rvs(s.gram_small@), rvs(s.mat_dense@), rows, d)
+    &&& rows == 0 ==> s.gram_small@.len() == 0
+    &&& rows == 0 ==> nz == 0
+}
+
+/// One update from the iterates (Z, S) of st0 to those of st1, for the penalty mu and the
+/// step rho (sdpad_spec.rs): y solves the dual system with right-hand side
+/// mu (b - A(Z)) + A(C - S); diff = C - A*(y); V = diff - mu Z; S' = V_+; and
+/// Z' = (1 - rho) Z + (rho / mu) (S' - V).
+pub open spec fn wgy_update_ok(s: &SdpadSetup, check: bool, mu: real, rho: real, st0: &WgyState, st1: &WgyState) -> bool {
+    let d = s.var_dim as int;
+    let cf = rvs(s.obj_frob@);
+    let z0 = rvs(st0.prim_z@);
+    let y = rvs(st1.dual_y@);
+    let v = rvs(st1.dual_sfull@);
+    let rhs = wgy_rhs_r(mu, rvs(s.point@), setup_action_r(s, z0), setup_action_r(s, vsub_r(cf, rvs(st0.dual_s@))));
+    &&& dual_solve_ok(rvs(s.gram_small@), rhs, s.c_len as int, check, y)
+    &&& is_dual_slack(rvs(st1.diff@), cf, rvs(s.mat_dense@), s.c_len as int, s.zeros@, y, d)
+    &&& is_shifted_slack(v, rvs(st1.diff@), mu, z0, d)
+    &&& is_pos_part(v, rvs(st1.dual_s@), d)
+    &&& is_primal_step(rvs(st1.prim_z@), rho, mu, z0, rvs(st1.dual_s@), v, d)
+}
+
+/// The packed column count of the setup is positive and the dense rows are read back from the
+/// length of mat_dense (the row count constraint_action and constraint_lin_comb compute).
+pub proof fn lemma_setup_rows(s: &SdpadSetup)
+    requires
+        wgy_setup_ok(s),
+    ensures
+        pk_len(s.var_dim as int) >= 1,
+        s.mat_dense@.len() as int % pk_len(s.var_dim as int) == 0,
+        rows_of(s.mat_dense@.len() as int, pk_len(s.var_dim as int)) == s.c_len as int,
+        s.mat_dense@.len() == 0 ==> s.c_len == 0,
+{
+    let d = s.var_dim as int;
+    let cols = pk_len(d);
+    let rows = s.c_len as int;
+    lemma_pk_col_start_zero();
+    lemma_pk_col_start_step(0);
+    lemma_pk_col_start_monotone(1, d);
+    lemma_mod_multiples_basic(rows, cols);
+    lemma_div_multiples_vanish(rows, cols);
+    assert(rows * cols == cols * rows) by (nonlinear_arith);
+    assert(s.mat_dense@.len() == 0 ==> rows == 0) by (nonlinear_arith)
+        requires s.mat_dense@.len() == rows * cols, cols >= 1, rows >= 0;
+}
+
+// the constraint operator of the setup applied to x (contract: setup_action_r), with one entry
+// per constraint row
+fn setup_action(s: &SdpadSetup, x: &SymMatrix) -> (r: Vector)
+    requires
+        wgy_setup_ok(s),
+        x@.len() == pk_len(s.var_dim as int),
+    ensures
+        r@.len() == s.c_len + s.zeros@.len(),
+        rvs(r@) == setup_action_r(s, rvs(x@)),
+{
+    let ghost d = s.var_dim as int;
+    proof {
+        lemma_setup_rows(s);
+        assert(dim_fits(d) && pk_len(d) == x@.len() && valid_zero_list(s.zeros@, d));
+        assert(zero_list_fits(s.zeros@, x@.len() as int));
+    }
+    let constr = (&s.mat_dense, &s.zeros);
+    let r = constraint_action(&constr, x);
+    proof {
+        if s.mat_dense@.len() == 0 {
+            assert(rvs(r@) =~= setup_action_r(s, rvs(x@)));
+        }
+    }
+    r
+}
+
+// one Wen-Goldfarb-Yin update of the iterates for the penalty mu and the step rho
+// (contract: wgy_update_ok): the dual solve for y, V = C - A*(y) - mu Z, S = V_+ through
+// poseigendecomp, and Z <- (1 - rho) Z + (rho / mu) (S - V)
+pub fn wgy_update(s: &SdpadSetup, check: bool, var: &JacobiVariant, penalty: f64, step: f64, st: &mut WgyState)
+    requires
+        wgy_setup_ok(s),
+        old(st).prim_z@.len() == pk_len(s.var_dim as int),
+        old(st).dual_s@.len() == pk_len(s.var_dim as int),
+        rv(penalty) != 0.0real,
+    ensures
+        wgy_update_ok(s, check, rv(penalty), rv(step), old(st), final(st)),
+{
+    let ghost d = s.var_dim as int;
+    let ghost cols = pk_len(d);
+    let ghost rows = s.c_len as int;
+    let ghost mu = rv(penalty);
+    let ghost rho = rv(step);
+    let ghost z0 = rvs(old(st).prim_z@);
+    let ghost s0 = rvs(old(st).dual_s@);
+    let ghost cf = rvs(s.obj_frob@);
+    let var_dim = s.var_dim;
+    proof {
+        lemma_dim_fits_idx(d, d);
+        lemma_pk_col_start_zero();
+    }
+    let var_dim_tot = (var_dim * (var_dim + 1)) / 2;
+    // the dual system (A A*) y = A(C - S) + mu (b - A(Z))
+    let action = setup_action(s, &st.prim_z);
+    let c_minus_s = vect_subt(&s.obj_frob, &st.dual_s);
+    let acs = setup_action(s, &c_minus_s);
+    let ghost rhs = wgy_rhs_r(mu, rvs(s.point@), setup_action_r(s, z0), setup_action_r(s, vsub_r(cf, s0)));
+    let n = acs.len();
+    st.inverse_y.clear();
+    for i in 0..n
+        invariant
+            n == acs@.len() == action@.len() == s.point@.len(),
+            st.prim_z@ == old(st).prim_z@,
+            st.dual_s@ == old(st).dual_s@,
+            st.inverse_y@.len() == i,
+            forall|k: int| 0 <= k < i
+                ==> rv(#[trigger] st.inverse_y@[k]) == rv(penalty) * (rv(s.point@[k]) - rv(action@[k])) + rv(acs@[k]),
+    {
+        st.inverse_y.push(penalty * (s.point[i] - action[i]) + acs[i]);
+    }
+    proof {
+        assert(rvs(acs@) == setup_action_r(s, vsub_r(cf, s0)));
+        assert(rvs(st.inverse_y@) =~= rhs);
+    }
+    st.dual_y = dual_solve(&s.gram_small, &mut st.inverse_y, s.c_len, check);
+    let ghost y = rvs(st.dual_y@);
+    // the dual slack C - A*(y) and V = C - A*(y) - mu Z
+    proof {
+        lemma_setup_rows(s);
+    }
+    let constr = (&s.mat_dense, &s.zeros);
+    let lin_comb = constraint_lin_comb(var_dim, &constr, &st.dual_y);
+    st.diff = vect_subt(&s.obj_frob, &lin_comb);
+    proof {
+        let m = rvs(s.mat_dense@);
+        let lc = rvs(lin_comb@);
+        assert forall|r: int, c: int| 0 <= r <= c < d
+            implies #[trigger] rvs(st.diff@)[pk_idx(r, c)] == cf[pk_idx(r, c)] - adjoint_entry_r(m, rows, s.zeros@, y, r, c) by {
+            lemma_pk_idx_bound(r, c, d);
+            if s.mat_dense@.len() == 0 {
+                lemma_adjoint_entry_empty(m, s.zeros@, y, r, c);
+            }
+        }
+        assert(is_dual_slack(rvs(st.diff@), cf, m, rows, s.zeros@, y, d));
+    }
+    st.dual_sfull.clear();
+    st.dual_sfull_temp.clear();
+    for i in 0..var_dim_tot
+        invariant
+            var_dim_tot == cols,
+            st.prim_z@ == old(st).prim_z@,
+            st.prim_z@.len() == cols,
+            st.diff@.len() == cols,
+            st.dual_sfull@.len() == i,
+            st.dual_sfull_temp@ == st.dual_sfull@,
+            forall|t: int| 0 <= t < i ==> rv(#[trigger] st.dual_sfull@[t]) == rv(st.diff@[t]) - rv(penalty) * rv(st.prim_z@[t]),
+    {
+        let val = st.diff[i] - penalty * st.prim_z[i];
+        st.dual_sfull.push(val);
+        st.dual_sfull_temp.push(val);
+    }
+    let ghost v = rvs(st.dual_sfull@);
+    let ghost diff = rvs(st.diff@);
+    proof {
+        assert forall|t: int| 0 <= t < cols implies #[trigger] v[t] == diff[t] - mu * z0[t] by {
+            assert(rv(st.dual_sfull@[t]) == rv(st.diff@[t]) - rv(penalty) * rv(st.prim_z@[t]));
+        }
+        assert(is_shifted_slack(v, diff, mu, z0, d));
+        assert(rvs(st.dual_sfull_temp@) == v);
+    }
+    // S = V_+, the positive spectral part of V
+    let (egnvals, egnvects) = poseigendecomp(&mut st.dual_sfull_temp, var_dim, var);
+    let ghost b = rvs(st.dual_sfull_temp@);
+    let ghost vals = sym_diag_r(b, d);
+    let ghost q = choose|q: Seq<real>| #[trigger] spectral_part_ok(v, b, q, pos_sel(vals), rvs(egnvals@), rvs(egnvects@), d);
+    if egnvals.is_empty() {
+        st.dual_s = vec![0.0; var_dim_tot];
+        proof {
+            assert forall|t: int| 0 <= t < st.dual_s@.len() implies #[trigger] rvs(st.dual_s@)[t] == 0.0real by {
+                assert(rv(st.dual_s@[t]) == 0.0real);
+            }
+            lemma_zero_pos_part(v, b, q, rvs(st.dual_s@), d);
+        }
+    } else {
+        let ghost m = egnvals@.len() as int;
+        proof {
+            lemma_rows_of_product(m, d);
+        }
+        st.dual_s = diag_scale_gram(&egnvals, &egnvects);
+        proof {
+            lemma_selected_pos_part(v, b, q, rvs(egnvals@), rvs(egnvects@), rvs(st.dual_s@), d);
+        }
+    }
+    let ghost s1 = rvs(st.dual_s@);
+    proof {
+        assert(pos_part_of(v, b, q, s1, d));
+        assert(is_pos_part(v, s1, d));
+    }
+    // Z <- (1 - rho) Z + (rho / mu) (S - V)
+    for i in 0..var_dim_tot
+        invariant
+            var_dim_tot == cols,
+            rv(penalty) != 0.0real,
+            st.prim_z@.len() == cols,
+            st.dual_s@.len() == cols,
+            st.dual_sfull@.len() == cols,
+            z0 == rvs(old(st).prim_z@),
+            s1 == rvs(st.dual_s@),
+            v == rvs(st.dual_sfull@),
+            forall|t: int| 0 <= t < i
+                ==> rv(#[trigger] st.prim_z@[t]) == (1.0real - rv(step)) * z0[t] + (rv(step) / rv(penalty)) * (s1[t] - v[t]),
+            forall|t: int| i <= t < cols ==> rv(#[trigger] st.prim_z@[t]) == z0[t],
+    {
+        st.prim_z[i] = (1.0 - step) * st.prim_z[i] + (step / penalty) * (st.dual_s[i] - st.dual_sfull[i]);
+    }
+    proof {
+        assert forall|t: int| 0 <= t < cols
+            implies #[trigger] rvs(st.prim_z@)[t] == (1.0real - rho) * z0[t] + (rho / mu) * (s1[t] - v[t]) by {
+            assert(rv(st.prim_z@[t]) == (1.0real - rv(step)) * z0[t] + (rv(step) / rv(penalty)) * (s1[t] - v[t]));
+        }
+        assert(is_primal_step(rvs(st.prim_z@), rho, mu, z0, s1, v, d));
+    }
+}
+
+// the penalty update of one iteration from the primal and dual infeasibilities (contract:
+// penalty_update_ok): the counts of consecutive primal- and dual-dominated iterations stay
+// below PEN_COUNT, and the penalty stays within [PEN_MIN, PEN_MAX]
+pub fn penalty_update(penalty: f64, pinf: f64, dinf: f64, it_pinf: i32, it_dinf: i32) -> (res: (f64, i32, i32))
+    requires
+        0 <= it_pinf < PEN_COUNT,
+        0 <= it_dinf < PEN_COUNT,
+    ensures
+        penalty_update_ok(rv(penalty), rv(pinf), rv(dinf), it_pinf as int, it_dinf as int, rv(res.0), res.1 as int, res.2 as int),
+        0 <= res.1 < PEN_COUNT,
+        0 <= res.2 < PEN_COUNT,
+        rv(PEN_MIN) <= rv(penalty) <= rv(PEN_MAX) ==> rv(PEN_MIN) <= rv(res.0) <= rv(PEN_MAX),
+{
+    let ghost mu0 = rv(penalty);
+    let ghost ip0 = it_pinf as int;
+    let ghost id0 = it_dinf as int;
+    let i_ratio = pinf / dinf;
+    let mut penalty = penalty;
+    let mut it_pinf = it_pinf;
+    let mut it_dinf = it_dinf;
+    if !(i_ratio > PEN_RATIO1) {
+        it_pinf += 1;
+        it_dinf = 0;
+        if it_pinf >= PEN_COUNT {
+            penalty = (PEN_FACT * penalty).max(PEN_MIN);
+            it_pinf = 0;
+        }
+    } else if i_ratio > PEN_RATIO2 {
+        it_dinf += 1;
+        it_pinf = 0;
+        if it_dinf >= PEN_COUNT {
+            penalty = (penalty / PEN_FACT).min(PEN_MAX);
+            it_dinf = 0;
+        }
+    }
+    let res = (penalty, it_pinf, it_dinf);
+    proof {
+        assert(penalty_step_ok(mu0, rv(i_ratio), ip0, id0, rv(res.0), res.1 as int, res.2 as int));
+    }
+    res
+}
+
 } // verus!
 
 // the alternating direction dual augmented Lagrangian method
 pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant) -> (Vec<SymMatrix>, f64) {
-    let SdpadSetup { obj_frob, mat_dense, zeros, point, var_dim, symm_dims, c_len, block_size_sum, gram_small, psd_blocks, .. } =
-	sdpad_setup(sdp, check_constraints);
-    let obj_frob = &obj_frob;
-    let constr_mat = (&mat_dense, &zeros);
+    let setup = sdpad_setup(sdp, check_constraints);
+    let obj_frob = &setup.obj_frob;
+    let constr_mat = (&setup.mat_dense, &setup.zeros);
+    let (point, var_dim, c_len, block_size_sum) = (&setup.point, setup.var_dim, setup.c_len, setup.block_size_sum);
+    let (symm_dims, psd_blocks) = (&setup.symm_dims, &setup.psd_blocks);
     let (mut it_stag, mut it_pinf, mut it_dinf) = (0, 0, 0);
-    // tuning parameters
-    let (mut penalty, pen_min, pen_max, pen_fact, step) = (5.0, 1e-4, 1e4, 0.5, 1.6);
-    let (stag1, stag2, stag3, pen_count, pen_ratio1, pen_ratio2) : (i32, i32, i32, i32, f64, f64) = (20, 150, 300, 50, 1.0, 1.0);
-    let mut i_ratio : f64;
-    let mut dual_y : Vector;
+    let mut penalty = 5.0;
     let var_dim_tot = (var_dim * (var_dim + 1)) / 2;
-    let (mut prim_z, mut dual_s) : (SymMatrix, SymMatrix) = initial_iterates(var_dim);
+    let (prim_z, dual_s) : (SymMatrix, SymMatrix) = initial_iterates(var_dim);
+    let mut st = WgyState {
+	prim_z, dual_s, dual_y: Vec::new(), diff: Vec::new(), dual_sfull: Vec::with_capacity(var_dim),
+	inverse_y: Vec::with_capacity(c_len), dual_sfull_temp: Vec::with_capacity(var_dim),
+    };
     let (mut pinf, mut dinf, mut gap) : (f64, f64, f64);
     let mut delta : f64;
     let mut best_delta = f64::INFINITY;
-    let (mut inverse_y, mut dual_sfull, mut dual_sfull_temp) : (Vector, SymMatrix, SymMatrix) =
-	(Vec::with_capacity(c_len), Vec::with_capacity(var_dim), Vec::with_capacity(var_dim));
-    let mut diff : SymMatrix;
     let (mut symm_offset, mut result) : (usize, Vec<SymMatrix>) = (0, Vec::new());
-    let (mut action, mut lin_comb) : (Vector, SymMatrix);
     let (mut prim_val, mut dual_val) : (f64, f64);
     let mut best_prim_z : SymMatrix = Vec::with_capacity(var_dim_tot);
     let (mut best_feas_delta, mut best_pinf, mut best_dinf, mut best_gap, mut best_prim_val) : (f64, f64, f64, f64, Option<f64>) =
@@ -425,47 +738,24 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
     loop {
 	count += 1;
 
-	action = constraint_action(&constr_mat, &prim_z);
-	inverse_y.clear();
-	for (i, a) in constraint_action(&constr_mat, &vect_subt(obj_frob, &dual_s)).iter().enumerate() {
-	    inverse_y.push(penalty * (point[i] - action[i]) + a);
-	}
-	dual_y = dual_solve(&gram_small, &mut inverse_y, c_len, check_constraints);
-	lin_comb = constraint_lin_comb(var_dim, &constr_mat, &dual_y);
-	diff = vect_subt(obj_frob, &lin_comb);
-	dual_sfull.clear();
-	dual_sfull_temp.clear();
-	for i in 0..var_dim_tot {
-	    let val = diff[i] - penalty * prim_z[i];
-	    dual_sfull.push(val);
-	    dual_sfull_temp.push(val);
-	}
-	let (egnvals, egnvects) : (Vector, Matrix) = poseigendecomp(&mut dual_sfull_temp, var_dim, &jac_variant);
-	if egnvals.is_empty() {
-	    dual_s = vec![0.0; var_dim_tot];
-	} else {
-	    dual_s = diag_scale_gram(&egnvals, &egnvects)
-	}
+	wgy_update(&setup, check_constraints, jac_variant, penalty, STEP, &mut st);
+	let (prim_z, dual_s, dual_y, diff) = (&st.prim_z, &st.dual_s, &st.dual_y, &st.diff);
 
-	for i in 0..var_dim_tot {
-	    prim_z[i] = (1.0 - step) * prim_z[i] + (step / penalty) * (dual_s[i] - dual_sfull[i]);
-	}
-	
-	pinf = euclid_distance(&constraint_action(&constr_mat, &prim_z), &point) / (1.0 + euclid_norm(&point));
-	dinf = frob_dist_sym(&diff, &dual_s, var_dim) / (1.0 + sym_mat_one_norm(obj_frob, var_dim));
+	pinf = euclid_distance(&constraint_action(&constr_mat, prim_z), point) / (1.0 + euclid_norm(point));
+	dinf = frob_dist_sym(diff, dual_s, var_dim) / (1.0 + sym_mat_one_norm(obj_frob, var_dim));
 
-	(prim_val, dual_val) = (frob_prod_sym(obj_frob, &prim_z, var_dim), dot_prod(&point, &dual_y));
+	(prim_val, dual_val) = (frob_prod_sym(obj_frob, prim_z, var_dim), dot_prod(point, dual_y));
 	gap = (dual_val - prim_val).abs() / (1.0 + dual_val.abs() + prim_val.abs());
 	delta = pinf.max(dinf).max(gap);
 
 	if residual_is_small(delta, TOL) &&
-	    psd_block_check(&prim_z, &psd_blocks) {
+	    psd_block_check(prim_z, psd_blocks) {
 		if block_size_sum == 0 {
-		    result.push(prim_z);
+		    result.push(prim_z.clone());
 		} else {
-		    for d in symm_dims {
-			result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &prim_z),
-					      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &prim_z)));
+		    for &d in symm_dims {
+			result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, prim_z),
+					      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, prim_z)));
 			symm_offset += 2 * d
 		    }
 		}
@@ -474,12 +764,12 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	    }
 
 	// record best solution so far
-	if !(delta > best_feas_delta) && psd_block_check(&prim_z, &psd_blocks) {
+	if !(delta > best_feas_delta) && psd_block_check(prim_z, psd_blocks) {
 	    best_feas_delta = delta;
 	    best_pinf = pinf;
 	    best_dinf = dinf;
 	    best_gap = gap;
-	    best_prim_z.clone_from(&prim_z);
+	    best_prim_z.clone_from(prim_z);
 	    best_prim_val = Some(prim_val);
 	}
 	
@@ -491,13 +781,13 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	    it_stag = 0;
 	}
 	if let Some(best_prim_val) = best_prim_val &&
-	    ((it_stag > stag1 && residual_is_small(delta, 1e-5)) ||
-	     (it_stag > stag2 && residual_is_small(delta, 1e-4)) ||
-	     (it_stag > stag3 && residual_is_small(delta, 1e-3))) {
+	    ((it_stag > STAG1 && residual_is_small(delta, 1e-5)) ||
+	     (it_stag > STAG2 && residual_is_small(delta, 1e-4)) ||
+	     (it_stag > STAG3 && residual_is_small(delta, 1e-3))) {
 		if block_size_sum == 0 {
 		    result.push(best_prim_z);
 		} else {
-		    for d in symm_dims {
+		    for &d in symm_dims {
 			result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &best_prim_z),
 					      &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &best_prim_z)));
 			symm_offset += 2 * d
@@ -510,11 +800,11 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 
 	if count == TOTAL_STEPS {
 	    if block_size_sum == 0 {
-		result.push(prim_z);
+		result.push(prim_z.clone());
 	    } else {
-		for d in symm_dims {
-		    result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, &prim_z),
-					  &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, &prim_z)));
+		for &d in symm_dims {
+		    result.push(vect_subt(&sym_matrix_diag_block(block_size_sum + symm_offset, d, prim_z),
+					  &sym_matrix_diag_block(block_size_sum + symm_offset + d, d, prim_z)));
 		    symm_offset += 2 * d
 		}
 	    }
@@ -523,22 +813,10 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	    return (result, prim_val);
 	}
 
-	i_ratio = pinf / dinf;
-	if !(i_ratio > pen_ratio1) {
-	    it_pinf += 1;
-	    it_dinf = 0;
-	    if it_pinf >= pen_count {
-		penalty = (pen_fact * penalty).max(pen_min);
-		it_pinf = 0;
-	    }
-	} else if i_ratio > pen_ratio2 {
-	    it_dinf += 1;
-	    it_pinf = 0;
-	    if it_dinf >= pen_count {
-		penalty = (penalty / pen_fact).min(pen_max);
-		it_dinf = 0;
-	    }
-	}
+	let (p, ip, id) = penalty_update(penalty, pinf, dinf, it_pinf, it_dinf);
+	penalty = p;
+	it_pinf = ip;
+	it_dinf = id;
     }
 }
 

@@ -91,7 +91,7 @@ status: done
 L18 | Wen-Goldfarb-Yin iteration: formalize the executable iteration spec (y from (A A^*) y = A(C - S) + penalty (b - A(Z)); W = C - A^*(y) - penalty Z; S = Pi_pos(W) via poseigendecomp thresholds; Z <- (1 - step) Z + (step / penalty)(S - W); penalty updates) and prove each executable iteration matches it |
 deps: L17, L12, L07 |
 targets: sdpad (iteration section) |
-status: not started
+status: done
 
 L19 | Residuals and KKT quantities: primal residual pinf, dual residual dinf, objective values, duality gap, delta, feasibility check, stagnation/best-solution bookkeeping, final result reconstruction; correspondence with mathematical definitions and tolerance contracts |
 deps: L18 |

@@ -15,6 +15,20 @@
 //     on the diagonal, with the residual of the unregularized system bounded
 //     relative to the data (`dual_solve_ok`);
 //   - the initial iterates are Z = I and S = 0 (`initial_iterates_ok`).
+//
+// Each iteration then performs the Wen-Goldfarb-Yin update for the penalty
+// mu and the step rho (sdpad.pdf, (7), (9), (10), (26)):
+//
+//   y   solves  (A A*) y = A(C - S) + mu (b - A(Z))      (`wgy_rhs_r`, `dual_solve_ok`)
+//   V   = C - A*(y) - mu Z                               (`is_dual_slack`, `is_shifted_slack`)
+//   S'  = V_+ = Q diag(lambda_+) Q^T                     (`is_pos_part`)
+//   Z'  = (1 - rho) Z + (rho / mu) (S' - V)              (`is_primal_step`)
+//
+// where V = Q B Q^T is the eigensolver's approximate decomposition (Q
+// orthogonal, lambda = diag(B), ||B - diag(B)||_F <= eps) and lambda_+ keeps
+// the entries lambda_k > 0 of poseigendecomp; nothing relates S' to the exact
+// PSD projection of V. The penalty is adapted from the ratio of the primal
+// and dual infeasibilities (`penalty_update_ok`).
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -43,6 +57,12 @@ use crate::lin_alg::sym_matrix::*;
 use crate::sdp_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::sdp::*;
+#[cfg(verus_keep_ghost)]
+use crate::sdp_altdir::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::eigen_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::spectral_spec::*;
 
 verus! {
 
@@ -387,6 +407,170 @@ pub open spec fn initial_iterates_ok(z: Seq<real>, s: Seq<real>, dim: int) -> bo
     &&& is_sym_ident_r(z, dim)
     &&& s.len() == pk_len(dim)
     &&& forall|t: int| 0 <= t < s.len() ==> #[trigger] s[t] == 0.0real
+}
+
+/* ---------- the Wen-Goldfarb-Yin update ---------- */
+
+/// The right-hand side of the dual system, mu (b - A(Z)) + A(C - S), with one entry per
+/// entry of A(Z).
+pub open spec fn wgy_rhs_r(mu: real, b: Seq<real>, az: Seq<real>, acs: Seq<real>) -> Seq<real> {
+    Seq::new(az.len(), |i: int| mu * (b[i] - az[i]) + acs[i])
+}
+
+/// diff is the packed dual slack C - A*(y) of the constraint operator with c_len dense rows
+/// (the multipliers of the zero-pattern rows follow them in y).
+pub open spec fn is_dual_slack(diff: Seq<real>, cf: Seq<real>, m: Seq<real>, c_len: int, list: Seq<(usize, usize)>, y: Seq<real>, dim: int) -> bool {
+    &&& diff.len() == pk_len(dim)
+    &&& forall|r: int, c: int| 0 <= r <= c < dim
+            ==> #[trigger] diff[pk_idx(r, c)] == cf[pk_idx(r, c)] - adjoint_entry_r(m, c_len, list, y, r, c)
+}
+
+/// v = diff - mu z entrywise on the packed matrices of order dim.
+pub open spec fn is_shifted_slack(v: Seq<real>, diff: Seq<real>, mu: real, z: Seq<real>, dim: int) -> bool {
+    &&& v.len() == pk_len(dim)
+    &&& forall|t: int| 0 <= t < pk_len(dim) ==> #[trigger] v[t] == diff[t] - mu * z[t]
+}
+
+/// s is the positive spectral part of v computed from the eigensolver output (q, b):
+/// v = Q B Q^T with Q orthogonal and ||B - diag(B)||_F <= eps (eigensolver_ok), and
+/// s = Q diag(lambda_+) Q^T with lambda = diag(B) and lambda_+ keeping the entries > 0
+/// (the selection of poseigendecomp).
+pub open spec fn pos_part_of(v: Seq<real>, b: Seq<real>, q: Seq<real>, s: Seq<real>, dim: int) -> bool {
+    let vals = sym_diag_r(b, dim);
+    &&& eigensolver_ok(v, b, q, vals, dim)
+    &&& s.len() == pk_len(dim)
+    &&& meq(sym_view(s), mmul(mmul(cm_view(q, dim), diag_view(masked_r(vals, pos_sel(vals))), dim), mtr(cm_view(q, dim)), dim), dim, dim)
+}
+
+/// s is the positive spectral part of v for some eigensolver output.
+pub open spec fn is_pos_part(v: Seq<real>, s: Seq<real>, dim: int) -> bool {
+    exists|q: Seq<real>, b: Seq<real>| #[trigger] pos_part_of(v, b, q, s, dim)
+}
+
+/// z1 = (1 - rho) z + (rho / mu) (s - v) entrywise on the packed matrices of order dim.
+pub open spec fn is_primal_step(z1: Seq<real>, rho: real, mu: real, z: Seq<real>, s: Seq<real>, v: Seq<real>, dim: int) -> bool {
+    &&& z1.len() == pk_len(dim)
+    &&& forall|t: int| 0 <= t < pk_len(dim)
+            ==> #[trigger] z1[t] == (1.0real - rho) * z[t] + (rho / mu) * (s[t] - v[t])
+}
+
+/// Without dense rows and zero-pattern rows the adjoint is zero.
+pub proof fn lemma_adjoint_entry_empty(m: Seq<real>, list: Seq<(usize, usize)>, y: Seq<real>, r: int, c: int)
+    requires
+        list.len() == 0,
+    ensures
+        adjoint_entry_r(m, 0, list, y, r, c) == 0.0real,
+{
+    assert(col_comb_r(m, 0, y, pk_idx(r, c)) == 0.0real);
+    assert(zero_comb_r(list, 0, y, r, c) == 0.0real);
+}
+
+/// Q diag(0) Q^T = 0: when no value is selected, the zero matrix is the positive part.
+pub proof fn lemma_zero_pos_part(v: Seq<real>, b: Seq<real>, q: Seq<real>, s: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+        eigensolver_ok(v, b, q, sym_diag_r(b, dim), dim),
+        sel_indices(pos_sel(sym_diag_r(b, dim)), dim as nat).len() == 0,
+        s.len() == pk_len(dim),
+        forall|t: int| 0 <= t < s.len() ==> #[trigger] s[t] == 0.0real,
+    ensures
+        pos_part_of(v, b, q, s, dim),
+{
+    let vals = sym_diag_r(b, dim);
+    let sel = pos_sel(vals);
+    let md = masked_r(vals, sel);
+    let qv = cm_view(q, dim);
+    lemma_sel_indices_empty(sel, dim as nat);
+    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim
+        implies #[trigger] sym_view(s)(r, c) == mmul(mmul(qv, diag_view(md), dim), mtr(qv), dim)(r, c) by {
+        lemma_mul_diag_transpose(qv, md, dim, r, c);
+        let f = |k: int| md[k] * qv(r, k) * qv(c, k);
+        assert forall|k: int| 0 <= k < dim implies #[trigger] f(k) == 0.0real by {
+            assert(!sel(k));
+            assert(md[k] == 0.0real);
+            let (u, w) = (qv(r, k), qv(c, k));
+            assert(0.0real * u * w == 0.0real) by (nonlinear_arith);
+        }
+        lemma_sum_fn_zero(dim as nat);
+        lemma_sum_fn_ext(f, |k: int| 0.0real, dim as nat);
+        if r <= c {
+            lemma_pk_idx_bound(r, c, dim);
+        } else {
+            lemma_pk_idx_bound(c, r, dim);
+        }
+    }
+}
+
+/// The reconstruction diag_scale_gram computes from the selected pairs of the positive
+/// part is the positive part.
+pub proof fn lemma_selected_pos_part(v: Seq<real>, b: Seq<real>, q: Seq<real>, vals: Seq<real>, vects: Seq<real>, s: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+        spectral_part_ok(v, b, q, pos_sel(sym_diag_r(b, dim)), vals, vects, dim),
+        s.len() == pk_len(dim),
+        meq(sym_view(s), mmul(mmul(cm_view(vects, dim), diag_view(vals), vals.len() as int), mtr(cm_view(vects, dim)), vals.len() as int), dim, dim),
+    ensures
+        pos_part_of(v, b, q, s, dim),
+{
+    let lam = sym_diag_r(b, dim);
+    let sel = pos_sel(lam);
+    lemma_selected_reconstruction(q, lam, sel, vals, vects, dim);
+    assert(sel_count(sel, dim) == vals.len());
+    lemma_meq_trans(sym_view(s),
+        mmul(mmul(cm_view(vects, dim), diag_view(vals), vals.len() as int), mtr(cm_view(vects, dim)), vals.len() as int),
+        mmul(mmul(cm_view(q, dim), diag_view(masked_r(lam, sel)), dim), mtr(cm_view(q, dim)), dim), dim, dim);
+}
+
+/// The positive spectral part is symmetric and positive semidefinite.
+pub proof fn lemma_pos_part_psd_sym(v: Seq<real>, s: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+        is_pos_part(v, s, dim),
+    ensures
+        is_symmetric(sym_view(s), dim),
+        is_psd(sym_view(s), dim),
+{
+    let (q, b) = choose|q: Seq<real>, b: Seq<real>| #[trigger] pos_part_of(v, b, q, s, dim);
+    let vals = sym_diag_r(b, dim);
+    lemma_sym_view_symmetric(s, dim);
+    lemma_pos_part_psd(q, vals, dim);
+    let rec = mmul(mmul(cm_view(q, dim), diag_view(masked_r(vals, pos_sel(vals))), dim), mtr(cm_view(q, dim)), dim);
+    lemma_meq_sym(sym_view(s), rec, dim, dim);
+    lemma_psd_shifted_meq(rec, sym_view(s), dim, 0.0real);
+}
+
+/* ---------- the penalty update ---------- */
+
+/// The penalty step for the infeasibility ratio pinf / dinf: a ratio <= PEN_RATIO1 counts a
+/// primal-dominated iteration (and resets the dual count), a ratio > PEN_RATIO2 a
+/// dual-dominated one; after PEN_COUNT consecutive iterations of one kind the penalty is
+/// scaled by PEN_FACT (resp. 1 / PEN_FACT), clamped to [PEN_MIN, PEN_MAX], and the count
+/// restarts.
+pub open spec fn penalty_step_ok(mu0: real, ratio: real, ip0: int, id0: int, mu1: real, ip1: int, id1: int) -> bool {
+    if !(ratio > rv(PEN_RATIO1)) {
+        &&& id1 == 0
+        &&& if ip0 + 1 >= PEN_COUNT as int {
+                mu1 == max_r(rv(PEN_FACT) * mu0, rv(PEN_MIN)) && ip1 == 0
+            } else {
+                mu1 == mu0 && ip1 == ip0 + 1
+            }
+    } else if ratio > rv(PEN_RATIO2) {
+        &&& ip1 == 0
+        &&& if id0 + 1 >= PEN_COUNT as int {
+                mu1 == min_r(mu0 / rv(PEN_FACT), rv(PEN_MAX)) && id1 == 0
+            } else {
+                mu1 == mu0 && id1 == id0 + 1
+            }
+    } else {
+        mu1 == mu0 && ip1 == ip0 && id1 == id0
+    }
+}
+
+/// The penalty update from the infeasibilities: the step for the ratio pinf / dinf (an
+/// unspecified value when dinf = 0, where the executable quotient is not modeled).
+pub open spec fn penalty_update_ok(mu0: real, pinf: real, dinf: real, ip0: int, id0: int, mu1: real, ip1: int, id1: int) -> bool {
+    exists|ratio: real| (dinf != 0.0real ==> ratio == pinf / dinf)
+        && #[trigger] penalty_step_ok(mu0, ratio, ip0, id0, mu1, ip1, id1)
 }
 
 } // verus!

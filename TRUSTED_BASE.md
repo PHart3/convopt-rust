@@ -114,4 +114,11 @@ nonzero, which is exactly the case in which the contract `dual_solve_ok` claims 
 `abort` (T8) for the data-dependent failure of the residual test of the regularized Gram solve
 (the original `panic!`). `src/sdpad_spec.rs` is spec- and proof-only; its threshold `1e-9`
 appears as the real constant `0.000000001real`.
-
+L18 added no trusted items. `wgy_update` uses the literals `0.0`, `1.0` (T5) and the
+constants `STEP = 1.6` and the penalty passed by the caller; its division `step / penalty` is
+covered by T3 through the precondition `rv(penalty) != 0`. `penalty_update` uses the
+constants `PEN_MIN = 1e-4`, `PEN_MAX = 1e4`, `PEN_FACT = 0.5`, `PEN_RATIO1 = PEN_RATIO2 = 1.0`
+(T5), the `max`, `min` contracts (T6) and the comparisons of T4; its quotient `pinf / dinf` is
+covered by T3 only when `dinf != 0`, and the contract `penalty_update_ok` claims the ratio's
+value only in that case; the division by `PEN_FACT` is by a nonzero constant. The spec module
+`src/sdpad_spec.rs` remains spec- and proof-only.

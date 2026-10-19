@@ -35,12 +35,35 @@ Runtime checks: `cargo build`, `cargo test`.
 | L16 standard-form conversion | done | `src/sdp_spec.rs` (new spec/proof module); `SDP` struct, `sdp_to_standard` and seven helpers in the first `verus!` block of `src/sdp.rs`. Public API: `SDP` fields are now `pub`; `sdp_to_standard` has shape preconditions (`sdp_single_input_ok` / `sdp_lmi_input_ok`). |
 | L12 PSD spectral operations | done | `src/lin_alg/spectral_spec.rs` (new spec/proof module); `JacobiVariant`, the helper `select_eigenpairs`, `poseigendecomp`, `negeigendecomp` in the `verus!` block of `src/lin_alg/jacobi.rs`; `pivot_scale` (L05) is now `pub(crate)`. |
 | L17 solver linear-system setup | done | `src/sdpad_spec.rs` (new spec/proof module); `SdpadSetup`, `sdpad_setup`, `psd_block_list`, `dual_solve`, `initial_iterates` in a `verus!` block of `src/sdp_altdir.rs`; `sdpad` itself stays outside `verus!` and calls them (L18/L19). **One executable correction** (empty PSD block list for single-variable problems), see the L17 architecture decisions and `EXPOSED_BUGS.md`. |
-| L18 .. L20 | not started | |
+| L18 Wen-Goldfarb-Yin iteration | done | `WgyState`, `wgy_update` (one update of the iterates), `penalty_update`, the helper `setup_action` and the tuning constants in the `verus!` block of `src/sdp_altdir.rs`; iteration specs in `src/sdpad_spec.rs`; `sdpad` itself stays outside `verus!` and calls them (L19). |
+| L19 .. L20 | not started | |
 
 ## Verified-function count
 
-Last full run: **825 verified, 0 errors** (Verus `--time`: 22 s SMT time; no slow
-proofs; the whole run takes 26 s).
+Last full run: **852 verified, 0 errors** (Verus `--time`: 24 s SMT time; no slow
+proofs; the whole run takes 28 s).
+
+- 2 public and 1 private executable functions, 1 struct and 1 lemma (`src/sdp_altdir.rs`,
+  `verus!` block) (L18): `wgy_update(s, check, var, penalty, step, st)` requires `wgy_setup_ok(s)`
+  (the shape facts of `sdpad_setup_ok` and `c_len == 0 ==> zeros.len() == 0`), iterates `Z`, `S`
+  of packed length `pk_len(d)` and `rv(penalty) != 0`, and ensures `wgy_update_ok(s, check, mu,
+  rho, old(st), final(st))`: `dual_solve_ok` (L17) for the right-hand side `wgy_rhs_r(mu, b,
+  A(Z), A(C_F - S))`, `is_dual_slack` (`diff = C_F - A*(y)`), `is_shifted_slack` (`V = diff - mu
+  Z`), `is_pos_part(V, S', d)` and `is_primal_step` (`Z' = (1 - rho) Z + (rho / mu)(S' - V)`),
+  where `A` is `setup_action_r` (`constraint_action_r` of the dense rows and the zero pattern).
+  `penalty_update(penalty, pinf, dinf, it_pinf, it_dinf)` returns the new triple with
+  `penalty_update_ok`, counts in `[0, PEN_COUNT)` and the penalty kept in `[PEN_MIN, PEN_MAX]`.
+  `setup_action` wraps `constraint_action` for the setup; `lemma_setup_rows` reads the dense row
+  count back from the length of `mat_dense`. The `WgyState` record holds the iterates and the two
+  reused buffers (right-hand side, eigensolver working copy).
+- 8 spec functions and 5 lemmas in `src/sdpad_spec.rs` (L18): `wgy_rhs_r`, `is_dual_slack`,
+  `is_shifted_slack`, `pos_part_of` (`V = Q B Q^T` by `eigensolver_ok` and `S' = Q
+  diag(masked_r(diag(B), pos_sel)) Q^T`), `is_pos_part` (existential over `(Q, B)`),
+  `is_primal_step`, `penalty_step_ok`, `penalty_update_ok` (existential ratio equal to
+  `pinf / dinf` when `dinf != 0`); `lemma_adjoint_entry_empty`, `lemma_zero_pos_part` (no
+  positive value: the zero matrix is the positive part), `lemma_selected_pos_part` (the
+  `diag_scale_gram` reconstruction is the positive part, via `lemma_selected_reconstruction`),
+  `lemma_pos_part_psd_sym` (`S'` is symmetric and PSD, for L19).
 
 - 1 public and 3 private executable functions (`src/sdp_altdir.rs`, `verus!` block) (L17):
   `sdpad_setup(sdp, check)` requires `sdpad_input_ok` (the `sdp_to_standard` preconditions plus
@@ -563,6 +586,38 @@ proofs; the whole run takes 26 s).
   `jacobi_eigen_cyc` must ensure (with `a = rvs(old(a)@)`, `b = rvs(final(a)@)`): it is the
   common eigensolver interface used by L12.
 
+## Architecture decisions (L18)
+
+- The loop body of `sdpad` is split along CLAUDE.md's list: the update of the iterates is the
+  verified `wgy_update` (dual solve, dual slack, `V`, positive spectral part, primal step) and
+  the penalty adaptation is the verified `penalty_update`; the residuals, the termination tests
+  and the bookkeeping between them remain in `sdpad` (L19). The iterates and the two buffers the
+  original reused across iterations (`inverse_y`, `dual_sfull_temp`, cleared and refilled) live
+  in the record `WgyState`, so the executable allocation pattern is unchanged.
+- The iteration is specified by what the code computes, not by the ideal method: the dual
+  system is the Gram system of `dual_solve_ok` (regularized unless the constraints were
+  reduced); `S'` is `Q diag(lambda_+) Q^T` for the eigensolver's `(Q, B)` of `V` with `lambda =
+  diag(B)` and the selection `lambda_k > 0` of `poseigendecomp` (`pos_part_of`, through
+  `spectral_part_ok` of L12); no error against the exact projection is claimed (CLAUDE.md,
+  sections 7 and 9). The objective matrix `C` of the method is the Frobenius-weighted
+  `obj_frob` (`C_F`), as in the code.
+- `is_pos_part` is existential in `(Q, B)` because neither is returned by `poseigendecomp`; the
+  derived facts L19 needs (`S'` symmetric and PSD) are `lemma_pos_part_psd_sym`.
+- `wgy_setup_ok` adds the shape fact `c_len == 0 ==> zeros.len() == 0` to the setup contract:
+  `constraint_action` returns the empty vector when there are no dense rows, so with zero
+  constraints but no dense rows the right-hand side would be empty although `point` is not
+  (the original would panic). The standard forms produced never have this shape (zero
+  constraints exist only with LMI blocks, whose `-1` entries survive the reduction), but the
+  reduction contract (L14) does not expose `rank >= 1`; L19 must prove the fact from the
+  reduction contract (user decision: no executable guard/abort), e.g. by exposing in the
+  `gauss_elim`/`linear_remove_redundant_sym` contracts that a nonzero input yields `rank >= 1`.
+- `penalty_update_ok` is stated through a ratio that equals `pinf / dinf` only when `dinf != 0`
+  (the quotient by zero is not modeled, T3); under IEEE the ratio is then infinite and the
+  dual-dominated branch runs, which the contract allows but does not assert.
+- The tuning parameters are `pub const`s inside the `verus!` block (`PEN_MIN`, `PEN_MAX`,
+  `PEN_FACT`, `STEP`, `STAG1..3`, `PEN_COUNT`, `PEN_RATIO1/2`), so the specification can name
+  them (`rv(PEN_FACT)` etc.); their values are unchanged.
+
 ## Architecture decisions (L17)
 
 - **Bug found and fixed** (details in `EXPOSED_BUGS.md`): for a problem without LMIs the
@@ -858,6 +913,10 @@ proofs; the whole run takes 26 s).
 | `for i in &maxima[1..]`, `for i in &mut maxima { .. *i = .. }`, `for i in &maxima` with hand-maintained counters `m1`, `m2` | index loops `for m in 1..dim { let i = maxima[m - 1]; .. maxima[m - 1] = ..; }`; the two pivot searches are the helper `cached_pivot_col` | `jacobi_eigen_cach` |
 | `(eigenvals, eigenvects, biggest) = (..)` and `(eigenvals_new, ..) = jacobi_rot(..)` (destructuring assignment is unsupported) | `let (v, q, b) = jacobi_rot(vals, vects, dim, k, j); vals = v; vects = q; biggest = b;` (single reference pair; also the fix of the stale `biggest`) | `jacobi_eigen_cach` |
 | `&mut ident_mat(dim)` (borrowed temporary) and `eigenvects_new.to_vec()` | `let mut q0 = ident_mat(dim); let mut vects = &mut q0;` and returning `q0` after the loop (no copy) | `jacobi_eigen_cach` |
+| `for (i, a) in constraint_action(..).iter().enumerate()` | `let acs = setup_action(..); for i in 0..acs.len()` (same cost) | `wgy_update` |
+| `(prim_val, dual_val) = (..)` style destructuring assignment for the penalty state | `penalty_update` returns `(f64, i32, i32)`, assigned field by field in `sdpad` | `sdpad` |
+| tuning parameters bound by `let` tuples in `sdpad` | `pub const`s inside the `verus!` block (same values) | `sdp_altdir.rs` |
+| `result.push(prim_z)` (move out of a loop-carried local) | `result.push(prim_z.clone())` (one copy at termination; `prim_z` is now a field of `WgyState`) | `sdpad` |
 | `loop { .. return (..) .. }` | `loop { .. break; .. }` with `ensures`, result built after the loop (the owned `q0` is only available once the borrow has ended) | `jacobi_eigen_cach` |
 | `MAX_SWEEPS * dim * (dim - 1) / 2` | `(dim * (dim - 1) / 2).saturating_mul(MAX_SWEEPS)` | `jacobi_eigen_cach` |
 | `let mut biggest = f64::NEG_INFINITY` (never read before the first rotation) | `let mut biggest = 0.0` | `jacobi_eigen_cach` |
@@ -902,6 +961,17 @@ Known constructs that later layers must rewrite (found during L00 experiments):
 - Before rewriting a construct, probe it in a scratch file: every entry in the table above
   was re-confirmed by a probe on 2026-10-17 (unary `-x`, `+=` on `f64`, `INFINITY`,
   `FRAC_1_SQRT_2`, `Vec::extend`, `zip`, `fold` all fail in this build).
+
+Proof-engineering notes (L18; probed 2026-10-19):
+
+- Mutating `Vec` fields through a `&mut` struct parameter (`st.buf.clear()`, `st.buf.push(x)`,
+  `st.z[i] = x`, `st.y = f(&mut st.buf)`, `st.s = vec![0.0; n]`) verifies with the usual
+  `Vec` contracts; loop invariants may mention `old(st).field@`, and a postcondition that
+  passes the parameter to a predicate must write `final(st)` (plain `st` is rejected).
+- Spec predicates over `&SdpadSetup`/`&WgyState` parameters accept `old(st)` and `final(st)`
+  directly.
+- `exists|q, b| #[trigger] pos_part_of(..)` is established by asserting the trigger term with
+  the chosen witnesses (`choose` on the callee's existential postcondition for `q`).
 
 Proof-engineering notes (L17; probed 2026-10-19):
 
@@ -1185,10 +1255,7 @@ Proof-engineering notes (L01):
   magnitude. `src/sdp_tests.rs` gained the regression test `test_jacobi_cach_cache_update`.
 - `poseigendecomp`/`negeigendecomp` (L12) inherit the eigensolver preconditions `dim >= 1`,
   `dim_fits(dim)` and an input of length `>= pk_len(dim)`; `sdpad_setup_ok` (L17) provides
-  `d >= 1` and `dim_fits(d)` for L18. The L18 specification of the dual update should use `spectral_part_ok` with
-  `pos_sel`, `lemma_selected_reconstruction` for the `diag_scale_gram` result (with
-  `lemma_rows_of_product` for its preconditions when the positive part is nonempty) and
-  `lemma_pos_part_psd`.
+  `d >= 1` and `dim_fits(d)`, which `wgy_update` (L18) uses.
 - L14 changed the executable row scaling of `linear_remove_redundant_sym` twice (packed-column
   start, and the off-diagonal factor `sqrt(2)` requested by the user); the scale is now the
   Frobenius norm of the row's symmetric matrix. Both changes are documented in the L14
@@ -1198,8 +1265,15 @@ Proof-engineering notes (L01):
   `verus!`) `sdpad_input_ok`, i.e. additionally `dim_fits(total_rows(sdp))`; `sdpad_setup`,
   `SdpadSetup` and `sdpad_setup_ok` are public. Two executable changes: the single-variable
   PSD block (`EXPOSED_BUGS.md`) and the always-full-length `dual_y` (L17 architecture
-  decisions). L18 should verify the loop body as a helper taking `&SdpadSetup` and the iteration
-  state, reusing `dual_solve_ok`, `spectral_part_ok` (L12) and the L04 operator contracts.
+  decisions).
+- L18: `sdpad` (still outside `verus!`) calls `wgy_update` and `penalty_update`; it must
+  (informally) provide `wgy_setup_ok(&setup)`, i.e. additionally `c_len == 0 ==> zeros.len() ==
+  0`, and `penalty != 0`. L19 should move the remaining loop into `verus!`, carrying the loop
+  invariants `prim_z.len() == dual_s.len() == pk_len(d)`, `PEN_MIN <= penalty <= PEN_MAX`, the
+  counter bounds of `penalty_update`, and `dual_y.len() == point.len()` (from `dual_solve_ok`
+  and the `wgy_setup_ok` shape fact) for `dot_prod(point, dual_y)`; the residual `dinf` uses
+  `is_dual_slack`, `pinf` uses `setup_action_r`, and the best-solution bookkeeping needs
+  `lemma_pos_part_psd_sym` only for documentation (the PSD test is `psd_block_check`).
 - The full-verification command in CLAUDE.md needs `-V no-solver-version-check` on
   this machine (Z3 4.16.0 with build hashcode); without it Verus panics as soon as any
   function is verified.
