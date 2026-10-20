@@ -470,12 +470,13 @@ pub fn pos_def_solver(mat : &SymMatrix, vect : &mut [f64]) -> Vector {
     back_subst(&l, &mut sol2)
 }
 
-// solver for block-diagonal symmetric positive definite matrix (A, I)
+// solver for block-diagonal symmetric positive definite matrix (A, 0.5*I)
 pub fn pos_def_solver_upperleft(mat : &SymMatrix, vect : &mut Vector, id_len : usize) -> Vector {
     let ul_len = vect.len() - id_len;
     let mut result = pos_def_solver(mat, &mut vect[..ul_len]);
     for v in &vect[ul_len..] {
-	result.push(*v);
+	// we multiply by 2 because the corresponding block of the matrix is 0.5 * I
+	result.push(2.0 * *v);
     }
     result
 }
