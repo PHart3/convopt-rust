@@ -654,7 +654,7 @@ pub proof fn lemma_adjoint_zero_basis(m: Seq<real>, row_dim: int, list: Seq<(usi
 }
 
 /// Under the two hypotheses, A A* is the block matrix (G, I/2): the dense Gram block, and the
-/// zero constraints, each of Frobenius norm 1/2, orthogonal to the dense rows and to each other.
+/// zero constraints, each of squared Frobenius norm 1/2, orthogonal to the dense rows and to each other.
 pub proof fn lemma_full_gram_block(g: Seq<real>, m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>, dim: int)
     requires
         row_dim >= 0,

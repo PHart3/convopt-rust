@@ -15,7 +15,7 @@
 //     on the diagonal, with the residual of the unregularized system bounded
 //     relative to the data (`dual_solve_ok`); (G, I/2) is the Gram matrix A A* of
 //     the full constraint operator (`lemma_setup_full_gram`): the zero constraints
-//     have Frobenius norm 1/2 and are orthogonal to the dense rows, which vanish on
+//     have squared Frobenius norm 1/2 and are orthogonal to the dense rows, which vanish on
 //     the zero pattern (`lemma_setup_gram_hypotheses`);
 //   - the initial iterates are Z = I and S = 0 (`initial_iterates_ok`).
 //
