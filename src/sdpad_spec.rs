@@ -10,10 +10,11 @@
 //     (constraint_gram, L04);
 //   - the diagonal-block partition of Z that the termination test checks for
 //     positive semidefiniteness is listed (`psd_partition`, `block_list_ok`);
-//   - every iteration solves the block system (G, I) y = b, either directly
+//   - every iteration solves the block system (G, I/2) y = b, either directly
 //     (reduced constraints) or after regularizing G by TOL * max(max_i |G_ii|, 1)
 //     on the diagonal, with the residual of the unregularized system bounded
-//     relative to the data (`dual_solve_ok`);
+//     relative to the data (`dual_solve_ok`); I/2 is the Gram block of the zero
+//     constraints, whose adjoint entries carry the factor 1/2;
 //   - the initial iterates are Z = I and S = 0 (`initial_iterates_ok`).
 //
 // Each iteration then performs the Wen-Goldfarb-Yin update for the penalty
@@ -337,30 +338,31 @@ pub open spec fn residual_ok(g: Seq<real>, c_len: int, yt: Seq<real>, bt: Seq<re
 }
 
 /// y solves the block system of one iteration: (G + s I) y_top = b_top with the shift s of
-/// `reg_shift_r`, y_bottom = b_bottom (the multipliers of the zero constraints), and, when G
-/// was regularized, the residual of the unregularized system passes the test.
+/// `reg_shift_r`, y_bottom = 2 b_bottom (the multipliers of the zero constraints, whose Gram
+/// block is I/2), and, when G was regularized, the residual of the unregularized system
+/// passes the test.
 pub open spec fn dual_solve_ok(g: Seq<real>, b: Seq<real>, c_len: int, check: bool, y: Seq<real>) -> bool {
     let n = b.len() as int;
     let yt = y.subrange(0, c_len);
     let bt = b.subrange(0, c_len);
     &&& y.len() == n
     &&& mat_vec(madd(sym_view(g), mscale(reg_shift_r(g, c_len, check), mident())), c_len, yt) == bt
-    &&& forall|t: int| c_len <= t < n ==> #[trigger] y[t] == b[t]
+    &&& forall|t: int| c_len <= t < n ==> #[trigger] y[t] == 2.0real * b[t]
     &&& !check && c_len > 0 ==> residual_ok(g, c_len, yt, bt)
 }
 
-/// A solution of the block system (A, I) x = b solves A x_top = b_top and has x_bottom = b_bottom.
-pub proof fn lemma_block_ident_solve_inv(a: MatF, n: int, total: int, x: Seq<real>, b: Seq<real>)
+/// A solution of the block system (A, I/2) x = b solves A x_top = b_top and has x_bottom = 2 b_bottom.
+pub proof fn lemma_block_half_solve_inv(a: MatF, n: int, total: int, x: Seq<real>, b: Seq<real>)
     requires
         0 <= n <= total,
         x.len() == total,
         b.len() == total,
-        mat_vec(block_ident_view(a, n), total, x) == b,
+        mat_vec(block_half_view(a, n), total, x) == b,
     ensures
         mat_vec(a, n, x.subrange(0, n)) == b.subrange(0, n),
-        forall|t: int| n <= t < total ==> #[trigger] x[t] == b[t],
+        forall|t: int| n <= t < total ==> #[trigger] x[t] == 2.0real * b[t],
 {
-    let m = block_ident_view(a, n);
+    let m = block_half_view(a, n);
     let xs = x.subrange(0, n);
     assert forall|r: int| 0 <= r < n implies #[trigger] mat_vec(a, n, xs)[r] == b.subrange(0, n)[r] by {
         let f = |k: int| m(r, k) * x[k];
@@ -377,13 +379,13 @@ pub proof fn lemma_block_ident_solve_inv(a: MatF, n: int, total: int, x: Seq<rea
         assert(mat_vec(m, total, x)[r] == b[r]);
     }
     assert(mat_vec(a, n, xs) =~= b.subrange(0, n));
-    assert forall|t: int| n <= t < total implies #[trigger] x[t] == b[t] by {
+    assert forall|t: int| n <= t < total implies #[trigger] x[t] == 2.0real * b[t] by {
         let f = |k: int| m(t, k) * x[k];
         assert forall|k: int| 0 <= k < total && k != t implies #[trigger] f(k) == 0.0real by {
             assert(m(t, k) == 0.0real);
         }
         lemma_sum_fn_single(f, total as nat, t);
-        assert(m(t, t) == 1.0real);
+        assert(m(t, t) == 0.5real);
         assert(mat_vec(m, total, x)[t] == b[t]);
     }
 }

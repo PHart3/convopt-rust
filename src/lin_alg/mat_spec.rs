@@ -45,9 +45,9 @@ pub open spec fn diag_view(d: Seq<real>) -> MatF {
     |r: int, c: int| if r == c { d[r] } else { 0.0real }
 }
 
-/// The block-diagonal matrix (A, I) whose leading n x n block is a.
-pub open spec fn block_ident_view(a: MatF, n: int) -> MatF {
-    |r: int, c: int| if r < n && c < n { a(r, c) } else if r == c { 1.0real } else { 0.0real }
+/// The block-diagonal matrix (A, I/2) whose leading n x n block is a.
+pub open spec fn block_half_view(a: MatF, n: int) -> MatF {
+    |r: int, c: int| if r < n && c < n { a(r, c) } else if r == c { 0.5real } else { 0.0real }
 }
 
 /// The diagonal block of a packed symmetric matrix starting at row/column `start`.

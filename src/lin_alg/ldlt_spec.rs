@@ -199,20 +199,20 @@ pub proof fn lemma_ldlt_product(a: Seq<real>, l: Seq<real>, d: Seq<real>, dim: i
     }
 }
 
-/* ---------- the block-diagonal solver (A, I) ---------- */
+/* ---------- the block-diagonal solver (A, I/2) ---------- */
 
-/// If A x_head = b_head and the tails of x and b agree, then (A, I) x = b.
-pub proof fn lemma_block_ident_solve(a: MatF, n: int, total: int, x: Seq<real>, b: Seq<real>)
+/// If A x_head = b_head and the tail of x is twice the tail of b, then (A, I/2) x = b.
+pub proof fn lemma_block_half_solve(a: MatF, n: int, total: int, x: Seq<real>, b: Seq<real>)
     requires
         0 <= n <= total,
         x.len() == total,
         b.len() == total,
         mat_vec(a, n, x.subrange(0, n)) == b.subrange(0, n),
-        forall|t: int| n <= t < total ==> x[t] == b[t],
+        forall|t: int| n <= t < total ==> #[trigger] x[t] == 2.0real * b[t],
     ensures
-        mat_vec(block_ident_view(a, n), total, x) == b,
+        mat_vec(block_half_view(a, n), total, x) == b,
 {
-    let m = block_ident_view(a, n);
+    let m = block_half_view(a, n);
     assert forall|r: int| 0 <= r < total implies #[trigger] mat_vec(m, total, x)[r] == b[r] by {
         let f = |k: int| m(r, k) * x[k];
         if r < n {
@@ -233,7 +233,7 @@ pub proof fn lemma_block_ident_solve(a: MatF, n: int, total: int, x: Seq<real>, 
                 assert(m(r, k) == 0.0real);
             }
             lemma_sum_fn_single(f, total as nat, r);
-            assert(m(r, r) == 1.0real);
+            assert(m(r, r) == 0.5real);
         }
     }
     assert(mat_vec(m, total, x) =~= b);

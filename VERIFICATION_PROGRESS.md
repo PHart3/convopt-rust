@@ -86,7 +86,8 @@ Executable functions verified (contract summary):
   off-diagonal factors 1/2, adjoint identity `<A(X), y> = <X, A*(y)>_F`),
   `constraint_gram`, `diag_scale_gram` (`Q D Q^T`); `diag_solver`, `forw_subst`,
   `back_subst` (`L x = b`, `L^T x = b`), `ldlt_decomp` (`L D L^T = A`, pivots
-  `>= TOL * max(max_i |A_ii|, 1)`), `pos_def_solver`, `pos_def_solver_upperleft`;
+  `>= TOL * max(max_i |A_ii|, 1)`), `pos_def_solver`, `pos_def_solver_upperleft`
+  (the block system `(A, I/2) x = b`);
   `psd_block_check` (success gives `B >= -eps I`, `eps = 1e-9 * max(max_i |B_ii|, 1)`
   per block); `linear_remove_redundant_sym` (reduced system: first `rank` echelon
   rows divided by their Frobenius norms); block embeddings and symmetric-map helpers.
@@ -104,7 +105,8 @@ Executable functions verified (contract summary):
   the constraint reduction is exported as `reduced_from`.
 - **Solver** (`sdp_altdir.rs`, 10): `sdpad_setup` (`sdpad_setup_ok`: Frobenius
   weighting, Gram matrix, PSD partition, standard form), `dual_solve`
-  (`(G + s I) y = b` with the residual contract), `wgy_update` (`wgy_update_ok`:
+  (`(G + s I) y_top = b_top`, `y_bottom = 2 b_bottom` with the residual contract),
+  `wgy_update` (`wgy_update_ok`:
   dual solve, `diff = C_F - A*(y)`, `V = diff - mu Z`, `S' = Pi_pos(V)` through
   `poseigendecomp`, `Z' = (1 - rho) Z + (rho / mu)(S' - V)`), `penalty_update`,
   `kkt_quantities` (`pinf`, `dinf`, objective, gap, delta as defined in `kkt_ok`),
@@ -157,7 +159,9 @@ Executable functions verified (contract summary):
 Bugs found by verification (details in `EXPOSED_BUGS.md`): the stale `biggest`
 bound and the out-of-column cache read of `jacobi_eigen_cach` (L10); the packed
 column start of the row-norm loop of `linear_remove_redundant_sym` (L14); the
-empty PSD block list for single-variable problems (L17).
+empty PSD block list for single-variable problems (L17); the missing factor 2
+on the zero-constraint multipliers of the dual solve (L17, found by the
+specification audit of 2026-10-20 and fixed on `main` by the author).
 
 Other behaviour and interface changes:
 
@@ -239,18 +243,18 @@ the installed Verus (0.2026.08.23).
 
 ## Open issues
 
-A specification audit (2026-10-20) reported two gaps. The first is fixed:
+A specification audit (2026-10-20) reported two gaps, both addressed.
 `outcome_ok` required only that the returned state be some valid update of
 some predecessor; it now indexes into the ghost trajectory from the initial
-iterates. The second is open: `dual_solve_ok` specifies the implemented block
-solve `(G, I) y = rhs`, whereas the Gram matrix of the full constraint operator
-has the block `I / 2` for the zero constraints (their adjoint entries carry the
-factor `1/2`), so the solve agrees with the `A A*` system only when the
-zero-constraint right-hand sides vanish; the overview of `sdpad_spec.rs` still
-calls it the `A A*` solve. Resolving it means either scaling the bottom
-multipliers by 2 and proving the block system equal to the full Gram system
-(which needs that the dense rows vanish on the zero pattern), or documenting
-the deviation in the specification.
+iterates. The dual solve passed the zero-constraint right-hand sides through
+although their Gram block is `I/2`; the code now doubles them and
+`dual_solve_ok` states the system `(G, I/2) y = rhs`. Still open from that
+finding: the proof that `(G, I/2)` is the Gram matrix of the full constraint
+operator (dense rows followed by zero rows). It needs that the dense rows
+vanish on the zero pattern, which follows from `std_rows_ok` for the stacked
+rows but must be carried through `gauss_elim` (zero columns stay zero, a new
+invariant of L13) and the reduction (L14) for the `check` case, plus a
+definition of the full Gram matrix as `A(A*(e_l))_k` in L04.
 
 The final audit (L20) found no trusted construct outside
 `src/trusted.rs`, no raised `rlimit`, no slow proof, and no warning from

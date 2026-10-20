@@ -2633,7 +2633,7 @@ pub fn pos_def_solver(mat: &SymMatrix, vect: &mut [f64]) -> (solution: Vector)
     solution
 }
 
-// solver for block-diagonal symmetric positive definite matrix (A, I)
+// solver for block-diagonal symmetric positive definite matrix (A, 0.5*I)
 pub fn pos_def_solver_upperleft(mat: &SymMatrix, vect: &mut Vector, id_len: usize) -> (result: Vector)
     requires
         id_len <= old(vect)@.len(),
@@ -2642,7 +2642,7 @@ pub fn pos_def_solver_upperleft(mat: &SymMatrix, vect: &mut Vector, id_len: usiz
     ensures
         result@.len() == old(vect)@.len(),
         final(vect)@.len() == old(vect)@.len(),
-        mat_vec(block_ident_view(sym_view(rvs(mat@)), (old(vect)@.len() - id_len) as int), old(vect)@.len() as int, rvs(result@))
+        mat_vec(block_half_view(sym_view(rvs(mat@)), (old(vect)@.len() - id_len) as int), old(vect)@.len() as int, rvs(result@))
             == rvs(old(vect)@),
 {
     let ghost b = rvs(old(vect)@);
@@ -2656,16 +2656,17 @@ pub fn pos_def_solver_upperleft(mat: &SymMatrix, vect: &mut Vector, id_len: usiz
             result@.len() == t,
             head.len() == ul_len,
             forall|s: int| 0 <= s < ul_len ==> rv(#[trigger] result@[s]) == head[s],
-            forall|s: int| ul_len <= s < t ==> rv(#[trigger] result@[s]) == b[s],
+            forall|s: int| ul_len <= s < t ==> rv(#[trigger] result@[s]) == 2.0real * b[s],
             forall|s: int| ul_len <= s < vect@.len() ==> rv(#[trigger] vect@[s]) == b[s],
     {
-        result.push(vect[t]);
+        // we multiply by 2 because the corresponding block of the matrix is 0.5 * I
+        result.push(2.0 * vect[t]);
     }
     proof {
         let x = rvs(result@);
         assert(x.subrange(0, ul_len as int) =~= head);
         assert(b.subrange(0, ul_len as int) =~= rvs(old(vect)@.subrange(0, ul_len as int)));
-        lemma_block_ident_solve(sym_view(rvs(mat@)), ul_len as int, b.len() as int, x, b);
+        lemma_block_half_solve(sym_view(rvs(mat@)), ul_len as int, b.len() as int, x, b);
     }
     result
 }

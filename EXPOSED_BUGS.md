@@ -120,3 +120,38 @@ either), so the whole variable is checked; this is the same condition as the
 author's own fix on `main`. The list is also built once before the main loop instead of on every
 iteration (it never changes). `cargo test` passes with the change.
 
+
+## The dual solve treated the zero-constraint Gram block as `I` instead of `I/2`
+
+**Where:** `src/lin_alg/sym_matrix.rs`, `pos_def_solver_upperleft` (the tail of
+the block solve used by `dual_solve` in `src/sdp_altdir.rs`), found by a
+specification audit of layer L17 (2026-10-20).
+
+**What was wrong.** Each Wen-Goldfarb-Yin iteration solves the Gram system
+`(A A*) y = rhs` for the full constraint operator `A`, whose rows are the dense
+constraint matrices followed by one row per off-block-diagonal entry that must
+vanish. The dense Gram matrix `G` was formed with the Frobenius weights, and the
+adjoint `A*` placed `y_k / 2` at a zero-pattern entry, because the Frobenius
+product counts off-diagonal entries twice. Consequently the Gram block of the
+zero constraints is `I/2`: a zero row applied to its own adjoint gives `1/2`,
+and it is orthogonal to the dense rows (which live on the diagonal blocks) and
+to the other zero rows. The solver nevertheless passed the bottom right-hand
+side through unchanged, that is, it solved `(G, I) y = rhs`, so the multipliers
+of the zero constraints were half the correct values whenever their right-hand
+sides were nonzero. In exact arithmetic with an exact spectral projection they
+stay zero, but the implemented eigensolver does not preserve block diagonality,
+so in practice they are nonzero at roundoff level and the off-block entries of
+`Z` were damped by a factor `1 - rho/2` instead of `1 - rho`.
+
+**How it came to light.** The verified contract `dual_solve_ok` stated what the
+code did, `y_bottom = rhs_bottom`, while the verified adjoint identity
+`<A(X), y> = <X, A*(y)>_F` fixed the factor `1/2` in `A*`. An audit comparing
+the two against the `A A*` system named in the overview of `sdpad_spec.rs`
+found that they are consistent only when `rhs_bottom = 0`.
+
+**Fix.** The tail of `pos_def_solver_upperleft` returns `2 * rhs[t]`, and its
+contract, `dual_solve_ok` and the block-solve lemmas state the system
+`(G, I/2) y = rhs`. `cargo test` passes. The remaining step, proving that
+`(G, I/2)` is the Gram matrix of the full constraint operator, needs the fact
+that the dense rows vanish on the zero pattern; it is listed as open in
+`VERIFICATION_PROGRESS.md`.

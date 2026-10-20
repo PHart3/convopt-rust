@@ -184,7 +184,7 @@ fn psd_block_list(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, block_size_su
 }
 
 // the equality-system solve of one iteration (dual_solve_ok): with reduced constraints the
-// block system (G, I) y = rhs is solved directly; otherwise G is regularized by
+// block system (G, I/2) y = rhs is solved directly; otherwise G is regularized by
 // TOL * max(max_i |G_ii|, 1) on its diagonal, and the solution must have a small residual
 // relative to the original system (aborts otherwise)
 fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> (y: Vector)
@@ -211,7 +211,7 @@ fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> 
     if check || c_len == 0 {
         let y = pos_def_solver_upperleft(gram, rhs, nz);
         proof {
-            lemma_block_ident_solve_inv(sym_view(g), cl, n as int, rvs(y@), b);
+            lemma_block_half_solve_inv(sym_view(g), cl, n as int, rvs(y@), b);
             let yt = rvs(y@).subrange(0, cl);
             if check {
                 lemma_shift_zero_meq(sym_view(g), cl);
@@ -278,7 +278,7 @@ fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> 
     let y = pos_def_solver_upperleft(&gram_reg, rhs, nz);
     let ghost gr = rvs(gram_reg@);
     proof {
-        lemma_block_ident_solve_inv(sym_view(gr), cl, n as int, rvs(y@), b);
+        lemma_block_half_solve_inv(sym_view(gr), cl, n as int, rvs(y@), b);
         assert(diag_shifted(gr, g, cl, sh));
         lemma_diag_shifted_view(gr, g, cl, sh);
         lemma_mat_vec_meq(sym_view(gr), madd(sym_view(g), mscale(sh, mident())), cl, rvs(y@).subrange(0, cl));
