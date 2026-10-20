@@ -26,6 +26,7 @@ use crate::lin_alg::solve_spec::abs_max_r;
 use crate::lin_alg::spectral_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::sdp_spec::*;
+use crate::sdpad_spec::Penalty;
 #[cfg(verus_keep_ghost)]
 use crate::sdpad_spec::*;
 
@@ -39,6 +40,7 @@ pub const TOTAL_STEPS: usize = 5000;
 // tuning parameters: the penalty interval and scaling factor, the step of the primal update,
 // the stagnation thresholds, and the consecutive-iteration count and ratio thresholds of the
 // penalty update
+pub const PEN_INIT: f64 = 5.0;
 pub const PEN_MIN: f64 = 1e-4;
 pub const PEN_MAX: f64 = 1e4;
 pub const PEN_FACT: f64 = 0.5;
@@ -723,8 +725,9 @@ pub enum Termination {
 
 /// The outcome of the loop (outcome_ok, sdpad_spec.rs): the user's solution read from an
 /// iterate, that iterate's objective value and residual quantities, the termination reason,
-/// and (ghost) the deltas of all iterations, which of them were recorded as candidates, and the
-/// stagnation bookkeeping.
+/// and (ghost) the trajectory of the loop (its states and penalties), the index of the
+/// returned iterate in it, the deltas of all iterations, which of them were recorded as
+/// candidates, and the stagnation bookkeeping.
 pub struct SdpadOutcome {
     pub result: Vec<SymMatrix>,
     pub value: f64,
@@ -732,6 +735,9 @@ pub struct SdpadOutcome {
     pub dinf: f64,
     pub gap: f64,
     pub termination: Termination,
+    pub states: Ghost<Seq<WgyState>>,
+    pub pens: Ghost<Seq<Penalty>>,
+    pub iterate: Ghost<int>,
     pub deltas: Ghost<Seq<f64>>,
     pub feasible: Ghost<Seq<bool>>,
     pub best_delta: Ghost<f64>,
@@ -845,7 +851,8 @@ fn read_solution(s: &SdpadSetup, z: &SymMatrix) -> (result: Vec<SymMatrix>)
 
 // the solver loop (contract: outcome_ok): Wen-Goldfarb-Yin updates with the penalty
 // adaptation until the current iterate has delta < TOL and PSD-verified blocks, the stagnation
-// rule fires (the best PSD-verified candidate is returned), or TOTAL_STEPS iterations were run
+// rule fires (the best PSD-verified candidate is returned), or TOTAL_STEPS iterations were run;
+// the ghost trajectory (states, pens) records every iterate and the penalty that produced it
 // (the problem sdp is used by the specification only)
 #[allow(unused_variables)]
 pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -> (o: SdpadOutcome)
@@ -862,7 +869,7 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
     }
     let var_dim = s.var_dim;
     let (mut it_stag, mut it_pinf, mut it_dinf): (i32, i32, i32) = (0, 0, 0);
-    let mut penalty = 5.0;
+    let mut penalty = PEN_INIT;
     let var_dim_tot = (var_dim * (var_dim + 1)) / 2;
     let (prim_z, dual_s): (SymMatrix, SymMatrix) = initial_iterates(var_dim);
     let mut st = WgyState {
@@ -874,7 +881,11 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
     let (mut best_feas_delta, mut best_pinf, mut best_dinf, mut best_gap): (f64, f64, f64, f64) =
         (pos_infinity(), pos_infinity(), pos_infinity(), pos_infinity());
     let mut best_prim_val: Option<f64> = None;
+    // the trajectory so far (states, pens), the index in it of the recorded best candidate,
     // the deltas of the iterations so far and which of them were recorded as candidates
+    let ghost mut states: Seq<WgyState> = Seq::empty().push(st);
+    let ghost mut pens: Seq<Penalty> = Seq::empty();
+    let ghost mut best_idx: int = 0;
     let ghost mut deltas: Seq<f64> = Seq::empty();
     let ghost mut feasible: Seq<bool> = Seq::empty();
 
@@ -892,23 +903,32 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
             0 <= it_pinf < PEN_COUNT,
             0 <= it_dinf < PEN_COUNT,
             count < TOTAL_STEPS,
+            trajectory_ok(s, check, states, pens),
+            pens.len() == count,
+            states.last() == st,
+            count == 0 ==> rv(penalty) == rv(PEN_INIT) && it_pinf == 0 && it_dinf == 0,
+            count >= 1 ==> penalty_follows(s, pens.last(), &states.last(),
+                Penalty { mu: rv(penalty), ip: it_pinf as int, id: it_dinf as int }),
             deltas.len() == count,
+            forall|j: int| 0 <= j < count ==> rv(#[trigger] deltas[j]) == iterate_delta_r(s, &states[j + 1]),
             feasible.len() == count,
             it_stag <= count,
             stagnation_ok(rvs(deltas), rv(best_delta), it_stag as int),
             best_feasible_ok(rvs(deltas), feasible, rv(best_feas_delta), best_prim_val is Some),
             best_prim_val matches Some(v)
-                ==> best_record_ok(s, check, best_prim_z@, rv(best_pinf), rv(best_dinf), rv(best_gap), rv(v), rv(best_feas_delta)),
+                ==> best_record_ok(s, states, feasible, best_idx, best_prim_z@, rv(best_pinf), rv(best_dinf), rv(best_gap), rv(v), rv(best_feas_delta)),
         decreases TOTAL_STEPS - count,
     {
         count += 1;
 
         let ghost st0: WgyState = st;
-        let ghost mu = rv(penalty);
+        let ghost pen = Penalty { mu: rv(penalty), ip: it_pinf as int, id: it_dinf as int };
         wgy_update(s, check, var, penalty, STEP, &mut st);
         proof {
-            assert(wgy_update_ok(s, check, mu, rv(STEP), &st0, &st));
-            assert(iterate_ok(s, check, st));
+            assert(wgy_update_ok(s, check, pen.mu, rv(STEP), &st0, &st));
+            lemma_trajectory_step(s, check, states, pens, pen, st);
+            states = states.push(st);
+            pens = pens.push(pen);
             lemma_pos_part_psd_sym(rvs(st.dual_sfull@), rvs(st.dual_s@), d);
         }
         let (pinf, dinf, prim_val, gap, delta) = kkt_quantities(s, &st);
@@ -917,19 +937,25 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
             deltas = deltas.push(delta);
             assert(rvs(deltas) =~= rvs(deltas0).push(rv(delta)));
             lemma_stag_step(rvs(deltas0), rv(best_delta), it_stag as int, rv(delta));
+            assert forall|j: int| 0 <= j < count implies rv(#[trigger] deltas[j]) == iterate_delta_r(s, &states[j + 1]) by {
+                if j < count - 1 {
+                    assert(rv(deltas0[j]) == iterate_delta_r(s, &states[j + 1]));
+                }
+            }
         }
 
         if residual_is_small(delta, TOL) && psd_block_check(&st.prim_z, &s.psd_blocks) {
             let result = read_solution(s, &st.prim_z);
             let o = SdpadOutcome {
                 result, value: prim_val, pinf, dinf, gap, termination: Termination::Accuracy,
+                states: Ghost(states), pens: Ghost(pens), iterate: Ghost(count as int),
                 deltas: Ghost(deltas), feasible: Ghost(feasible.push(true)),
                 best_delta: Ghost(if rv(delta) > rv(best_delta) { best_delta } else { delta }),
                 it_stag: Ghost(if rv(delta) > rv(best_delta) { (it_stag + 1) as i32 } else { 0 }),
             };
             proof {
                 lemma_objective_value(sdp, check, s, rvs(st.prim_z@));
-                assert(iterate_ok(s, check, st) && solution_ok(s, rvs(st.prim_z@), o.result@));
+                assert(states[count as int] == st && solution_ok(s, rvs(st.prim_z@), o.result@));
             }
             return o;
         }
@@ -949,8 +975,9 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
             best_prim_z.extend_from_slice(st.prim_z.as_slice());
             best_prim_val = Some(prim_val);
             proof {
+                best_idx = count as int;
                 assert(best_prim_z@ =~= st.prim_z@);
-                assert(best_record_ok(s, check, best_prim_z@, rv(best_pinf), rv(best_dinf), rv(best_gap), rv(prim_val), rv(best_feas_delta)));
+                assert(best_record_ok(s, states, feasible, best_idx, best_prim_z@, rv(best_pinf), rv(best_dinf), rv(best_gap), rv(prim_val), rv(best_feas_delta)));
             }
         }
 
@@ -965,18 +992,21 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
             if (it_stag > STAG1 && residual_is_small(delta, 1e-5)) ||
                 (it_stag > STAG2 && residual_is_small(delta, 1e-4)) ||
                 (it_stag > STAG3 && residual_is_small(delta, 1e-3)) {
+                proof {
+                    let j = best_idx - 1;
+                    assert(wgy_update_ok(s, check, pens[j].mu, rv(STEP), &states[j], &states[j + 1]));
+                    assert(states[j + 1] == states[best_idx]);
+                }
                 let result = read_solution(s, &best_prim_z);
                 let o = SdpadOutcome {
                     result, value: best_val, pinf: best_pinf, dinf: best_dinf, gap: best_gap, termination: Termination::Stagnation,
+                    states: Ghost(states), pens: Ghost(pens), iterate: Ghost(best_idx),
                     deltas: Ghost(deltas), feasible: Ghost(feasible), best_delta: Ghost(best_delta), it_stag: Ghost(it_stag),
                 };
                 proof {
-                    let stb = choose|stb: WgyState| #[trigger] iterate_ok(s, check, stb)
-                        && stb.prim_z@ == best_prim_z@
-                        && psd_blocks_ok(s, rvs(best_prim_z@))
-                        && kkt_ok(s, &stb, rv(best_pinf), rv(best_dinf), rv(best_val), dual_val_r(s, rvs(stb.dual_y@)), rv(best_gap), rv(best_feas_delta));
+                    let stb = states[best_idx];
                     lemma_objective_value(sdp, check, s, rvs(stb.prim_z@));
-                    assert(iterate_ok(s, check, stb) && solution_ok(s, rvs(stb.prim_z@), o.result@));
+                    assert(solution_ok(s, rvs(stb.prim_z@), o.result@));
                 }
                 return o;
             }
@@ -986,11 +1016,12 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
             let result = read_solution(s, &st.prim_z);
             let o = SdpadOutcome {
                 result, value: prim_val, pinf, dinf, gap, termination: Termination::MaxIter,
+                states: Ghost(states), pens: Ghost(pens), iterate: Ghost(count as int),
                 deltas: Ghost(deltas), feasible: Ghost(feasible), best_delta: Ghost(best_delta), it_stag: Ghost(it_stag),
             };
             proof {
                 lemma_objective_value(sdp, check, s, rvs(st.prim_z@));
-                assert(iterate_ok(s, check, st) && solution_ok(s, rvs(st.prim_z@), o.result@));
+                assert(states[count as int] == st && solution_ok(s, rvs(st.prim_z@), o.result@));
             }
             return o;
         }
@@ -999,6 +1030,9 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
         penalty = p;
         it_pinf = ip;
         it_dinf = id;
+        proof {
+            assert(penalty_follows(s, pen, &st, Penalty { mu: rv(penalty), ip: it_pinf as int, id: it_dinf as int }));
+        }
     }
 }
 

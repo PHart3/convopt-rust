@@ -40,11 +40,15 @@
 //   gap   = |dual - prim| / (1 + |dual| + |prim|)
 //   delta = max(pinf, dinf, gap)
 //
-// and the loop stops with the current iterate when delta < TOL and its PSD
-// blocks pass the check (`psd_blocks_ok`), with the best PSD-verified iterate
-// when the stagnation rule fires (`stagnation_ok`, `stagnation_stop`), or with
-// the last iterate after TOTAL_STEPS iterations (`outcome_ok`). The user's
-// solution is read from the iterate's diagonal blocks (`solution_ok`).
+// The loop records its trajectory (`trajectory_ok`): the iterates from Z = I,
+// S = 0, each the update of the previous one for the penalty in force, which
+// the infeasibilities of the new iterate then update (`penalty_follows`). The
+// loop stops with the current iterate when delta < TOL and its PSD blocks pass
+// the check (`psd_blocks_ok`), with the best PSD-verified iterate when the
+// stagnation rule fires (`stagnation_ok`, `stagnation_stop`), or with the last
+// iterate after TOTAL_STEPS iterations; the returned iterate is an element of
+// the trajectory (`outcome_ok`). The user's solution is read from its diagonal
+// blocks (`solution_ok`).
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -688,11 +692,71 @@ pub open spec fn psd_blocks_ok(s: &SdpadSetup, z: Seq<real>) -> bool {
         ==> #[trigger] block_psd_ok(z, s.psd_blocks@[b].0 as int, s.psd_blocks@[b].1 as int)
 }
 
-/// st is an iterate: the Wen-Goldfarb-Yin update of some iterate for a penalty in
-/// [PEN_MIN, PEN_MAX] and the step STEP.
-pub open spec fn iterate_ok(s: &SdpadSetup, check: bool, st: WgyState) -> bool {
-    exists|mu: real, st0: WgyState| rv(PEN_MIN) <= mu <= rv(PEN_MAX)
-        && #[trigger] wgy_update_ok(s, check, mu, rv(STEP), &st0, &st)
+/// The penalty bookkeeping of an iteration: the penalty mu and the counters it_pinf, it_dinf
+/// of penalty_update.
+pub ghost struct Penalty {
+    pub mu: real,
+    pub ip: int,
+    pub id: int,
+}
+
+/// The initial penalty PEN_INIT with zero counters.
+pub open spec fn initial_penalty() -> Penalty {
+    Penalty { mu: rv(PEN_INIT), ip: 0, id: 0 }
+}
+
+/// pen1 is the penalty update of pen0 from the infeasibilities of the iterate st.
+pub open spec fn penalty_follows(s: &SdpadSetup, pen0: Penalty, st: &WgyState, pen1: Penalty) -> bool {
+    penalty_update_ok(pen0.mu, pinf_r(s, rvs(st.prim_z@)), dinf_r(s, rvs(st.diff@), rvs(st.dual_s@)),
+        pen0.ip, pen0.id, pen1.mu, pen1.ip, pen1.id)
+}
+
+/// The trajectory of the loop after pens.len() iterations: states[0] holds the initial
+/// iterates Z = I, S = 0; states[k + 1] is the Wen-Goldfarb-Yin update of states[k] for the
+/// penalty pens[k].mu and the step STEP; pens[0] is the initial penalty, and pens[k + 1] is
+/// the penalty update of pens[k] from the infeasibilities of states[k + 1].
+pub open spec fn trajectory_ok(s: &SdpadSetup, check: bool, states: Seq<WgyState>, pens: Seq<Penalty>) -> bool {
+    let n = pens.len() as int;
+    &&& states.len() == n + 1
+    &&& initial_iterates_ok(rvs(states[0].prim_z@), rvs(states[0].dual_s@), s.var_dim as int)
+    &&& n >= 1 ==> pens[0] == initial_penalty()
+    &&& forall|k: int| 0 <= k < n ==> #[trigger] wgy_update_ok(s, check, pens[k].mu, rv(STEP), &states[k], &states[k + 1])
+    &&& forall|k: int| 0 <= k < n - 1 ==> #[trigger] penalty_follows(s, pens[k], &states[k + 1], pens[k + 1])
+}
+
+/// The trajectory is extended by an iteration: the update st of the last state for the
+/// penalty pen in force (the initial penalty, or the update of the last penalty from the
+/// last state).
+pub proof fn lemma_trajectory_step(s: &SdpadSetup, check: bool, states: Seq<WgyState>, pens: Seq<Penalty>, pen: Penalty, st: WgyState)
+    requires
+        trajectory_ok(s, check, states, pens),
+        pens.len() == 0 ==> pen == initial_penalty(),
+        pens.len() >= 1 ==> penalty_follows(s, pens.last(), &states.last(), pen),
+        wgy_update_ok(s, check, pen.mu, rv(STEP), &states.last(), &st),
+    ensures
+        trajectory_ok(s, check, states.push(st), pens.push(pen)),
+{
+    let n = pens.len() as int;
+    let (states2, pens2) = (states.push(st), pens.push(pen));
+    assert forall|k: int| 0 <= k < n + 1
+        implies #[trigger] wgy_update_ok(s, check, pens2[k].mu, rv(STEP), &states2[k], &states2[k + 1]) by {
+        if k < n {
+            assert(wgy_update_ok(s, check, pens[k].mu, rv(STEP), &states[k], &states[k + 1]));
+        }
+    }
+    assert forall|k: int| 0 <= k < n
+        implies #[trigger] penalty_follows(s, pens2[k], &states2[k + 1], pens2[k + 1]) by {
+        if k < n - 1 {
+            assert(penalty_follows(s, pens[k], &states[k + 1], pens[k + 1]));
+        }
+    }
+}
+
+/// delta of the iterate st: max(pinf, dinf, gap) of its KKT quantities (kkt_ok).
+pub open spec fn iterate_delta_r(s: &SdpadSetup, st: &WgyState) -> real {
+    let prim = prim_val_r(s, rvs(st.prim_z@));
+    let dual = dual_val_r(s, rvs(st.dual_y@));
+    delta_r(pinf_r(s, rvs(st.prim_z@)), dinf_r(s, rvs(st.diff@), rvs(st.dual_s@)), gap_r(prim, dual))
 }
 
 /// The stagnation bookkeeping over the deltas of the iterations so far: best bounds every
@@ -756,13 +820,15 @@ pub proof fn lemma_best_feasible_step(deltas: Seq<real>, feasible: Seq<bool>, be
     }
 }
 
-/// The recorded best solution: an iterate zb whose PSD block check succeeded, with its KKT
-/// quantities.
-pub open spec fn best_record_ok(s: &SdpadSetup, check: bool, zb: Seq<f64>, pinf: real, dinf: real, gap: real, val: real, delta: real) -> bool {
-    exists|st: WgyState| #[trigger] iterate_ok(s, check, st)
-        && st.prim_z@ == zb
-        && psd_blocks_ok(s, rvs(zb))
-        && kkt_ok(s, &st, pinf, dinf, val, dual_val_r(s, rvs(st.dual_y@)), gap, delta)
+/// The recorded best solution: the iterate states[k], recorded as a candidate (feasible[k - 1])
+/// with its PSD block check succeeded, whose Z is stored in zb, with its KKT quantities.
+pub open spec fn best_record_ok(s: &SdpadSetup, states: Seq<WgyState>, feasible: Seq<bool>, k: int, zb: Seq<f64>, pinf: real, dinf: real, gap: real, val: real, delta: real) -> bool {
+    &&& 1 <= k < states.len()
+    &&& k <= feasible.len()
+    &&& feasible[k - 1]
+    &&& states[k].prim_z@ == zb
+    &&& psd_blocks_ok(s, rvs(zb))
+    &&& kkt_ok(s, &states[k], pinf, dinf, val, dual_val_r(s, rvs(states[k].dual_y@)), gap, delta)
 }
 
 /// The stagnation stopping rule: more than STAG1 (STAG2, STAG3) iterations without improving
@@ -773,30 +839,39 @@ pub open spec fn stagnation_stop(delta: real, it_stag: int) -> bool {
     ||| it_stag > STAG3 as int && delta < 0.001real
 }
 
-/// The outcome of the loop: the solution read from an iterate, with that iterate's KKT
-/// quantities and objective value; the deltas of the n iterations run, which candidates were
-/// recorded, and the stagnation bookkeeping after the last iteration; and the termination
-/// reason: Accuracy (the last iterate, with delta < TOL and PSD-verified blocks), Stagnation
-/// (a PSD-verified candidate attaining the least recorded delta, after the stopping rule fired
-/// on the last iterate), or MaxIter (the last of TOTAL_STEPS iterates).
+/// The outcome of the loop: the trajectory of the n iterations run (states, pens), whose
+/// deltas are recorded in order; which iterations were recorded as candidates; the stagnation
+/// bookkeeping after the last iteration; and the solution read from the iterate
+/// states[iterate], with that iterate's KKT quantities and objective value. The termination
+/// reason fixes the iterate: Accuracy (the last iterate, with delta < TOL and PSD-verified
+/// blocks), Stagnation (a recorded PSD-verified candidate attaining the least recorded delta,
+/// after the stopping rule fired on the last iterate), or MaxIter (the last of TOTAL_STEPS
+/// iterates).
 pub open spec fn outcome_ok(sdp: &SDP, s: &SdpadSetup, check: bool, o: SdpadOutcome) -> bool {
+    let states = o.states@;
     let deltas = rvs(o.deltas@);
     let n = deltas.len() as int;
+    let k = o.iterate@;
+    let st = states[k];
     let delta = delta_r(rv(o.pinf), rv(o.dinf), rv(o.gap));
     &&& 1 <= n <= TOTAL_STEPS
+    &&& trajectory_ok(s, check, states, o.pens@)
+    &&& o.pens@.len() == n
+    &&& forall|j: int| 0 <= j < n ==> #[trigger] deltas[j] == iterate_delta_r(s, &states[j + 1])
     &&& o.feasible@.len() == n
     &&& stagnation_ok(deltas, rv(o.best_delta@), o.it_stag@ as int)
-    &&& exists|st: WgyState| #[trigger] iterate_ok(s, check, st)
-            && solution_ok(s, rvs(st.prim_z@), o.result@)
-            && kkt_ok(s, &st, rv(o.pinf), rv(o.dinf), rv(o.value), dual_val_r(s, rvs(st.dual_y@)), rv(o.gap), delta)
-            && rv(o.value) == objective_r(sdp, rvs(st.prim_z@))
-            && match o.termination {
-                Termination::Accuracy => psd_blocks_ok(s, rvs(st.prim_z@)) && delta < rv(TOL) && delta == deltas[n - 1],
-                Termination::Stagnation => psd_blocks_ok(s, rvs(st.prim_z@))
-                    && best_feasible_ok(deltas, o.feasible@, delta, true)
-                    && stagnation_stop(deltas[n - 1], o.it_stag@ as int),
-                Termination::MaxIter => n == TOTAL_STEPS && delta == deltas[n - 1],
-            }
+    &&& 1 <= k <= n
+    &&& solution_ok(s, rvs(st.prim_z@), o.result@)
+    &&& kkt_ok(s, &st, rv(o.pinf), rv(o.dinf), rv(o.value), dual_val_r(s, rvs(st.dual_y@)), rv(o.gap), delta)
+    &&& rv(o.value) == objective_r(sdp, rvs(st.prim_z@))
+    &&& match o.termination {
+            Termination::Accuracy => k == n && psd_blocks_ok(s, rvs(st.prim_z@)) && delta < rv(TOL),
+            Termination::Stagnation => psd_blocks_ok(s, rvs(st.prim_z@))
+                && o.feasible@[k - 1]
+                && best_feasible_ok(deltas, o.feasible@, delta, true)
+                && stagnation_stop(deltas[n - 1], o.it_stag@ as int),
+            Termination::MaxIter => k == n && n == TOTAL_STEPS,
+        }
 }
 
 /* ---------- the penalty update ---------- */

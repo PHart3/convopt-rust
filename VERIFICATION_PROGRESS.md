@@ -43,7 +43,7 @@ All 21 layers (L00-L20) are done.
 
 ## Verified-function count
 
-Last full run: **866 verified, 0 errors** (about 27 s wall clock, 15 threads;
+Last full run: **868 verified, 0 errors** (about 27 s wall clock, 15 threads;
 `--time` reports no slow proof; no `rlimit` is raised anywhere).
 
 Per module (Verus counts executable functions, lemmas, recursive spec
@@ -69,10 +69,10 @@ functions and loop bodies; `external_body` items are not counted):
 | `lin_alg::sym_matrix` | 168 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 41 | L08, L10-L12 |
 | `sdp_spec` | 62 | L16 |
-| `sdpad_spec` | 23 | L17-L19 |
+| `sdpad_spec` | 24 | L17-L19 |
 | `sdp` | 113 | L15, L16 |
-| `sdp_altdir` | 37 | L17-L19 |
-| **total** | **866** | |
+| `sdp_altdir` | 38 | L17-L19 |
+| **total** | **868** | |
 
 Executable functions verified (contract summary):
 
@@ -108,9 +108,12 @@ Executable functions verified (contract summary):
   dual solve, `diff = C_F - A*(y)`, `V = diff - mu Z`, `S' = Pi_pos(V)` through
   `poseigendecomp`, `Z' = (1 - rho) Z + (rho / mu)(S' - V)`), `penalty_update`,
   `kkt_quantities` (`pinf`, `dinf`, objective, gap, delta as defined in `kkt_ok`),
-  `read_solution`, `sdpad_loop` (`outcome_ok`: the returned solution is read from an
-  iterate of the verified update, its value is the user's objective, and the
-  termination reason's conditions hold).
+  `read_solution`, `sdpad_loop` (`outcome_ok`: the ghost trajectory `trajectory_ok`
+  runs from `Z = I, S = 0` with each state the verified update of its predecessor
+  for the penalty in force and each penalty the verified update from the new
+  infeasibilities; the returned solution is read from the iterate at index
+  `iterate` of the trajectory, its value is the user's objective, the recorded
+  deltas are those of the iterates, and the termination reason fixes the index).
 
 ## Specification architecture
 
@@ -144,8 +147,10 @@ Executable functions verified (contract summary):
   are `pub`) and quantified functionally over the variable `z`; the solver carries
   the standard form through `sdpad_setup_ok`, each iteration is specified by what
   the code computes (`wgy_update_ok`, `penalty_update_ok`), and the loop by
-  `outcome_ok` over ghost histories of deltas and feasibility flags. Nothing is
-  claimed about convergence.
+  `outcome_ok` over a ghost trajectory of states and penalties (`trajectory_ok`,
+  extended by `lemma_trajectory_step`) with the returned iterate and the recorded
+  best candidate held as indices into it, plus ghost histories of deltas and
+  feasibility flags. Nothing is claimed about convergence.
 
 ## Executable changes
 
@@ -166,7 +171,9 @@ Other behaviour and interface changes:
 - `sdpad` is split into the verified `sdpad_setup`, `dual_solve`, `wgy_update`,
   `penalty_update`, `kkt_quantities`, `read_solution`, `sdpad_loop` and the
   unverified printing wrapper; `SdpadSetup`, `WgyState`, `SdpadOutcome`,
-  `Termination`, the tuning constants and `TOTAL_STEPS` are public.
+  `Termination`, the tuning constants (including `PEN_INIT = 5.0`, the initial
+  penalty) and `TOTAL_STEPS` are public. `SdpadOutcome` carries the ghost
+  trajectory (`states`, `pens`, `iterate`) besides the ghost histories.
 - `dual_solve` always returns a `dual_y` of full length (the original left it empty
   without reduction and with no dense rows); the PSD block list is computed once
   before the loop; the best-solution copy reuses its buffer.
@@ -225,12 +232,27 @@ the installed Verus (0.2026.08.23).
   (bind tuple results to `let res = ..` first, or trigger on a result-free term).
 - Ghost comparisons of `f64` values are not interpreted (T4 covers executable
   comparisons only); compare `rv` values in ghost code.
-- `Ghost<T>` fields must hold `cargo`-buildable types (`f64`, `Seq<f64>`), not `int`
-  or `real`; unused spec-only parameters need `#[allow(unused_variables)]` under `cargo`.
+- `Ghost<T>` fields may hold `int`, `real`, `Seq` of executable structs and `ghost
+  struct`s (`cargo` builds them through `verus_builtin`); a `ghost struct` used in
+  such a field needs an unconditional `use`. Unused spec-only parameters need
+  `#[allow(unused_variables)]` under `cargo`.
 
 ## Open issues
 
-None. The final audit (L20) found no trusted construct outside
+A specification audit (2026-10-20) reported two gaps. The first is fixed:
+`outcome_ok` required only that the returned state be some valid update of
+some predecessor; it now indexes into the ghost trajectory from the initial
+iterates. The second is open: `dual_solve_ok` specifies the implemented block
+solve `(G, I) y = rhs`, whereas the Gram matrix of the full constraint operator
+has the block `I / 2` for the zero constraints (their adjoint entries carry the
+factor `1/2`), so the solve agrees with the `A A*` system only when the
+zero-constraint right-hand sides vanish; the overview of `sdpad_spec.rs` still
+calls it the `A A*` solve. Resolving it means either scaling the bottom
+multipliers by 2 and proving the block system equal to the full Gram system
+(which needs that the dense rows vanish on the zero pattern), or documenting
+the deviation in the specification.
+
+The final audit (L20) found no trusted construct outside
 `src/trusted.rs`, no raised `rlimit`, no slow proof, and no warning from
 `cargo build` or `cargo test`. It removed the unused literal axioms `1e3`,
 `1e-6` and the unused wrapper `neg_infinity` from the trusted base, annotated
