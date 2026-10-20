@@ -1,160 +1,102 @@
 # Bugs Exposed by Verification
 
-Genuine errors in the original Rust code that came to light while verifying it
-with Verus. Each entry says what was wrong, how the verification effort exposed
-it, and what was changed. This file is for human review only.
+Genuine errors in the original Rust code found while verifying it with Verus.
+`cargo test` passes after each fix.
 
-## Row normalization in `linear_remove_redundant_sym` double-counted packed entries
+## 1. Row norms in `linear_remove_redundant_sym` counted entries twice
 
-**Where:** `src/lin_alg/sym_matrix.rs`, the loop that computes the norm `scale` of
-each kept constraint row (layer L14, 2026-10-18).
+**Where:** `src/lin_alg/sym_matrix.rs`, the loop computing the norm `scale`
+of each kept constraint row (L14).
 
-**What was wrong.** A constraint row stores a symmetric matrix in packed form,
-column by column: column `k` occupies packed indices `k(k+1)/2` through
-`k(k+1)/2 + k`, the last of which is the diagonal entry `(k, k)`. The loop walked
-the columns, adding the off-diagonal entries from `start` up to the diagonal index
-`diag`, then the diagonal entry, and then advanced with
+**Bug.** A row stores a symmetric matrix in packed form, column by column:
+column `k` occupies indices `k(k+1)/2` to `k(k+1)/2 + k`, ending with the
+diagonal entry `diag`. The loop advanced with `start += k`, but the next
+column begins at `diag + 1 = start + k + 1`. From the third column on,
+`start` fell further behind and the loop re-added entries of the previous
+column. For a 3 x 3 matrix, entry `(1, 1)` was counted one and a half times.
 
-    start += k;
+**How Verus exposed it.** The loop invariant requires `start` to be the
+packed start of column `k`. `start += k` does not preserve it.
 
-The next column actually begins at `diag + 1`, which is `start + k + 1`. So from the
-third column on, `start` lagged further behind each time, and the loop re-added the
-last `k - 1` entries of the previous column. For a 3 x 3 matrix the diagonal entry
-`(1, 1)` was counted one and a half times.
+**Fix.** `start = diag + 1`. Any positive scale gives the same solution set,
+so only the conditioning of the reduced system changed.
 
-**How Verus exposed it.** The specification of the norm is a sum over the packed
-triangle, column by column (`row_sq_upto_r` in `src/lin_alg/reduce_spec.rs`). The
-loop invariant needs `start` to equal the packed start index of column `k`. That
-invariant is established for `k = 1` but is not preserved by `start += k`; the
-proof could not be closed without first identifying what the loop actually
-summed, which made the overlap obvious.
+## 2. Cached Jacobi: stale bound and out-of-column cache read
 
-**Fix.** `start = diag + 1`. The solution set of the reduced system never depended
-on the scale (any positive scale works), so only the conditioning of the reduced
-system changes. `cargo test` passes.
+**Where:** `src/lin_alg/jacobi.rs`, the cache update of `jacobi_eigen_cach`
+(L10).
 
-## Cached Jacobi: the cache update used a stale maximum and an out-of-column index
+**Background.** For each column `m >= 1`, `maxima[m - 1]` stores the row of
+the largest-magnitude entry above the diagonal. A rotation at `(j, k)`
+changes only rows and columns `j` and `k`, so the cache is refreshed with a
+few comparisons against `biggest`, the magnitude of the pivot just rotated:
+every unrotated entry is at most that large.
 
-**Where:** `src/lin_alg/jacobi.rs`, the cache update loop of `jacobi_eigen_cach`
-(layer L10, 2026-10-18).
-
-**Background.** The cached solver keeps, for every column `m >= 1` of the packed
-symmetric matrix, the row `maxima[m - 1]` of the entry of largest magnitude among the
-rows `0..m`. After a rotation at the pivot `(j, k)` only rows and columns `j` and `k`
-change, so the cache is refreshed column by column with a few comparisons instead of a
-full rescan. The refresh compares the rotated entries against `biggest`, meant to be the
-magnitude of the pivot just rotated: every entry that was not rotated is at most that
-large, so if the cached entry still has magnitude at least `biggest` after the rotation,
-only the rotated rows can beat it.
-
-**What was wrong (1): stale `biggest`.** The rotation returns the magnitude of the
-pivot it annihilated, but the solver stored that value in `biggest_new` and copied it
-into `biggest` only at the *next* rotation:
-
-    (eigenvals, eigenvects, biggest) = (eigenvals_new, eigenvects_new, biggest_new);
-    (eigenvals_new, eigenvects_new, biggest_new) = jacobi_rot(eigenvals, eigenvects, dim, k, j);
-
-So during the cache update after rotation `t`, `biggest` held the pivot magnitude of
-rotation `t - 1`. A rotation can make an off-diagonal entry up to `sqrt 2` times larger
-than the previous maximum, so the stale value could be smaller than the true bound on
-the unrotated entries, and the "cached entry still dominates" shortcut could then keep a
+**Bug (a): stale `biggest`.** The rotation's return value went into
+`biggest_new` and reached `biggest` only at the next rotation. The update
+after rotation `t` therefore used the pivot of rotation `t - 1`. Rotations
+can grow off-diagonal entries by up to `sqrt 2`, so the cache could keep a
 row that was no longer maximal.
 
-**What was wrong (2): out-of-column index.** The last branch of the update,
+**Bug (b): out-of-column read.** The last branch compared the entries at
+`m(m+1)/2 + j` and `m(m+1)/2 + k`, which belong to column `m` only when
+`j < k < m`. The branch was also reached for `j < m < k`, where it read a
+later column and could cache the row `k >= m`. The next pivot search then
+called `jacobi_rot` with its indices in the wrong order, which panics.
 
-    } else if |A[m(m+1)/2 + j]| > |A[m(m+1)/2 + k]| { *i = j } else { *i = k }
+**How Verus exposed it.** `jacobi_rot` requires `j < k`, and the invariant
+says `maxima[m - 1]` is a maximal row `< m` of column `m`. Proving this
+needs `biggest` to bound every unrotated entry, which the stale value does
+not, and the last branch cannot be proved for `m < k`. Random tests of the
+original code confirmed both: invalid caches in a few hundred of 2000 runs,
+and crashes from rotations with `j >= k`.
 
-reads the entries `(j, m)` and `(k, m)` of column `m`, which is only correct when
-`j < k < m`. The branch is also reached when `j < m < k` (and, with a tie, when
-`m < j`). Then `m(m+1)/2 + k` lies in a later column, the comparison is meaningless, and
-the cache may receive the row index `k >= m`, which is not a row of column `m`. The next
-pivot search then reads the same wrong position and can select `(k, m)` with `k > m` as
-the pivot, calling `jacobi_rot` with the pivot indices in the wrong order. The original
-`jacobi_rot` panics in that case (`split_at_mut` / slice range out of bounds).
+**Fix.** `biggest` is the value returned by the latest `jacobi_rot`. The
+last branch is split by the position of `m`: for `k < m` compare both
+rotated entries; for `j < m < k` only row `j` changed, so it replaces the
+cached row only if it is now larger; for `m < j` the column is unchanged.
+The regression test `test_jacobi_cach_cache_update` (`src/sdp_tests.rs`)
+crashes the original solver.
 
-**How Verus exposed it.** `jacobi_rot` requires `j < k`, and the loop invariant of the
-solver states that `maxima[m - 1]` is a maximal row `< m` of column `m`. Proving the
-invariant through the update loop requires, for the "cached entry still dominates"
-branches, that `biggest` bounds every unrotated entry of the matrix *before the last
-rotation*; the stale value gives no such bound. The last branch could not be proved at
-all for `m < k`, since `m(m+1)/2 + k` is not the packed index of an entry of column `m`.
-An instrumented run of the original code on random symmetric matrices (orders 3 to 10)
-confirmed both: invalid caches after a few hundred of 2000 runs, and dozens of rotations
-called with `j >= k`, which crash. The matrix of `test_jacobi_cach_cache_update` in
-`src/sdp_tests.rs` crashes the original solver.
+## 3. No PSD check for single-variable problems
 
-**Fix.** `biggest` is now the value returned by the last `jacobi_rot` call (the pivot
-magnitude of the matrix just rotated; `biggest_new` is gone). The last branch is split:
-for `k < m` it compares the two rotated entries as before; for `j < m < k` only row `j`
-was rotated, and it replaces the cached row only if it now exceeds the cached entry; for
-`m < j` the column is unrotated and the cache is kept. The verified invariant states that
-after the update every `maxima[m - 1]` is a maximal row of column `m`, and the pivot
-search then returns a position of maximal off-diagonal magnitude. `cargo test` passes,
-including the new regression test.
+**Where:** `src/sdp_altdir.rs`, the block list `psd_blocks` that
+`psd_block_check` examines before returning a solution (L17).
 
-## The solver never checked positive semidefiniteness for single-variable problems
+**Bug.** `psd_blocks` was built from the LMI and user-variable block sizes.
+Without LMIs both lists are empty, so the check was vacuously true. The
+solver could return, and record as best feasible, an iterate that is not
+PSD, although `Z >= 0` is a constraint of the standard form.
 
-**Where:** `src/sdp_altdir.rs`, the list `psd_blocks` of diagonal blocks that
-`psd_block_check` examines before `sdpad` returns a solution (layer L17,
-2026-10-19).
+**How Verus exposed it.** The setup contract says `psd_blocks` partitions
+the standard-form variable: the block sizes sum to the order of `Z`. In the
+no-LMI case there was no block to list, contradicting that sum.
 
-**What was wrong.** The termination test accepts an iterate `Z` only when
-`psd_block_check(&prim_z, &psd_blocks)` succeeds, and `psd_blocks` was built from
-the LMI block sizes and the user-variable block sizes returned by
-`sdp_to_standard`. For a problem without LMIs, both lists are empty (the user's
-single variable *is* the standard-form variable), so `psd_blocks` was empty and
-the check was vacuously true. The solver could therefore return, and record as
-"best feasible", an iterate that is not positive semidefinite, although `Z >= 0`
-is a constraint of the standard form in that case too (test problem 5 relies on
-the returned `X` being PSD).
+**Fix.** `psd_block_list` returns the single block `(0, var_dim)` when there
+are no LMIs, matching the author's fix on `main`. The list is now built once
+before the main loop.
 
-**How Verus exposed it.** The contract of the setup (`sdpad_setup_ok`) states that
-`psd_blocks` lists a partition of the standard-form variable: consecutive diagonal
-blocks whose sizes sum to the order of `Z`. Writing that partition
-(`psd_partition` in `src/sdpad_spec.rs`) for the no-LMI case left no block to
-list, which contradicts the required sum and showed that nothing was checked.
+## 4. The dual solve used `I` instead of `I/2` for the zero constraints
 
-**What was changed.** `psd_block_list` now returns the single block `(0, var_dim)`
-when the total LMI block size is zero (no LMIs, hence no user-variable blocks
-either), so the whole variable is checked; this is the same condition as the
-author's own fix on `main`. The list is also built once before the main loop instead of on every
-iteration (it never changes). `cargo test` passes with the change.
+**Where:** `src/lin_alg/sym_matrix.rs`, `pos_def_solver_upperleft`, called
+by `dual_solve` in `src/sdp_altdir.rs` (L17).
 
+**Bug.** Each iteration solves `(A A*) y = rhs`, where `A` has the dense
+constraint rows followed by one row per off-block-diagonal entry that must
+vanish. Because the Frobenius product counts off-diagonal entries twice,
+`A*` places `y_k / 2` at a zero-pattern entry, so the Gram block of these
+rows is `I/2`. The solver passed their right-hand sides through unchanged,
+solving `(G, I) y = rhs` and halving their multipliers. In exact arithmetic
+these right-hand sides stay zero, but the eigensolver does not preserve
+block diagonality, so in practice they are small but nonzero, and the
+off-block entries of `Z` were damped by `1 - rho/2` instead of `1 - rho`.
 
-## The dual solve treated the zero-constraint Gram block as `I` instead of `I/2`
+**How Verus exposed it.** The verified contract `dual_solve_ok` stated what
+the code did, `y_bottom = rhs_bottom`, while the verified adjoint identity
+fixed the factor `1/2` in `A*`. A specification audit found the two agree
+with the `A A*` system only when `rhs_bottom = 0`.
 
-**Where:** `src/lin_alg/sym_matrix.rs`, `pos_def_solver_upperleft` (the tail of
-the block solve used by `dual_solve` in `src/sdp_altdir.rs`), found by a
-specification audit of layer L17 (2026-10-20).
-
-**What was wrong.** Each Wen-Goldfarb-Yin iteration solves the Gram system
-`(A A*) y = rhs` for the full constraint operator `A`, whose rows are the dense
-constraint matrices followed by one row per off-block-diagonal entry that must
-vanish. The dense Gram matrix `G` was formed with the Frobenius weights, and the
-adjoint `A*` placed `y_k / 2` at a zero-pattern entry, because the Frobenius
-product counts off-diagonal entries twice. Consequently the Gram block of the
-zero constraints is `I/2`: a zero row applied to its own adjoint gives `1/2`,
-and it is orthogonal to the dense rows (which live on the diagonal blocks) and
-to the other zero rows. The solver nevertheless passed the bottom right-hand
-side through unchanged, that is, it solved `(G, I) y = rhs`, so the multipliers
-of the zero constraints were half the correct values whenever their right-hand
-sides were nonzero. In exact arithmetic with an exact spectral projection they
-stay zero, but the implemented eigensolver does not preserve block diagonality,
-so in practice they are nonzero at roundoff level and the off-block entries of
-`Z` were damped by a factor `1 - rho/2` instead of `1 - rho`.
-
-**How it came to light.** The verified contract `dual_solve_ok` stated what the
-code did, `y_bottom = rhs_bottom`, while the verified adjoint identity
-`<A(X), y> = <X, A*(y)>_F` fixed the factor `1/2` in `A*`. An audit comparing
-the two against the `A A*` system named in the overview of `sdpad_spec.rs`
-found that they are consistent only when `rhs_bottom = 0`.
-
-**Fix.** The tail of `pos_def_solver_upperleft` returns `2 * rhs[t]`, and its
-contract, `dual_solve_ok` and the block-solve lemmas state the system
-`(G, I/2) y = rhs`. `cargo test` passes. The lemma `lemma_full_gram_block`
-(`src/lin_alg/constr_spec.rs`) then proves that `(G, I/2)` is the Gram matrix
-`A A*` of the full operator whenever the dense rows vanish on the zero pattern
-and the pattern is distinct, and `lemma_setup_gram_hypotheses`
-(`src/sdpad_spec.rs`) derives both facts from the standard form, so every
-iteration's multipliers verifiably solve the Gram system
-(`lemma_wgy_dual_gram`).
+**Fix.** `pos_def_solver_upperleft` returns `2 * rhs[t]` for these rows, and
+the contracts state the system `(G, I/2) y = rhs`. `lemma_wgy_dual_gram`
+now proves that every iteration's multipliers solve the `A A*` system of
+the full constraint operator.

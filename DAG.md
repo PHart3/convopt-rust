@@ -1,104 +1,104 @@
-L00 | Verus scaffolding and trusted exact-real model: spec view rv: f64 -> real over Verus's native SMT reals, sqrt_r axiom, trusted axioms giving vstd's f64 operator/comparison hooks exact-real meaning, literal axioms, assume_specification contracts for std f64 methods (abs sqrt recip signum max min mul_add hypot is_finite), inline wrappers for unsupported primitives (neg, infinities, abort); verified comparison functions; create TRUSTED_BASE.md |
+L00 | Trusted exact-real model: rv: f64 -> real, sqrt_r axiom, exact-real axioms for vstd's f64 operator and comparison hooks, literal axioms, assume_specification contracts for std f64 methods, inline wrappers for unsupported primitives (neg, pos_infinity, abort); verified comparison functions |
 deps: none |
 targets: float_equality, scaled_near_zero, pivot_below_positive_threshold, is_significantly_negative, residual_is_small, relative_residual_is_small |
 status: done
 
-L01 | Vector views (Seq<Real>) and basic vector/matrix constructors and operations |
+L01 | Vector views (Seq<real>) and basic vector and matrix operations |
 deps: L00 |
 targets: standard_basis, ident_mat, zero_mat, dot_prod, euclid_norm, euclid_distance, vect_add, vect_subt, scal_vect, negscal_vect, vect_add_scaled, matrix_add_diff, ident_mat_low_tri, vector_equality |
 status: done
 
-L02 | Packed symmetric-matrix view (packed index lemmas, (i,j) -> Real spec view, symmetry), column-major Matrix view, and basic symmetric-matrix operations |
+L02 | Packed symmetric view (packed index lemmas, symmetric entry view), column-major view, basic symmetric operations |
 deps: L01 |
 targets: max_diag_sym, frob_prod_sym, frob_norm_sym, frob_dist_sym, sym_mat_one_norm, ident_sym_mat, sym_mat_act, scale_off_diag, outer_prod_upper, outer_prod_single, outer_prod_single_scale, diag_of_sym_mat, sym_matrix_diag_block_map, sym_matrix_diag_block, sym_matrix_diagonal |
 status: done
 
-L03 | Reusable spec-level matrix algebra: product, transpose, identity, orthogonality (Q^T Q = I and Q Q^T = I), associativity/transpose lemmas, Frobenius product lemmas, eigenvalue definition and similarity invariance, PSD/order definitions (A >= -eps I) |
+L03 | Spec-level matrix algebra: product, transpose, identity, orthogonality, eigenvalues and their similarity invariance, the order A >= -eps I |
 deps: L02 |
-targets: (spec/proof only: mat_mul, mat_transpose, is_orthogonal, is_eigenvalue, lemma_similarity_preserves_eigenvalues, lemma_mul_assoc, lemma_transpose_mul) |
+targets: (spec/proof only: mmul, mtr, is_orthogonal, is_eigenvalue, psd_shifted, lemma_similarity_preserves_eigenvalues, lemma_mul_assoc, lemma_transpose_mul) |
 status: done
 
-L04 | Constraint operator and adjoint: constraint_action spec, constraint_lin_comb adjoint identity <constraint_action(X), y> = <X, constraint_lin_comb(y)>_F with off-diagonal 1/2 factors, Gram matrix, Q D Q^T reconstruction |
+L04 | Constraint operator A and adjoint A* with the off-diagonal factors 1/2: <A(X), y> = <X, A*(y)>_F; Gram matrix; Q D Q^T reconstruction |
 deps: L03 |
 targets: constraint_action, constraint_lin_comb, constraint_gram, diag_scale_gram |
 status: done
 
-L05 | Triangular and diagonal solvers: packed lower-triangular view, forward/back substitution solve L x = b and L^T x = b, diagonal solve, with division-safety contracts |
+L05 | Triangular and diagonal solvers: L x = b, L^T x = b, D x = b on the packed lower-triangular view, with division-safety contracts |
 deps: L02 |
 targets: forw_subst, back_subst, diag_solver |
 status: done
 
-L06 | LDLT factorization and positive-definite solvers: ldlt_decomp returns L D L^T = A with unit-lower L and all pivots d_i >= TOL * max(max_diag, 1); pos_def_solver solves A x = b; upper-left block solver |
+L06 | LDLT and positive-definite solvers: L D L^T = A with unit-lower L and pivots d_i >= TOL * max(max_diag, 1); A x = b; upper-left block solve |
 deps: L05, L03 |
 targets: ldlt_decomp, pos_def_solver, pos_def_solver_upperleft |
 status: done
 
-L07 | PSD block check: successful psd_block_check establishes each diagonal block B satisfies B >= -eps I with eps = 1e-9 * max(max_diag(B), 1), via shifted LDLT with positive pivots (x^T L D L^T x = sum d_k y_k^2 >= 0) |
+L07 | PSD block check: success gives B >= -eps I for each block, eps = 1e-9 * max(max_diag(B), 1), from the shifted LDLT with positive pivots |
 deps: L06 |
 targets: psd_block_check |
 status: done
 
-L08 | Shared Jacobi rotation core: for pivot (k, j) with j < k prove J^T J = I, J J^T = I, A' = J^T A J, annihilation of the (k, j) entry, symmetry preserved, eigenvalues preserved, eigenvector accumulation Q' = Q J, returned value is |old pivot entry| |
+L08 | Shared Jacobi rotation: for a pivot j < k, J^T J = J J^T = I, A' = J^T A J, A'_jk = 0, symmetry and eigenvalues preserved, Q' = Q J, returns |A_jk| |
 deps: L03 |
 targets: jacobi_rot |
 status: done
 
-L09 | Common eigensolver specification: predicate eigen_decomp_approx(A, Q, B, eps) with Q^T Q = I, A = Q B Q^T, B symmetric; max-off-diagonal stopping criterion lemma: max |B_ij| (i != j) < tol * max(1, max_diag) implies ||B - diag(B)||_F <= eps; rotation-sequence invariant lemma (orthogonality and similarity are preserved by each jacobi_rot) |
+L09 | Common eigensolver specification: invariant eigen_decomp_inv (Q orthogonal, A = Q B Q^T), preserved by every rotation; stopping predicate offdiag_below implies ||B - diag(B)||_F <= eps; shared contract eigensolver_ok |
 deps: L08 |
-targets: (spec/proof only: eigen_decomp_approx, lemma_offdiag_bound, lemma_rotation_preserves_decomp) |
+targets: (spec/proof only: eigen_decomp_inv, eigen_decomp_approx, offdiag_below, lemma_eigen_inv_step, lemma_converged_approx, eigensolver_ok) |
 status: done
 
-L10 | Cached Jacobi: index_max_in_col returns argmax index in column; cache invariant (maxima[n-1] is column index of row-n maximum); cache update after rotation is correct; selected pivot is the cached global maximum; jacobi_eigen_cach satisfies eigen_decomp_approx with the implementation's tolerance |
+L10 | Cached Jacobi: index_max_in_col returns a column argmax; maxima[m-1] is a maximal row of column m, kept correct by the update after each rotation; the pivot is a global off-diagonal maximum; eigensolver_ok |
 deps: L09 |
 targets: index_max_in_col, jacobi_eigen_cach |
 status: done
 
-L11 | Column-cyclic Jacobi: each sweep visits every pair 0 <= j < k < dim exactly once in column-cyclic order; every rotation uses jacobi_rot; final max-off-diagonal scan computes the true maximum; jacobi_eigen_cyc satisfies eigen_decomp_approx |
+L11 | Column-cyclic Jacobi: each sweep visits every pair 0 <= j < k < dim exactly once in column-cyclic order, each through jacobi_rot; eigensolver_ok |
 deps: L09 |
 targets: jacobi_eigen_cyc |
 status: done
 
-L12 | PSD spectral operations via the common eigensolver interface: poseigendecomp selects eigenpairs with lambda > 0, negeigendecomp selects lambda < -1e-8 * scale; outputs are the selected columns of Q and diagonal of B; reconstruction diag_scale_gram(vals, vects) = sum lambda_i q_i q_i^T; positivity of selected values gives PSD reconstruction |
+L12 | Spectral operations through eigensolver_ok: poseigendecomp keeps B_kk > 0, negeigendecomp keeps B_kk < -1e-8 * scale; the reconstruction equals Q diag(masked diag(B)) Q^T, PSD for the positive part |
 deps: L10, L11, L04 |
 targets: poseigendecomp, negeigendecomp |
 status: done
 
-L13 | Gaussian elimination: row-echelon invariants, partial-pivot selection correctness (chosen pivot has maximal magnitude in remaining rows of the column), tolerance-based skip rule, row operations preserve row space / solution set, rank and consistency outputs |
+L13 | Gaussian elimination: echelon invariants, partial-pivot selection, tolerance-based skip rule, solution set preserved, rank and consistency outputs |
 deps: L02 |
 targets: gauss_elim |
 status: done
 
-L14 | Constraint reduction: linear_remove_redundant_sym returns the first rank rows of the echelon form, each divided by the Frobenius norm of its symmetric matrix (positive when eps = TOL * max|entry| > 0 and the system is solvable); every solution of the input solves the reduced system, and every solution of the reduced system satisfies each dropped row of the echelon form up to a residual bounded by an explicit multiple of eps (from skipped_bounded of L13); the inconsistency panic is an abort |
+L14 | Constraint reduction: the first rank echelon rows, each divided by its Frobenius norm; input solutions solve the reduced system; reduced solutions satisfy each dropped row up to a residual bounded by a multiple of eps; inconsistency aborts |
 deps: L13 |
 targets: linear_remove_redundant_sym |
 status: done
 
-L15 | User-facing symmetric-map representation (MatrixSym) and composition with diagonal-block embedding: flattening, diagonal-block composition, and helper constructors |
+L15 | User-facing symmetric maps (MatrixSym), flattening, diagonal-block embeddings, helper constructors |
 deps: L02 |
 targets: matrixsym_flatten, matrix_diagonal_mult_sym, mat_sym_diagonal_mult_sym, mk_symmap_real, sym_matrix_trace, sym_matrix_scale, sym_matrix_zero, sym_matrix_proj, sym_matrix_add, mk_symmap, zero_symmap, ident_symmap |
 status: done
 
-L16 | Standard-form conversion: sdp_to_standard preserves objective (C(Z_1..Z_n) = <obj_sum, Z>), equality constraints, LMI constraints (block B_i = H_i(...) - M_i on upper triangle), zero-pattern constraints forcing block-diagonal form, and variable reconstruction Z_i = B_{s+2i-1} - B_{s+2i}; both check_constraints branches |
+L16 | Standard-form conversion: objective, equality rows, LMI rows (B_i = H_i(..) - M_i on the upper triangle), zero pattern, and reconstruction Z_i = B_{s+2i-1} - B_{s+2i}; both check_constraints branches |
 deps: L15, L14 |
 targets: sdp_to_standard |
 status: done
 
-L17 | Solver linear-system setup: Frobenius-weighted objective (scale_off_diag), Gram matrix of constraints, regularized Gram solve with relative-residual contract, psd_blocks partition, initial iterates |
+L17 | Solver setup: Frobenius-weighted objective, Gram matrix, regularized Gram solve with relative-residual contract, PSD block partition, initial iterates; the dual solve is the A A* system of the full constraint operator |
 deps: L16, L04, L06 |
-targets: sdpad (setup section) |
+targets: sdpad_setup, dual_solve, psd_block_list, initial_iterates |
 status: done
 
-L18 | Wen-Goldfarb-Yin iteration: formalize the executable iteration spec (y from (A A^*) y = A(C - S) + penalty (b - A(Z)); W = C - A^*(y) - penalty Z; S = Pi_pos(W) via poseigendecomp thresholds; Z <- (1 - step) Z + (step / penalty)(S - W); penalty updates) and prove each executable iteration matches it |
+L18 | Wen-Goldfarb-Yin iteration: (A A*) y = A(C - S) + mu (b - A(Z)); V = C - A*(y) - mu Z; S' = positive part of V via poseigendecomp; Z' = (1 - rho) Z + (rho / mu)(S' - V); penalty update |
 deps: L17, L12, L07 |
-targets: sdpad (iteration section) |
+targets: wgy_update, penalty_update |
 status: done
 
-L19 | Residuals and KKT quantities: primal residual pinf, dual residual dinf, objective values, duality gap, delta, feasibility check, stagnation/best-solution bookkeeping, final result reconstruction; correspondence with mathematical definitions and tolerance contracts |
+L19 | Residuals and KKT quantities: pinf, dinf, objective values, gap, delta, feasibility check, stagnation and best-solution bookkeeping, solution read-out; loop outcome over a ghost trajectory from the initial iterates |
 deps: L18 |
-targets: sdpad (termination section) |
+targets: kkt_quantities, read_solution, sdpad_loop |
 status: done
 
-L20 | Final audit: full-crate verification, cargo build/test pass, TRUSTED_BASE.md audit of every external_body/assume, VERIFICATION_PROGRESS.md final counts |
+L20 | Final audit: full-crate verification, cargo build and test, trusted-base audit, final counts |
 deps: L19 |
 targets: (all) |
 status: done
