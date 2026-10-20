@@ -81,6 +81,74 @@ pub open spec fn row_subtracted(m: Seq<real>, m2: Seq<real>, row_dim: int, col_d
                 == if i == j { cm_entry(m, row_dim, j, c) - piv * cm_entry(m, row_dim, p, c) } else { cm_entry(m, row_dim, i, c) }
 }
 
+/* ---------- zero columns ---------- */
+
+/// Column c of m is zero.
+pub open spec fn col_zero(m: Seq<real>, row_dim: int, c: int) -> bool {
+    forall|i: int| 0 <= i < row_dim ==> #[trigger] cm_entry(m, row_dim, i, c) == 0.0real
+}
+
+/// Every zero column of a is a zero column of b (the row operations never fill a zero column).
+pub open spec fn zero_cols_kept(a: Seq<real>, b: Seq<real>, row_dim: int, col_dim: int) -> bool {
+    forall|c: int| 0 <= c < col_dim && col_zero(a, row_dim, c) ==> #[trigger] col_zero(b, row_dim, c)
+}
+
+pub proof fn lemma_zero_cols_refl(a: Seq<real>, row_dim: int, col_dim: int)
+    ensures
+        zero_cols_kept(a, a, row_dim, col_dim),
+{
+}
+
+pub proof fn lemma_zero_cols_trans(a: Seq<real>, b: Seq<real>, c: Seq<real>, row_dim: int, col_dim: int)
+    requires
+        zero_cols_kept(a, b, row_dim, col_dim),
+        zero_cols_kept(b, c, row_dim, col_dim),
+    ensures
+        zero_cols_kept(a, c, row_dim, col_dim),
+{
+    assert forall|k: int| 0 <= k < col_dim && col_zero(a, row_dim, k) implies #[trigger] col_zero(c, row_dim, k) by {
+        assert(col_zero(b, row_dim, k));
+    }
+}
+
+/// Exchanging two rows keeps zero columns.
+pub proof fn lemma_swap_zero_cols(m: Seq<real>, m2: Seq<real>, row_dim: int, col_dim: int, r1: int, r2: int)
+    requires
+        0 <= r1 < row_dim,
+        0 <= r2 < row_dim,
+        rows_swapped(m, m2, row_dim, col_dim, r1, r2),
+    ensures
+        zero_cols_kept(m, m2, row_dim, col_dim),
+{
+    assert forall|c: int| 0 <= c < col_dim && col_zero(m, row_dim, c) implies #[trigger] col_zero(m2, row_dim, c) by {
+        assert forall|i: int| 0 <= i < row_dim implies #[trigger] cm_entry(m2, row_dim, i, c) == 0.0real by {
+            let src = if i == r1 { r2 } else if i == r2 { r1 } else { i };
+            assert(cm_entry(m2, row_dim, i, c) == cm_entry(m, row_dim, src, c));
+            assert(cm_entry(m, row_dim, src, c) == 0.0real);
+        }
+    }
+}
+
+/// Subtracting a multiple of a row keeps zero columns.
+pub proof fn lemma_row_sub_zero_cols(m: Seq<real>, m2: Seq<real>, row_dim: int, col_dim: int, j: int, p: int, piv: real)
+    requires
+        0 <= j < row_dim,
+        0 <= p < row_dim,
+        row_subtracted(m, m2, row_dim, col_dim, j, p, piv),
+    ensures
+        zero_cols_kept(m, m2, row_dim, col_dim),
+{
+    assert forall|c: int| 0 <= c < col_dim && col_zero(m, row_dim, c) implies #[trigger] col_zero(m2, row_dim, c) by {
+        assert forall|i: int| 0 <= i < row_dim implies #[trigger] cm_entry(m2, row_dim, i, c) == 0.0real by {
+            assert(cm_entry(m, row_dim, i, c) == 0.0real);
+            assert(cm_entry(m, row_dim, p, c) == 0.0real);
+            if i == j {
+                assert(cm_entry(m2, row_dim, i, c) == 0.0real - piv * 0.0real);
+            }
+        }
+    }
+}
+
 /// Exchanging two rows preserves the solution set.
 pub proof fn lemma_swap_same_solutions(m: Seq<real>, m2: Seq<real>, row_dim: int, col_dim: int, r1: int, r2: int)
     requires

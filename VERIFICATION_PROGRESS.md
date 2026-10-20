@@ -43,7 +43,7 @@ All 21 layers (L00-L20) are done.
 
 ## Verified-function count
 
-Last full run: **868 verified, 0 errors** (about 27 s wall clock, 15 threads;
+Last full run: **902 verified, 0 errors** (about 29 s wall clock, 15 threads;
 `--time` reports no slow proof; no `rlimit` is raised anywhere).
 
 Per module (Verus counts executable functions, lemmas, recursive spec
@@ -54,31 +54,32 @@ functions and loop bodies; `external_body` items are not counted):
 | `trusted` | 0 | trusted items only (not counted) |
 | `real_spec` | 21 | L00 |
 | `lin_alg::vec_spec` | 23 | L01 |
-| `lin_alg::sym_spec` | 55 | L02, L03 |
+| `lin_alg::sym_spec` | 60 | L02, L03 |
 | `lin_alg::mat_spec` | 76 | L03, L07, L12 |
-| `lin_alg::constr_spec` | 26 | L04 |
+| `lin_alg::constr_spec` | 30 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
 | `lin_alg::ldlt_spec` | 13 | L06, L07 |
 | `lin_alg::jacobi_spec` | 61 | L08 |
 | `lin_alg::eigen_spec` | 21 | L09-L11 |
 | `lin_alg::spectral_spec` | 10 | L12 |
-| `lin_alg::gauss_spec` | 25 | L13 |
-| `lin_alg::reduce_spec` | 27 | L14 |
+| `lin_alg::gauss_spec` | 29 | L13 |
+| `lin_alg::reduce_spec` | 26 | L14 |
 | `lin_alg::matrix` | 47 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
 | `lin_alg::sym_matrix` | 168 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 41 | L08, L10-L12 |
-| `sdp_spec` | 62 | L16 |
-| `sdpad_spec` | 24 | L17-L19 |
-| `sdp` | 113 | L15, L16 |
+| `sdp_spec` | 70 | L16 |
+| `sdpad_spec` | 37 | L17-L19 |
+| `sdp` | 114 | L15, L16 |
 | `sdp_altdir` | 38 | L17-L19 |
-| **total** | **868** | |
+| **total** | **902** | |
 
 Executable functions verified (contract summary):
 
 - **Vectors and dense matrices** (`matrix.rs`, 15): constructors, dot product,
   norms, linear combinations, equality, and `gauss_elim` (solution set preserved,
-  echelon form with tolerance-based pivot/skip rules, `rank >= 1` for nonzero input).
+  zero columns kept, echelon form with tolerance-based pivot/skip rules, `rank >= 1`
+  for nonzero input).
 - **Comparisons** (`comparison.rs`, 6): exact-real reading of each tolerance test
   (e.g. `scaled_near_zero(x, s, tol)` iff `|x| < tol * s`).
 - **Packed symmetric matrices** (`sym_matrix.rs`, 36): basic operations;
@@ -116,6 +117,16 @@ Executable functions verified (contract summary):
   infeasibilities; the returned solution is read from the iterate at index
   `iterate` of the trajectory, its value is the user's objective, the recorded
   deltas are those of the iterates, and the termination reason fixes the index).
+- **Gram system** (`constr_spec.rs`, `sdp_spec.rs`, `sdpad_spec.rs`): `full_gram_view`
+  is the Gram matrix `A A*` of the full constraint operator (dense rows, then zero
+  rows), entry `(k, l) = A(A*(e_l))_k`; `lemma_full_gram_block` proves it equal to
+  the block matrix `(G, I/2)` when the dense rows vanish on the zero pattern and the
+  pattern is distinct; `lemma_setup_gram_hypotheses` derives both from the standard
+  form (`lemma_std_rows_vanish`: the stacked rows read the variable through its
+  diagonal blocks) through the elimination (zero columns kept) and the reduction;
+  `lemma_wgy_dual_gram` concludes that the multipliers of every iteration solve
+  `(A A*) y = mu (b - A(Z)) + A(C - S)`, less the regularization shift on the dense
+  rows (`reg_rhs_r`).
 
 ## Specification architecture
 
@@ -243,18 +254,18 @@ the installed Verus (0.2026.08.23).
 
 ## Open issues
 
-A specification audit (2026-10-20) reported two gaps, both addressed.
+None. A specification audit (2026-10-20) reported two gaps, both closed.
 `outcome_ok` required only that the returned state be some valid update of
 some predecessor; it now indexes into the ghost trajectory from the initial
 iterates. The dual solve passed the zero-constraint right-hand sides through
-although their Gram block is `I/2`; the code now doubles them and
-`dual_solve_ok` states the system `(G, I/2) y = rhs`. Still open from that
-finding: the proof that `(G, I/2)` is the Gram matrix of the full constraint
-operator (dense rows followed by zero rows). It needs that the dense rows
-vanish on the zero pattern, which follows from `std_rows_ok` for the stacked
-rows but must be carried through `gauss_elim` (zero columns stay zero, a new
-invariant of L13) and the reduction (L14) for the `check` case, plus a
-definition of the full Gram matrix as `A(A*(e_l))_k` in L04.
+although their Gram block is `I/2`; the code now doubles them,
+`dual_solve_ok` states the system `(G, I/2) y = rhs`, and the Gram-system
+theorem (`lemma_wgy_dual_gram`) proves that this is the `A A*` system of the
+full constraint operator. Closing the second gap moved the packed-index
+inverse (`pk_unpack`, `lemma_pk_idx_injective`, `lemma_pk_idx_surjective`)
+into `sym_spec.rs` (L02) and wrapped the objective-shape fact of
+`standard_lmi` in `lemma_objective_shapes` after the full-crate proof became
+unstable (it verified in isolation).
 
 The final audit (L20) found no trusted construct outside
 `src/trusted.rs`, no raised `rlimit`, no slow proof, and no warning from

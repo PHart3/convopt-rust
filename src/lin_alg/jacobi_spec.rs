@@ -25,7 +25,7 @@ use crate::lin_alg::sym_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::mat_spec::*;
 #[cfg(verus_keep_ghost)]
-use crate::lin_alg::constr_spec::lemma_pk_idx_injective;
+use crate::lin_alg::sym_spec::lemma_pk_idx_injective;
 
 verus! {
 

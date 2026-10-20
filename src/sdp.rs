@@ -252,6 +252,26 @@ pub open spec fn sdp_lmi_input_ok(sdp: &SDP) -> bool {
     &&& (pk_len(sd) + 1) * (lmi_rows(bd) + m + 1) <= usize::MAX
 }
 
+/// The objective maps have the shapes of their variables (sdp_lmi_input_ok), stated on the
+/// returned variable orders.
+proof fn lemma_objective_shapes(sdp: &SDP, symm_dims: Seq<usize>)
+    requires
+        sdp_lmi_input_ok(sdp),
+        dims_of(symm_dims) == vdims_r(sdp.lmi@, n_vars(sdp)),
+    ensures
+        forall|n: int| 0 <= n < sdp.objective@.len()
+            ==> part_shape((#[trigger] sdp.objective@[n])@, symm_dims[n] as int) && symm_dims[n] >= 1,
+{
+    let nv = n_vars(sdp);
+    let vd = vdims_r(sdp.lmi@, nv);
+    assert forall|n: int| 0 <= n < sdp.objective@.len()
+        implies part_shape((#[trigger] sdp.objective@[n])@, symm_dims[n] as int) && symm_dims[n] >= 1 by {
+        assert(part_shape(sdp.objective@[n]@, vd[n]));
+        assert(vd[n] >= 1);
+        assert(dims_of(symm_dims)[n] == vd[n]);
+    }
+}
+
 /// The single-variable case (no LMI): one objective map and at most one constraint map, both of
 /// the variable's order d (the number of columns of the objective map); the stacked constraint
 /// system fits in usize.
@@ -1641,12 +1661,8 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
             block_offset += block_size;
         }
         proof {
-            assert forall|n: int| 0 <= n < sdp.objective@.len()
-                implies part_shape((#[trigger] sdp.objective@[n])@, symm_dims@[n] as int) && symm_dims@[n] >= 1 by {
-                assert(part_shape(sdp.objective@[n]@, vd[n]));
-                assert(vd[n] >= 1);
-                assert(vd[n] == symm_dims@[n] as int);
-            }
+            assert(n_maps(lmis@) == nv);
+            lemma_objective_shapes(sdp, symm_dims@);
         }
         let obj_sum = objective_sum(&sdp.objective, &symm_dims, block_size_sum, total_dim);
         let constr_len = sdp.constraint.1.len();

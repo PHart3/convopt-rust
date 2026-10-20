@@ -13,14 +13,16 @@
 //   - every iteration solves the block system (G, I/2) y = b, either directly
 //     (reduced constraints) or after regularizing G by TOL * max(max_i |G_ii|, 1)
 //     on the diagonal, with the residual of the unregularized system bounded
-//     relative to the data (`dual_solve_ok`); I/2 is the Gram block of the zero
-//     constraints, whose adjoint entries carry the factor 1/2;
+//     relative to the data (`dual_solve_ok`); (G, I/2) is the Gram matrix A A* of
+//     the full constraint operator (`lemma_setup_full_gram`): the zero constraints
+//     have Frobenius norm 1/2 and are orthogonal to the dense rows, which vanish on
+//     the zero pattern (`lemma_setup_gram_hypotheses`);
 //   - the initial iterates are Z = I and S = 0 (`initial_iterates_ok`).
 //
 // Each iteration then performs the Wen-Goldfarb-Yin update for the penalty
 // mu and the step rho (sdpad.pdf, (7), (9), (10), (26)):
 //
-//   y   solves  (A A*) y = A(C - S) + mu (b - A(Z))      (`wgy_rhs_r`, `dual_solve_ok`)
+//   y   solves  (A A*) y = A(C - S) + mu (b - A(Z))      (`wgy_rhs_r`, `dual_solve_ok`, `lemma_wgy_dual_gram`)
 //   V   = C - A*(y) - mu Z                               (`is_dual_slack`, `is_shifted_slack`)
 //   S'  = V_+ = Q diag(lambda_+) Q^T                     (`is_pos_part`)
 //   Z'  = (1 - rho) Z + (rho / mu) (S' - V)              (`is_primal_step`)
@@ -67,7 +69,7 @@ use crate::lin_alg::mat_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
-use crate::lin_alg::ldlt_spec::{blocks_fit, block_psd_ok};
+use crate::lin_alg::ldlt_spec::{blocks_fit, block_psd_ok, lemma_block_half_solve};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::reduce_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -279,21 +281,6 @@ pub open spec fn block_list_ok(list: Seq<(usize, usize)>, bs: Seq<int>) -> bool 
     &&& list.len() == bs.len()
     &&& forall|j: int| 0 <= j < bs.len()
             ==> (#[trigger] list[j]).0 as int == sum_upto(bs, j) && list[j].1 as int == bs[j]
-}
-
-/// Every entry of block_sizes(bd, vd) is one of the given sizes (and nonnegative when they are).
-pub proof fn lemma_block_sizes_entry(bd: Seq<int>, vd: Seq<int>, j: int)
-    requires
-        0 <= j < bd.len() + 2 * vd.len(),
-    ensures
-        j < bd.len() ==> block_sizes(bd, vd)[j] == bd[j],
-        j >= bd.len() ==> 0 <= (j - bd.len()) / 2 < vd.len() && block_sizes(bd, vd)[j] == vd[(j - bd.len()) / 2],
-{
-    if j >= bd.len() {
-        let i = j - bd.len();
-        lemma_fundamental_div_mod(i, 2);
-        lemma_mod_bound(i, 2);
-    }
 }
 
 /// A block list of a partition of the dim x dim variable fits the packed matrix of order dim.
@@ -908,6 +895,241 @@ pub open spec fn penalty_step_ok(mu0: real, ratio: real, ip0: int, id0: int, mu1
 pub open spec fn penalty_update_ok(mu0: real, pinf: real, dinf: real, ip0: int, id0: int, mu1: real, ip1: int, id1: int) -> bool {
     exists|ratio: real| (dinf != 0.0real ==> ratio == pinf / dinf)
         && #[trigger] penalty_step_ok(mu0, ratio, ip0, id0, mu1, ip1, id1)
+}
+
+
+/* ---------- the Gram system of the constraint operator ---------- */
+
+/// The packed part of the returned augmented system is the constraint matrix.
+pub proof fn lemma_result_aug_entry(mat: Seq<f64>, point: Seq<f64>, rows: int, cols: int, a: int, t: int)
+    requires
+        mat.len() == rows * cols,
+        0 <= a < rows,
+        0 <= t < cols,
+    ensures
+        cm_entry(result_aug(mat, point, rows), rows, a, t) == constr_entry(rvs(mat), rows, a, t),
+{
+    lemma_cm_idx_bound(rows, a, t, cols);
+    assert(cols * rows == rows * cols) by (nonlinear_arith);
+    assert((rvs(mat) + rvs(point.subrange(0, rows)))[cm_idx(rows, a, t)] == rvs(mat)[cm_idx(rows, a, t)]);
+}
+
+/// A zero column of the stacked system is a zero column of its reduction: the elimination
+/// keeps zero columns and the kept rows are only rescaled.
+pub proof fn lemma_reduced_zero_col(a0: Seq<real>, red: Seq<real>, dim: int, total: int, rows: int, t: int)
+    requires
+        dim >= 0,
+        total >= 0,
+        rows >= 0,
+        a0.len() == total * red_col_dim(dim),
+        red.len() == rows * red_col_dim(dim),
+        reduced_from(a0, red, dim),
+        0 <= t < red_col_dim(dim),
+        col_zero(a0, total, t),
+    ensures
+        col_zero(red, rows, t),
+{
+    let cd = red_col_dim(dim);
+    lemma_pk_col_start_monotone(0, dim);
+    let e = choose|e: Seq<real>| reduced_system(a0, e, red, dim);
+    let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(a0, e, red, dim, pivots);
+    let rd = a0.len() as int / cd;
+    assert(a0.len() as int == cd * total) by (nonlinear_arith)
+        requires a0.len() as int == total * cd;
+    lemma_div_multiples_vanish(total, cd);
+    assert(rd == total);
+    let rank = pivots.len() as int;
+    assert(rank == rows) by (nonlinear_arith)
+        requires cd >= 1, cd * rank == rows * cd;
+    assert(col_zero(e, rd, t));
+    assert forall|i: int| 0 <= i < rows implies #[trigger] cm_entry(red, rows, i, t) == 0.0real by {
+        let sc = row_scale_r(e, rd, dim, i);
+        assert(cm_entry(red, rank, i, t) == cm_entry(e, rd, i, t) / sc);
+        assert(cm_entry(e, rd, i, t) == 0.0real);
+        assert(0.0real / sc == 0.0real) by (nonlinear_arith)
+            requires sc > 0.0real;
+    }
+}
+
+/// The solver's constraint operator satisfies the hypotheses of the block Gram form: the
+/// zero-pattern positions are distinct (zeros_ok) and the dense rows vanish on them (the
+/// stacked rows read the variable through its diagonal blocks, and the reduction keeps zero
+/// columns); without LMIs there are no zero constraints.
+pub proof fn lemma_setup_gram_hypotheses(sdp: &SDP, check: bool, s: &SdpadSetup)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+    ensures
+        distinct_zero_list(s.zeros@),
+        rows_vanish_on_zeros(rvs(s.mat_dense@), s.c_len as int, s.zeros@),
+{
+    let d = s.var_dim as int;
+    let cols = pk_len(d);
+    let nz = s.zeros@.len() as int;
+    let rows = s.c_len as int;
+    let list = s.zeros@;
+    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
+        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let res = (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims);
+    if sdp.lmi@.len() == 0 {
+        assert(nz == 0);
+    } else {
+        let nv = n_vars(sdp);
+        let bd = bdims_r(sdp.lmi@);
+        let vd = vdims_r(sdp.lmi@, nv);
+        let sd = std_dim(bd, vd);
+        let bs = block_sizes(bd, vd);
+        let m = sdp.constraint.1@.len() as int;
+        let total = lmi_rows(bd) + m;
+        assert(d == sd);
+        assert forall|i: int| 0 <= i < bd.len() implies #[trigger] bd[i] >= 0 by {
+            assert(bd[i] == dims_of(s.block_dims@)[i]);
+        }
+        assert forall|n: int| 0 <= n < vd.len() implies #[trigger] vd[n] >= 0 by {
+            assert(vd[n] == dims_of(s.symm_dims@)[n]);
+        }
+        assert(zeros_ok(list, bs, sd));
+        let aug = choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
+            && (if check { reduced_from(aug, result_aug(s.mat_dense@, s.point@, rows), sd) } else { result_aug(s.mat_dense@, s.point@, rows) == aug });
+        lemma_pk_col_start_monotone(0, d);
+        lemma_sq_sum_upto_monotone(bd, 0, bd.len() as int);
+        lemma_reduced_rows(aug, s.mat_dense@, s.point@, rows, total, d, check);
+        assert forall|a: int, q: int| 0 <= a < rows && 0 <= q < nz
+            implies #[trigger] constr_entry(rvs(s.mat_dense@), rows, a, zero_idx(list, q)) == 0.0real by {
+            let (r0, c0) = (list[q].0 as int, list[q].1 as int);
+            let t0 = pk_idx(r0, c0);
+            assert(in_zero_region(bs, r0, c0));
+            lemma_pk_idx_bound(r0, c0, d);
+            lemma_std_rows_vanish(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug, r0, c0);
+            assert(col_zero(aug, total, t0));
+            let red = result_aug(s.mat_dense@, s.point@, rows);
+            assert(red.len() == rows * cols + rows);
+            assert(rows * cols + rows == rows * (cols + 1)) by (nonlinear_arith);
+            if check {
+                lemma_reduced_zero_col(aug, red, d, total, rows, t0);
+            } else {
+                assert(rows == total);
+            }
+            assert(cm_entry(red, rows, a, t0) == 0.0real);
+            lemma_result_aug_entry(s.mat_dense@, s.point@, rows, cols, a, t0);
+        }
+    }
+}
+
+/// The dense Gram block of the setup satisfies is_constraint_gram also without dense rows.
+pub proof fn lemma_setup_gram(sdp: &SDP, check: bool, s: &SdpadSetup)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+    ensures
+        is_constraint_gram(rvs(s.gram_small@), rvs(s.mat_dense@), s.c_len as int, s.var_dim as int),
+{
+    if s.c_len == 0 {
+        lemma_pk_col_start_zero();
+    }
+}
+
+/// The Gram matrix of the setup's constraint operator (dense rows, then zero rows) is the
+/// block matrix (G, I/2) of the dense Gram matrix and half the identity.
+pub proof fn lemma_setup_full_gram(sdp: &SDP, check: bool, s: &SdpadSetup)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+    ensures
+        meq(full_gram_view(rvs(s.mat_dense@), s.c_len as int, s.zeros@, s.var_dim as int),
+            block_half_view(sym_view(rvs(s.gram_small@)), s.c_len as int), s.point@.len() as int, s.point@.len() as int),
+{
+    lemma_setup_gram_hypotheses(sdp, check, s);
+    lemma_setup_gram(sdp, check, s);
+    lemma_full_gram_block(rvs(s.gram_small@), rvs(s.mat_dense@), s.c_len as int, s.zeros@, s.var_dim as int);
+}
+
+/// (A + s I) x = A x + s x on the leading dim rows.
+pub proof fn lemma_mat_vec_shift(a: MatF, s: real, dim: int, x: Seq<real>)
+    requires
+        dim >= 0,
+        x.len() == dim,
+    ensures
+        forall|i: int| 0 <= i < dim
+            ==> #[trigger] mat_vec(madd(a, mscale(s, mident())), dim, x)[i] == mat_vec(a, dim, x)[i] + s * x[i],
+{
+    let ms = madd(a, mscale(s, mident()));
+    assert forall|i: int| 0 <= i < dim
+        implies #[trigger] mat_vec(ms, dim, x)[i] == mat_vec(a, dim, x)[i] + s * x[i] by {
+        let f = |k: int| a(i, k) * x[k];
+        let g = |k: int| (s * mident()(i, k)) * x[k];
+        let h = |k: int| ms(i, k) * x[k];
+        assert forall|k: int| 0 <= k < dim implies #[trigger] h(k) == f(k) + g(k) by {
+            let (u, v, w) = (a(i, k), s * mident()(i, k), x[k]);
+            assert(h(k) == (u + v) * w);
+            assert((u + v) * w == u * w + v * w) by (nonlinear_arith);
+        }
+        lemma_sum_fn_add(f, g, h, dim as nat);
+        assert forall|k: int| 0 <= k < dim && k != i implies #[trigger] g(k) == 0.0real by {
+            assert(mident()(i, k) == 0.0real);
+        }
+        lemma_sum_fn_single(g, dim as nat, i);
+        assert(g(i) == (s * 1.0real) * x[i]);
+    }
+}
+
+/// The right-hand side of the Gram system actually satisfied by the regularized solve: b less
+/// the shift s y on the dense rows (b itself when there is no shift).
+pub open spec fn reg_rhs_r(g: Seq<real>, b: Seq<real>, c_len: int, check: bool, y: Seq<real>) -> Seq<real> {
+    Seq::new(b.len(), |t: int| b[t] - (if t < c_len { reg_shift_r(g, c_len, check) } else { 0.0real }) * y[t])
+}
+
+/// A solution of the block system of dual_solve solves the Gram system of the full constraint
+/// operator, up to the regularization shift on the dense rows: A A* y = b - s (y_top, 0).
+pub proof fn lemma_dual_solve_gram(g: Seq<real>, m: Seq<real>, list: Seq<(usize, usize)>, dim: int, c_len: int, check: bool, b: Seq<real>, y: Seq<real>)
+    requires
+        c_len >= 0,
+        dim >= 0,
+        m.len() == c_len * pk_len(dim),
+        is_constraint_gram(g, m, c_len, dim),
+        valid_zero_list(list, dim),
+        distinct_zero_list(list),
+        rows_vanish_on_zeros(m, c_len, list),
+        b.len() == c_len + list.len(),
+        dual_solve_ok(g, b, c_len, check, y),
+    ensures
+        mat_vec(full_gram_view(m, c_len, list, dim), b.len() as int, y) == reg_rhs_r(g, b, c_len, check, y),
+{
+    let n = b.len() as int;
+    let sh = reg_shift_r(g, c_len, check);
+    let bs = reg_rhs_r(g, b, c_len, check, y);
+    let yt = y.subrange(0, c_len);
+    let bt = b.subrange(0, c_len);
+    let gv = sym_view(g);
+    lemma_mat_vec_shift(gv, sh, c_len, yt);
+    assert forall|i: int| 0 <= i < c_len implies #[trigger] mat_vec(gv, c_len, yt)[i] == bs.subrange(0, c_len)[i] by {
+        assert(mat_vec(madd(gv, mscale(sh, mident())), c_len, yt)[i] == bt[i]);
+    }
+    assert(mat_vec(gv, c_len, yt) =~= bs.subrange(0, c_len));
+    assert forall|t: int| c_len <= t < n implies #[trigger] y[t] == 2.0real * bs[t] by {
+        assert(bs[t] == b[t] - 0.0real * y[t]);
+    }
+    lemma_block_half_solve(gv, c_len, n, y, bs);
+    lemma_full_gram_block(g, m, c_len, list, dim);
+    lemma_mat_vec_meq(full_gram_view(m, c_len, list, dim), block_half_view(gv, c_len), n, y);
+}
+
+/// The multipliers of every iteration solve the Gram system of the constraint operator:
+/// (A A*) y = mu (b - A(Z)) + A(C - S), less the regularization shift on the dense rows.
+pub proof fn lemma_wgy_dual_gram(sdp: &SDP, check: bool, s: &SdpadSetup, mu: real, rho: real, st0: &WgyState, st1: &WgyState)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+        wgy_update_ok(s, check, mu, rho, st0, st1),
+    ensures
+        ({
+            let rhs = wgy_rhs_r(mu, rvs(s.point@), setup_action_r(s, rvs(st0.prim_z@)),
+                setup_action_r(s, vsub_r(rvs(s.obj_frob@), rvs(st0.dual_s@))));
+            mat_vec(full_gram_view(rvs(s.mat_dense@), s.c_len as int, s.zeros@, s.var_dim as int), s.point@.len() as int, rvs(st1.dual_y@))
+                == reg_rhs_r(rvs(s.gram_small@), rhs, s.c_len as int, check, rvs(st1.dual_y@))
+        }),
+{
+    let rhs = wgy_rhs_r(mu, rvs(s.point@), setup_action_r(s, rvs(st0.prim_z@)),
+        setup_action_r(s, vsub_r(rvs(s.obj_frob@), rvs(st0.dual_s@))));
+    lemma_setup_gram_hypotheses(sdp, check, s);
+    lemma_setup_gram(sdp, check, s);
+    lemma_dual_solve_gram(rvs(s.gram_small@), rvs(s.mat_dense@), s.zeros@, s.var_dim as int, s.c_len as int, check, rhs, rvs(st1.dual_y@));
 }
 
 } // verus!

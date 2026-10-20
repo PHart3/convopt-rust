@@ -277,20 +277,6 @@ pub open spec fn is_constraint_gram(g: Seq<real>, m: Seq<real>, row_dim: int, di
 
 /* ---------- lemmas ---------- */
 
-/// Packed indices of distinct triangle positions are distinct.
-pub proof fn lemma_pk_idx_injective(r1: int, c1: int, r2: int, c2: int)
-    requires
-        0 <= r1 <= c1,
-        0 <= r2 <= c2,
-    ensures
-        pk_idx(r1, c1) == pk_idx(r2, c2) <==> (r1 == r2 && c1 == c2),
-{
-    if c1 < c2 {
-        lemma_pk_idx_bound(r1, c1, c2);
-    } else if c2 < c1 {
-        lemma_pk_idx_bound(r2, c2, c1);
-    }
-}
 
 /// The packed dot product of column n of the constraint matrix (the slice starting at lo = n * row_dim)
 /// with the leading row_dim multipliers is entry n of the linear combination of the rows.
@@ -535,6 +521,229 @@ pub proof fn lemma_gram_action(g: Seq<real>, m: Seq<real>, row_dim: int, dim: in
         assert(row_dot_r(m, row_dim, i, a_star) == sum_fn_r(flat, pk_len(dim) as nat));
     }
     assert(gy =~= ax);
+}
+
+
+/* ---------- the Gram matrix of the full operator ---------- */
+
+/// A*(y) as a packed vector of order dim.
+pub open spec fn adjoint_r(m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>, y: Seq<real>, dim: int) -> Seq<real> {
+    Seq::new(pk_len(dim) as nat, |t: int| adjoint_entry_r(m, row_dim, list, y, pk_unpack(t).0, pk_unpack(t).1))
+}
+
+/// adjoint_r satisfies the adjoint characterization.
+pub proof fn lemma_adjoint_r_ok(m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>, y: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+    ensures
+        is_constraint_adjoint(adjoint_r(m, row_dim, list, y, dim), dim, m, row_dim, list, y),
+{
+    let a = adjoint_r(m, row_dim, list, y, dim);
+    lemma_pk_col_start_monotone(0, dim);
+    assert forall|r: int, c: int| 0 <= r <= c < dim
+        implies #[trigger] a[pk_idx(r, c)] == adjoint_entry_r(m, row_dim, list, y, r, c) by {
+        lemma_pk_idx_bound(r, c, dim);
+        lemma_pk_unpack_idx(r, c);
+    }
+}
+
+/// Entry (k, l) of the Gram matrix A A* of the full operator (the dense rows followed by the
+/// zero-pattern rows): A(A*(e_l))_k.
+pub open spec fn full_gram_entry_r(m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>, dim: int, k: int, l: int) -> real {
+    let n = (row_dim + list.len()) as nat;
+    action_entry_r(m, row_dim, list, adjoint_r(m, row_dim, list, std_basis_r(l, n), dim), k)
+}
+
+/// The Gram matrix A A* of the full operator as an index function.
+pub open spec fn full_gram_view(m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>, dim: int) -> MatF {
+    |k: int, l: int| full_gram_entry_r(m, row_dim, list, dim, k, l)
+}
+
+/// The dense rows carry no coefficient on the zero pattern: M_a[r, c] = 0 for every listed (r, c).
+pub open spec fn rows_vanish_on_zeros(m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>) -> bool {
+    forall|a: int, q: int| 0 <= a < row_dim && 0 <= q < list.len()
+        ==> #[trigger] constr_entry(m, row_dim, a, zero_idx(list, q)) == 0.0real
+}
+
+/// The zero-pattern positions are pairwise distinct.
+pub open spec fn distinct_zero_list(list: Seq<(usize, usize)>) -> bool {
+    forall|q1: int, q2: int| 0 <= q1 < list.len() && 0 <= q2 < list.len() && q1 != q2
+        ==> #[trigger] list[q1] != #[trigger] list[q2]
+}
+
+/// The dense part of the adjoint of a unit multiplier: entry n of the combination of the dense
+/// rows with weights e_l is M_l[n] when l is a dense row and 0 otherwise.
+pub proof fn lemma_col_comb_basis(m: Seq<real>, row_dim: int, l: int, n: int, len: nat)
+    requires
+        0 <= row_dim <= len,
+    ensures
+        col_comb_r(m, row_dim, std_basis_r(l, len), n) == if 0 <= l < row_dim { constr_entry(m, row_dim, l, n) } else { 0.0real },
+{
+    let y = std_basis_r(l, len);
+    let f = |i: int| constr_entry(m, row_dim, i, n) * y[i];
+    if 0 <= l < row_dim {
+        assert forall|i: int| 0 <= i < row_dim && i != l implies #[trigger] f(i) == 0.0real by {
+            assert(y[i] == 0.0real);
+        }
+        lemma_sum_fn_single(f, row_dim as nat, l);
+        assert(f(l) == constr_entry(m, row_dim, l, n) * 1.0real);
+    } else {
+        assert forall|i: int| 0 <= i < row_dim implies #[trigger] f(i) == 0.0real by {
+            assert(y[i] == 0.0real);
+        }
+        lemma_sum_fn_tail_zero(f, 0, row_dim as nat);
+    }
+}
+
+/// The zero-pattern part of the adjoint of a unit multiplier: position (r, c) receives 1 when
+/// e_l selects a zero constraint addressing (r, c), else 0.
+pub proof fn lemma_zero_comb_basis(list: Seq<(usize, usize)>, row_dim: int, l: int, r: int, c: int)
+    requires
+        row_dim >= 0,
+    ensures
+        zero_comb_r(list, row_dim, std_basis_r(l, (row_dim + list.len()) as nat), r, c)
+            == if row_dim <= l < row_dim + list.len() && list[l - row_dim].0 == r && list[l - row_dim].1 == c { 1.0real } else { 0.0real },
+{
+    let nz = list.len();
+    let y = std_basis_r(l, (row_dim + nz) as nat);
+    let f = |q: int| zero_term_r(list, row_dim, y, r, c, q);
+    if row_dim <= l < row_dim + nz && list[l - row_dim].0 == r && list[l - row_dim].1 == c {
+        let q0 = l - row_dim;
+        assert forall|q: int| 0 <= q < nz && q != q0 implies #[trigger] f(q) == 0.0real by {
+            if list[q].0 == r && list[q].1 == c {
+                assert(y[row_dim + q] == 0.0real);
+            }
+        }
+        lemma_sum_fn_single(f, nz, q0);
+        assert(f(q0) == y[l]);
+    } else {
+        assert forall|q: int| 0 <= q < nz implies #[trigger] f(q) == 0.0real by {
+            if list[q].0 == r && list[q].1 == c {
+                assert(row_dim + q != l);
+                assert(y[row_dim + q] == 0.0real);
+            }
+        }
+        lemma_sum_fn_tail_zero(f, 0, nz);
+    }
+}
+
+/// The adjoint of a unit zero-constraint multiplier is half the unit packed vector at the
+/// constraint's position: A*(e_l)[t] = 1/2 if t is that position, else 0.
+pub proof fn lemma_adjoint_zero_basis(m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>, dim: int, l: int, t: int)
+    requires
+        row_dim >= 0,
+        dim >= 0,
+        valid_zero_list(list, dim),
+        row_dim <= l < row_dim + list.len(),
+        0 <= t < pk_len(dim),
+    ensures
+        adjoint_r(m, row_dim, list, std_basis_r(l, (row_dim + list.len()) as nat), dim)[t]
+            == if t == zero_idx(list, l - row_dim) { 0.5real } else { 0.0real },
+{
+    let n = (row_dim + list.len()) as nat;
+    let y = std_basis_r(l, n);
+    let a = adjoint_r(m, row_dim, list, y, dim);
+    let (r, c) = (pk_unpack(t).0, pk_unpack(t).1);
+    lemma_pk_unpack(t);
+    let (r0, c0) = (list[l - row_dim].0 as int, list[l - row_dim].1 as int);
+    assert(a[t] == adj_wt(r, c) * col_comb_r(m, row_dim, y, pk_idx(r, c)) + 0.5real * zero_comb_r(list, row_dim, y, r, c));
+    lemma_col_comb_basis(m, row_dim, l, pk_idx(r, c), n);
+    lemma_zero_comb_basis(list, row_dim, l, r, c);
+    lemma_pk_idx_injective(r, c, r0, c0);
+    assert(adj_wt(r, c) * 0.0real == 0.0real);
+}
+
+/// Under the two hypotheses, A A* is the block matrix (G, I/2): the dense Gram block, and the
+/// zero constraints, each of Frobenius norm 1/2, orthogonal to the dense rows and to each other.
+pub proof fn lemma_full_gram_block(g: Seq<real>, m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>, dim: int)
+    requires
+        row_dim >= 0,
+        dim >= 0,
+        m.len() == row_dim * pk_len(dim),
+        is_constraint_gram(g, m, row_dim, dim),
+        valid_zero_list(list, dim),
+        distinct_zero_list(list),
+        rows_vanish_on_zeros(m, row_dim, list),
+    ensures
+        meq(full_gram_view(m, row_dim, list, dim), block_half_view(sym_view(g), row_dim), row_dim + list.len(), row_dim + list.len()),
+{
+    let nz = list.len() as int;
+    let n = (row_dim + nz) as nat;
+    let np = pk_len(dim) as nat;
+    lemma_pk_col_start_monotone(0, dim);
+    let full = full_gram_view(m, row_dim, list, dim);
+    let blk = block_half_view(sym_view(g), row_dim);
+    assert forall|k: int, l: int| #![trigger full(k, l)] #![trigger blk(k, l)]
+        0 <= k < n && 0 <= l < n implies full(k, l) == blk(k, l) by {
+        let y = std_basis_r(l, n);
+        let a = adjoint_r(m, row_dim, list, y, dim);
+        lemma_adjoint_r_ok(m, row_dim, list, y, dim);
+        if l < row_dim {
+            // the adjoint of a dense unit multiplier is the adjoint without zero constraints
+            let yd = std_basis_r(l, row_dim as nat);
+            assert forall|r: int, c: int| 0 <= r <= c < dim
+                implies #[trigger] a[pk_idx(r, c)] == adjoint_entry_r(m, row_dim, Seq::<(usize, usize)>::empty(), yd, r, c) by {
+                let f = |i: int| constr_entry(m, row_dim, i, pk_idx(r, c)) * y[i];
+                let fd = |i: int| constr_entry(m, row_dim, i, pk_idx(r, c)) * yd[i];
+                assert forall|i: int| 0 <= i < row_dim implies #[trigger] f(i) == fd(i) by {
+                    assert(y[i] == yd[i]);
+                }
+                lemma_sum_fn_ext(f, fd, row_dim as nat);
+                lemma_zero_comb_basis(list, row_dim, l, r, c);
+                assert(zero_comb_r(Seq::<(usize, usize)>::empty(), row_dim, yd, r, c) == 0.0real);
+            }
+            assert(is_constraint_adjoint(a, dim, m, row_dim, Seq::<(usize, usize)>::empty(), yd));
+            lemma_gram_action(g, m, row_dim, dim, yd, a);
+            if k < row_dim {
+                // (G e_l)_k = G_kl
+                let gy = sym_mat_vec_r(g, row_dim, yd);
+                let gt = |j: int| sym_entry(g, k, j) * yd[j];
+                assert forall|j: int| 0 <= j < row_dim && j != l implies #[trigger] gt(j) == 0.0real by {
+                    assert(yd[j] == 0.0real);
+                }
+                lemma_sum_fn_single(gt, row_dim as nat, l);
+                assert(gy[k] == sym_entry(g, k, l) * 1.0real);
+                assert(full(k, l) == row_dot_r(m, row_dim, k, a));
+                assert(constraint_action_r(m, row_dim, Seq::<(usize, usize)>::empty(), a)[k] == row_dot_r(m, row_dim, k, a));
+            } else {
+                // a zero row reads an entry of A*(e_l), which vanishes on the zero pattern
+                let q = k - row_dim;
+                let (r, c) = (list[q].0 as int, list[q].1 as int);
+                assert(full(k, l) == a[pk_idx(r, c)]);
+                lemma_col_comb_basis(m, row_dim, l, pk_idx(r, c), n);
+                lemma_zero_comb_basis(list, row_dim, l, r, c);
+                assert(constr_entry(m, row_dim, l, zero_idx(list, q)) == 0.0real);
+                assert(a[pk_idx(r, c)] == adj_wt(r, c) * 0.0real + 0.5real * 0.0real);
+            }
+        } else {
+            let q0 = l - row_dim;
+            let t0 = zero_idx(list, q0);
+            lemma_pk_idx_bound(list[q0].0 as int, list[q0].1 as int, dim);
+            if k < row_dim {
+                // a dense row applied to half the unit vector at the zero position: M_k[t0] / 2 = 0
+                let f = |t: int| constr_entry(m, row_dim, k, t) * a[t];
+                assert forall|t: int| 0 <= t < np && t != t0 implies #[trigger] f(t) == 0.0real by {
+                    lemma_adjoint_zero_basis(m, row_dim, list, dim, l, t);
+                }
+                lemma_sum_fn_single(f, np, t0);
+                lemma_adjoint_zero_basis(m, row_dim, list, dim, l, t0);
+                assert(constr_entry(m, row_dim, k, t0) == 0.0real);
+                assert(full(k, l) == row_dot_r(m, row_dim, k, a));
+                assert(row_dot_r(m, row_dim, k, a) == sum_fn_r(f, np));
+            } else {
+                // two zero rows: 1/2 on the diagonal, 0 off it (distinct positions)
+                let q = k - row_dim;
+                let t = zero_idx(list, q);
+                lemma_pk_idx_bound(list[q].0 as int, list[q].1 as int, dim);
+                assert(full(k, l) == a[t]);
+                lemma_adjoint_zero_basis(m, row_dim, list, dim, l, t);
+                if k != l {
+                    assert(list[q] != list[q0]);
+                    lemma_pk_idx_injective(list[q].0 as int, list[q].1 as int, list[q0].0 as int, list[q0].1 as int);
+                }
+            }
+        }
+    }
 }
 
 } // verus!

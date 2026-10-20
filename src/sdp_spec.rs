@@ -30,8 +30,6 @@ use crate::lin_alg::mat_spec::lemma_dot_sum_fn;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
-use crate::lin_alg::reduce_spec::lemma_pk_idx_surjective;
-#[cfg(verus_keep_ghost)]
 use crate::lin_alg::solve_spec::abs_max_r;
 #[cfg(verus_keep_ghost)]
 use crate::real_spec::abs_r;
@@ -42,43 +40,7 @@ verus! {
 
 broadcast use crate::trusted::group_real_model;
 
-/* ---------- unpacking packed indices ---------- */
 
-/// The pair (r, c), r <= c, with packed index t.
-pub open spec fn pk_unpack(t: int) -> (int, int) {
-    choose|p: (int, int)| 0 <= p.0 <= p.1 && #[trigger] pk_idx(p.0, p.1) == t
-}
-
-/// Every t >= 0 is the packed index of its unpacked pair.
-pub proof fn lemma_pk_unpack(t: int)
-    requires
-        t >= 0,
-    ensures
-        0 <= pk_unpack(t).0 <= pk_unpack(t).1,
-        pk_idx(pk_unpack(t).0, pk_unpack(t).1) == t,
-{
-    assert(pk_len(t + 1) > t) by {
-        assert((t + 1) * (t + 2) >= 2 * (t + 1)) by (nonlinear_arith)
-            requires t >= 0;
-    }
-    lemma_pk_idx_surjective(t, t + 1);
-    let (r, c) = choose|r: int, c: int| 0 <= r <= c < t + 1 && #[trigger] pk_idx(r, c) == t;
-    let p = (r, c);
-    assert(0 <= p.0 <= p.1 && pk_idx(p.0, p.1) == t);
-}
-
-/// Unpacking inverts packing.
-pub proof fn lemma_pk_unpack_idx(r: int, c: int)
-    requires
-        0 <= r <= c,
-    ensures
-        pk_unpack(pk_idx(r, c)) == (r, c),
-{
-    lemma_pk_idx_bound(r, c, c + 1);
-    lemma_pk_unpack(pk_idx(r, c));
-    let p = pk_unpack(pk_idx(r, c));
-    lemma_pk_idx_injective(p.0, p.1, r, c);
-}
 
 /* ---------- packed views of user maps ---------- */
 
@@ -924,6 +886,266 @@ pub proof fn lemma_sum_upto_ge(s: Seq<int>, j: int)
 {
     if j > 0 {
         lemma_sum_upto_ge(s, j - 1);
+    }
+}
+
+/// Every entry of block_sizes(bd, vd) is one of the given sizes (and nonnegative when they are).
+pub proof fn lemma_block_sizes_entry(bd: Seq<int>, vd: Seq<int>, j: int)
+    requires
+        0 <= j < bd.len() + 2 * vd.len(),
+    ensures
+        j < bd.len() ==> block_sizes(bd, vd)[j] == bd[j],
+        j >= bd.len() ==> 0 <= (j - bd.len()) / 2 < vd.len() && block_sizes(bd, vd)[j] == vd[(j - bd.len()) / 2],
+{
+    if j >= bd.len() {
+        let i = j - bd.len();
+        lemma_fundamental_div_mod(i, 2);
+        lemma_mod_bound(i, 2);
+    }
+}
+
+/* ---------- the dense rows vanish on the zero pattern ---------- */
+
+/// A row applied to the unit packed vector e_t0 reads its entry t0.
+pub proof fn lemma_row_dot_basis(m: Seq<real>, row_dim: int, i: int, t0: int, len: nat)
+    requires
+        0 <= t0 < len,
+    ensures
+        row_dot_r(m, row_dim, i, std_basis_r(t0, len)) == constr_entry(m, row_dim, i, t0),
+{
+    let z = std_basis_r(t0, len);
+    let f = |n: int| constr_entry(m, row_dim, i, n) * z[n];
+    assert forall|n: int| 0 <= n < len && n != t0 implies #[trigger] f(n) == 0.0real by {
+        assert(z[n] == 0.0real);
+    }
+    lemma_sum_fn_single(f, len, t0);
+    assert(f(t0) == constr_entry(m, row_dim, i, t0) * 1.0real);
+}
+
+/// The packed dot product with the zero vector on the right vanishes.
+pub proof fn lemma_dot_zero_right(v: Seq<real>, z: Seq<real>)
+    requires
+        v.len() == z.len(),
+        forall|t: int| 0 <= t < z.len() ==> #[trigger] z[t] == 0.0real,
+    ensures
+        dot_r(v, z) == 0.0real,
+{
+    lemma_dot_sum_fn(v, z);
+    lemma_sum_fn_ext(|t: int| v[t] * z[t], |t: int| 0.0real, z.len());
+    lemma_sum_fn_zero(z.len());
+}
+
+/// A packed index below pk_len(d) addresses a column below d.
+pub proof fn lemma_pk_idx_lt_len(r: int, c: int, d: int)
+    requires
+        0 <= r <= c,
+        d >= 0,
+        pk_idx(r, c) < pk_len(d),
+    ensures
+        c < d,
+{
+    if c >= d {
+        lemma_pk_col_start_monotone(d, c);
+    }
+}
+
+/// A position inside one diagonal block of the partition bs is not off-block-diagonal.
+pub proof fn lemma_block_not_zero_region(bs: Seq<int>, j: int, r: int, c: int)
+    requires
+        forall|i: int| 0 <= i < bs.len() ==> #[trigger] bs[i] >= 0,
+        0 <= j < bs.len(),
+        sum_upto(bs, j) <= r < sum_upto(bs, j + 1),
+        sum_upto(bs, j) <= c < sum_upto(bs, j + 1),
+    ensures
+        !in_zero_region(bs, r, c),
+{
+    if in_zero_region(bs, r, c) {
+        let j2 = choose|j2: int| 0 <= j2 < bs.len() && #[trigger] sum_upto(bs, j2) <= r < sum_upto(bs, j2 + 1) <= c;
+        if j2 < j {
+            lemma_sum_upto_monotone(bs, j2 + 1, j);
+        } else if j2 > j {
+            lemma_sum_upto_monotone(bs, j + 1, j2);
+        }
+    }
+}
+
+/// The unit packed vector at an off-block-diagonal position (r0, c0) reads as zero on every
+/// diagonal block of the partition bs.
+pub proof fn lemma_blk_basis_zero(bs: Seq<int>, j: int, r0: int, c0: int, sd: int, t: int)
+    requires
+        forall|i: int| 0 <= i < bs.len() ==> #[trigger] bs[i] >= 0,
+        0 <= j < bs.len(),
+        sum_upto(bs, bs.len() as int) <= sd,
+        in_zero_region(bs, r0, c0),
+        0 <= r0 <= c0 < sd,
+        0 <= t < pk_len(bs[j]),
+    ensures
+        blk_r(std_basis_r(pk_idx(r0, c0), pk_len(sd) as nat), sum_upto(bs, j), bs[j])[t] == 0.0real,
+{
+    let (st, d) = (sum_upto(bs, j), bs[j]);
+    let z = std_basis_r(pk_idx(r0, c0), pk_len(sd) as nat);
+    let (r, c) = (pk_unpack(t).0, pk_unpack(t).1);
+    lemma_pk_unpack(t);
+    lemma_pk_idx_lt_len(r, c, d);
+    lemma_sum_upto_monotone(bs, 0, j);
+    lemma_sum_upto_monotone(bs, j + 1, bs.len() as int);
+    assert(sum_upto(bs, j + 1) == st + d);
+    lemma_pk_idx_bound(st + r, st + c, sd);
+    lemma_pk_idx_bound(r0, c0, sd);
+    assert(blk_r(z, st, d)[t] == z[pk_idx(st + r, st + c)]);
+    lemma_pk_idx_injective(st + r, st + c, r0, c0);
+    if st + r == r0 && st + c == c0 {
+        lemma_block_not_zero_region(bs, j, r0, c0);
+    }
+}
+
+/// The user maps applied to the unit packed vector at an off-block-diagonal position vanish:
+/// every user variable is read from diagonal blocks, where that vector is zero.
+pub proof fn lemma_maps_row_basis_zero(maps: Seq<Vec<Vec<Vec<f64>>>>, bd: Seq<int>, vd: Seq<int>, e: int, r0: int, c0: int)
+    requires
+        forall|i: int| 0 <= i < bd.len() ==> #[trigger] bd[i] >= 0,
+        forall|n: int| 0 <= n < vd.len() ==> #[trigger] vd[n] >= 0,
+        in_zero_region(block_sizes(bd, vd), r0, c0),
+        0 <= r0 <= c0 < std_dim(bd, vd),
+    ensures
+        maps_row_r(maps, block_sum(bd), vd, e, std_basis_r(pk_idx(r0, c0), pk_len(std_dim(bd, vd)) as nat)) == 0.0real,
+{
+    let bs = block_sizes(bd, vd);
+    let bsum = block_sum(bd);
+    let sd = std_dim(bd, vd);
+    let z = std_basis_r(pk_idx(r0, c0), pk_len(sd) as nat);
+    let s = bd.len() as int;
+    assert(bs.len() == s + 2 * vd.len());
+    lemma_block_sizes_sum(bd, vd, vd.len() as int);
+    assert forall|i: int| 0 <= i < bs.len() implies #[trigger] bs[i] >= 0 by {
+        lemma_block_sizes_entry(bd, vd, i);
+    }
+    let f = |n: int| map_term_r(maps, bsum, vd, e, z, n);
+    assert forall|n: int| 0 <= n < vd.len() implies #[trigger] f(n) == 0.0real by {
+        let (st, d) = (var_off(bsum, vd, n), vd[n]);
+        let (j1, j2) = (s + 2 * n, s + 2 * n + 1);
+        lemma_block_sizes_sum(bd, vd, n);
+        lemma_block_sizes_entry(bd, vd, j1);
+        lemma_block_sizes_entry(bd, vd, j2);
+        assert(bs[j1] == d && bs[j2] == d);
+        assert(sum_upto(bs, j2) == st + d);
+        lemma_pk_col_start_monotone(0, d);
+        let zv = zvar_r(z, st, d);
+        assert forall|t: int| 0 <= t < pk_len(d) implies #[trigger] zv[t] == 0.0real by {
+            lemma_blk_basis_zero(bs, j1, r0, c0, sd, t);
+            lemma_blk_basis_zero(bs, j2, r0, c0, sd, t);
+        }
+        lemma_dot_zero_right(symrow_r(maps[n]@, e, d), zv);
+    }
+    lemma_sum_fn_ext(f, |n: int| 0.0real, vd.len());
+    lemma_sum_fn_zero(vd.len());
+}
+
+/// The LMI entry read by an LMI row lies in that LMI's diagonal block, where the unit packed
+/// vector at an off-block-diagonal position is zero.
+pub proof fn lemma_lmi_entry_basis_zero(bd: Seq<int>, vd: Seq<int>, i0: int, e: int, r0: int, c0: int)
+    requires
+        forall|i: int| 0 <= i < bd.len() ==> #[trigger] bd[i] >= 0,
+        forall|n: int| 0 <= n < vd.len() ==> #[trigger] vd[n] >= 0,
+        0 <= i0 < bd.len(),
+        0 <= e < bd[i0] * bd[i0],
+        in_zero_region(block_sizes(bd, vd), r0, c0),
+        0 <= r0 <= c0 < std_dim(bd, vd),
+    ensures
+        sym_entry(std_basis_r(pk_idx(r0, c0), pk_len(std_dim(bd, vd)) as nat),
+            block_off(bd, i0) + lmi_row_lo(bd[i0], e), block_off(bd, i0) + lmi_row_hi(bd[i0], e)) == 0.0real,
+{
+    let bs = block_sizes(bd, vd);
+    let sd = std_dim(bd, vd);
+    let z = std_basis_r(pk_idx(r0, c0), pk_len(sd) as nat);
+    let k = bd[i0];
+    assert(k >= 1) by (nonlinear_arith)
+        requires k >= 0, 0 <= e < k * k;
+    lemma_lmi_row_bounds(k, e);
+    let (p, q) = (block_off(bd, i0) + lmi_row_lo(k, e), block_off(bd, i0) + lmi_row_hi(k, e));
+    let tail = Seq::new(2 * vd.len(), |j: int| var_block_size(vd, j));
+    assert(bs == bd + tail);
+    lemma_sum_upto_prefix(bd, tail, i0);
+    lemma_sum_upto_prefix(bd, tail, i0 + 1);
+    assert(bs[i0] == k);
+    assert(sum_upto(bs, i0 + 1) == sum_upto(bs, i0) + k);
+    assert forall|i: int| 0 <= i < bs.len() implies #[trigger] bs[i] >= 0 by {
+        lemma_block_sizes_entry(bd, vd, i);
+    }
+    lemma_block_sizes_sum(bd, vd, vd.len() as int);
+    lemma_sum_upto_monotone(bs, 0, i0);
+    lemma_sum_upto_monotone(bs, i0 + 1, bs.len() as int);
+    lemma_pk_idx_bound(p, q, sd);
+    lemma_pk_idx_bound(r0, c0, sd);
+    assert(sym_entry(z, p, q) == z[pk_idx(p, q)]);
+    lemma_pk_idx_injective(p, q, r0, c0);
+    if p == r0 && q == c0 {
+        lemma_block_not_zero_region(bs, i0, r0, c0);
+    }
+}
+
+/// Every LMI row index below lmi_rows(bd) restricted to the first n LMIs is row e of some LMI i0 < n.
+pub proof fn lemma_lmi_row_decomp(bd: Seq<int>, n: int, i: int)
+    requires
+        0 <= n <= bd.len(),
+        0 <= i < sq_sum_upto(bd, n),
+    ensures
+        exists|i0: int| 0 <= i0 < n && #[trigger] row_off(bd, i0) <= i < row_off(bd, i0) + bd[i0] * bd[i0],
+    decreases n,
+{
+    if i < sq_sum_upto(bd, n - 1) {
+        lemma_lmi_row_decomp(bd, n - 1, i);
+    } else {
+        assert(row_off(bd, n - 1) == sq_sum_upto(bd, n - 1));
+        assert(row_off(bd, n - 1) <= i < row_off(bd, n - 1) + bd[n - 1] * bd[n - 1]);
+    }
+}
+
+/// The stacked standard-form rows have no coefficient at an off-block-diagonal position: the
+/// LMI rows and the equality rows read the variable through its diagonal blocks only.
+pub proof fn lemma_std_rows_vanish(
+    lmis: Seq<(Vec<Vec<Vec<Vec<f64>>>>, Vec<f64>)>,
+    constr: Seq<Vec<Vec<Vec<f64>>>>,
+    b: Seq<f64>,
+    bd: Seq<int>,
+    vd: Seq<int>,
+    aug: Seq<real>,
+    r0: int,
+    c0: int,
+)
+    requires
+        std_rows_ok(lmis, constr, b, bd, vd, aug),
+        forall|i: int| 0 <= i < bd.len() ==> #[trigger] bd[i] >= 0,
+        forall|n: int| 0 <= n < vd.len() ==> #[trigger] vd[n] >= 0,
+        in_zero_region(block_sizes(bd, vd), r0, c0),
+        0 <= r0 <= c0 < std_dim(bd, vd),
+    ensures
+        forall|i: int| 0 <= i < lmi_rows(bd) + b.len()
+            ==> #[trigger] cm_entry(aug, lmi_rows(bd) + b.len() as int, i, pk_idx(r0, c0)) == 0.0real,
+{
+    let sd = std_dim(bd, vd);
+    let cols = pk_len(sd);
+    let rows = lmi_rows(bd) + b.len() as int;
+    let bsum = block_sum(bd);
+    let t0 = pk_idx(r0, c0);
+    lemma_pk_idx_bound(r0, c0, sd);
+    let z = std_basis_r(t0, cols as nat);
+    assert forall|i: int| 0 <= i < rows implies #[trigger] cm_entry(aug, rows, i, t0) == 0.0real by {
+        lemma_row_dot_basis(aug, rows, i, t0, cols as nat);
+        if i < lmi_rows(bd) {
+            lemma_lmi_row_decomp(bd, bd.len() as int, i);
+            let i0 = choose|i0: int| 0 <= i0 < bd.len() && #[trigger] row_off(bd, i0) <= i < row_off(bd, i0) + bd[i0] * bd[i0];
+            let e = i - row_off(bd, i0);
+            assert(row_dot_r(aug, rows, row_off(bd, i0) + e, z)
+                == maps_row_r(lmis[i0].0@, bsum, vd, e, z)
+                    - sym_entry(z, block_off(bd, i0) + lmi_row_lo(bd[i0], e), block_off(bd, i0) + lmi_row_hi(bd[i0], e)));
+            lemma_maps_row_basis_zero(lmis[i0].0@, bd, vd, e, r0, c0);
+            lemma_lmi_entry_basis_zero(bd, vd, i0, e, r0, c0);
+        } else {
+            let e = i - lmi_rows(bd);
+            assert(row_dot_r(aug, rows, lmi_rows(bd) + e, z) == maps_row_r(constr, bsum, vd, e, z));
+            lemma_maps_row_basis_zero(constr, bd, vd, e, r0, c0);
+        }
     }
 }
 

@@ -151,7 +151,10 @@ found that they are consistent only when `rhs_bottom = 0`.
 
 **Fix.** The tail of `pos_def_solver_upperleft` returns `2 * rhs[t]`, and its
 contract, `dual_solve_ok` and the block-solve lemmas state the system
-`(G, I/2) y = rhs`. `cargo test` passes. The remaining step, proving that
-`(G, I/2)` is the Gram matrix of the full constraint operator, needs the fact
-that the dense rows vanish on the zero pattern; it is listed as open in
-`VERIFICATION_PROGRESS.md`.
+`(G, I/2) y = rhs`. `cargo test` passes. The lemma `lemma_full_gram_block`
+(`src/lin_alg/constr_spec.rs`) then proves that `(G, I/2)` is the Gram matrix
+`A A*` of the full operator whenever the dense rows vanish on the zero pattern
+and the pattern is distinct, and `lemma_setup_gram_hypotheses`
+(`src/sdpad_spec.rs`) derives both facts from the standard form, so every
+iteration's multipliers verifiably solve the Gram system
+(`lemma_wgy_dual_gram`).

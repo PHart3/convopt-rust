@@ -168,25 +168,6 @@ pub proof fn lemma_tri_sum_ge_term(f: spec_fn(int, int) -> real, dim: nat, r0: i
     lemma_sum_fn_ge_term(|r: int| f(r, c0), (c0 + 1) as nat, r0);
 }
 
-/// Every packed index below pk_len(dim) is the index of a triangle position.
-pub proof fn lemma_pk_idx_surjective(t: int, dim: int)
-    requires
-        dim >= 0,
-        0 <= t < pk_len(dim),
-    ensures
-        exists|r: int, c: int| 0 <= r <= c < dim && #[trigger] pk_idx(r, c) == t,
-    decreases dim,
-{
-    lemma_pk_col_start_zero();
-    let d1 = dim - 1;
-    lemma_pk_col_start_step(d1);
-    lemma_pk_col_start_monotone(0, d1);
-    if t < pk_len(d1) {
-        lemma_pk_idx_surjective(t, d1);
-    } else {
-        assert(pk_idx(t - pk_col_start(d1), d1) == t);
-    }
-}
 
 /// With eps > 0 every pivot row has a positive norm: its pivot entry has magnitude
 /// at least eps and lies in the packed part (the pivot column is not the right-hand side).
@@ -324,8 +305,9 @@ pub proof fn lemma_dropped_row_residual(e: Seq<real>, row_dim: int, col_dim: int
 /* ---------- the result of the reduction ---------- */
 
 /// The reduced system res (rank rows) obtained from the input a0 through the echelon form e
-/// with pivot sequence pivots: res row i is echelon row i divided by its Frobenius norm. The
-/// rank is positive (the input of the reduction is nonzero).
+/// with pivot sequence pivots: res row i is echelon row i divided by its Frobenius norm, and the
+/// zero columns of a0 are zero columns of e. The rank is positive (the input of the reduction
+/// is nonzero).
 pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>) -> bool {
     let cd = red_col_dim(dim);
     let rd = a0.len() as int / cd;
@@ -335,6 +317,7 @@ pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
     &&& rank >= 1
     &&& res.len() == cd * rank
     &&& same_solutions(a0, e, rd, cd)
+    &&& zero_cols_kept(a0, e, rd, cd)
     &&& echelon_form(e, rd, cd, pivots, eps)
     &&& skipped_bounded(e, rd, cd, pivots, eps, cd)
     &&& forall|l: int| 0 <= l < rank ==> #[trigger] pivots[l] < cd - 1

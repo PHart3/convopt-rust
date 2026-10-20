@@ -408,7 +408,7 @@ verus! {
 
 // Gaussian elimination via partial pivoting
 // also computes rank and consistency of given augmented matrix
-// (the row operations preserve the solution set of [A | b]; the result is in echelon form
+// (the row operations preserve the solution set of [A | b] and keep zero columns zero; the result is in echelon form
 // with pivot columns strictly increasing, pivots of magnitude at least TOL * max |entry|
 // of the input and exact zeros below every pivot; the rank is the number of pivots and the
 // consistency flag says that no pivot lies in the last column)
@@ -420,6 +420,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         res.0@.len() == old(mat)@.len(),
         final(mat)@ == final(res.0)@,
         same_solutions(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int),
+        zero_cols_kept(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int),
         exists|pivots: Seq<int>| {
             &&& #[trigger] echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, rv(TOL) * abs_max_r(rvs(old(mat)@)))
             &&& skipped_bounded(rvs(res.0@), row_dim as int, col_dim as int, pivots, rv(TOL) * abs_max_r(rvs(old(mat)@)), col_dim as int)
@@ -448,6 +449,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
     let ghost mut pivots: Seq<int> = Seq::empty();
     proof {
         lemma_same_solutions_refl(a0, rd, cd);
+        lemma_zero_cols_refl(a0, rd, cd);
     }
     let mut n = 0;
     while n < col_dim && row_search < row_dim
@@ -468,6 +470,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             echelon_form(rvs(mat@), rd, cd, pivots, eps),
             skipped_bounded(rvs(mat@), rd, cd, pivots, eps, n as int),
             same_solutions(a0, rvs(mat@), rd, cd),
+            zero_cols_kept(a0, rvs(mat@), rd, cd),
             coeff_rank as int == row_search - (if row_search > 0 && pivots.last() == cd - 1 { 1int } else { 0int }),
         decreases col_dim - n,
     {
@@ -556,6 +559,8 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     assert(rows_swapped(before, cur, rd, cd, row_search as int, pivot_row as int));
                     lemma_swap_same_solutions(before, cur, rd, cd, row_search as int, pivot_row as int);
                     lemma_same_solutions_trans(a0, before, cur, rd, cd);
+                    lemma_swap_zero_cols(before, cur, rd, cd, row_search as int, pivot_row as int);
+                    lemma_zero_cols_trans(a0, before, cur, rd, cd);
                     lemma_echelon_swap(before, cur, rd, cd, pivots, eps, row_search as int, pivot_row as int);
                     lemma_skipped_swap(before, cur, rd, cd, pivots, eps, n as int, row_search as int, pivot_row as int);
                 }
@@ -597,6 +602,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                         ==> abs_r(#[trigger] cm_entry(swapped, rd, i, n as int)) <= abs_r(cm_entry(swapped, rd, row_search as int, n as int)),
                     echelon_form(rvs(mat@), rd, cd, pivots, eps),
                     same_solutions(a0, rvs(mat@), rd, cd),
+                    zero_cols_kept(a0, rvs(mat@), rd, cd),
                     forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
                     forall|c: int, i: int| 0 <= c < n && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= i < rd
                         ==> abs_r(#[trigger] cm_entry(rvs(mat@), rd, i, c))
@@ -651,6 +657,8 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     assert(row_subtracted(before, cur, rd, cd, ji, rs, rv(piv)));
                     lemma_row_sub_same_solutions(before, cur, rd, cd, ji, rs, rv(piv));
                     lemma_same_solutions_trans(a0, before, cur, rd, cd);
+                    lemma_row_sub_zero_cols(before, cur, rd, cd, ji, rs, rv(piv));
+                    lemma_zero_cols_trans(a0, before, cur, rd, cd);
                     lemma_echelon_row_sub(before, cur, rd, cd, pivots, eps, ji, rs, rv(piv));
                     // the entry (j, n) is annihilated: A_jn - (A_jn / A_rn) A_rn = 0
                     let (num, dn) = (cm_entry(before, rd, ji, ni), rv(denom));

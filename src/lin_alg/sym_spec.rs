@@ -765,4 +765,77 @@ pub proof fn lemma_partial_row_diag(t: spec_fn(int, int) -> real, dim: int, i: i
     }
 }
 
+/* ---------- injectivity, surjectivity and inversion of packed indices ---------- */
+
+/// Packed indices of distinct triangle positions are distinct.
+pub proof fn lemma_pk_idx_injective(r1: int, c1: int, r2: int, c2: int)
+    requires
+        0 <= r1 <= c1,
+        0 <= r2 <= c2,
+    ensures
+        pk_idx(r1, c1) == pk_idx(r2, c2) <==> (r1 == r2 && c1 == c2),
+{
+    if c1 < c2 {
+        lemma_pk_idx_bound(r1, c1, c2);
+    } else if c2 < c1 {
+        lemma_pk_idx_bound(r2, c2, c1);
+    }
+}
+
+/// Every packed index below pk_len(dim) is the index of a triangle position.
+pub proof fn lemma_pk_idx_surjective(t: int, dim: int)
+    requires
+        dim >= 0,
+        0 <= t < pk_len(dim),
+    ensures
+        exists|r: int, c: int| 0 <= r <= c < dim && #[trigger] pk_idx(r, c) == t,
+    decreases dim,
+{
+    lemma_pk_col_start_zero();
+    let d1 = dim - 1;
+    lemma_pk_col_start_step(d1);
+    lemma_pk_col_start_monotone(0, d1);
+    if t < pk_len(d1) {
+        lemma_pk_idx_surjective(t, d1);
+    } else {
+        assert(pk_idx(t - pk_col_start(d1), d1) == t);
+    }
+}
+
+/// The pair (r, c), r <= c, with packed index t.
+pub open spec fn pk_unpack(t: int) -> (int, int) {
+    choose|p: (int, int)| 0 <= p.0 <= p.1 && #[trigger] pk_idx(p.0, p.1) == t
+}
+
+/// Every t >= 0 is the packed index of its unpacked pair.
+pub proof fn lemma_pk_unpack(t: int)
+    requires
+        t >= 0,
+    ensures
+        0 <= pk_unpack(t).0 <= pk_unpack(t).1,
+        pk_idx(pk_unpack(t).0, pk_unpack(t).1) == t,
+{
+    assert(pk_len(t + 1) > t) by {
+        assert((t + 1) * (t + 2) >= 2 * (t + 1)) by (nonlinear_arith)
+            requires t >= 0;
+    }
+    lemma_pk_idx_surjective(t, t + 1);
+    let (r, c) = choose|r: int, c: int| 0 <= r <= c < t + 1 && #[trigger] pk_idx(r, c) == t;
+    let p = (r, c);
+    assert(0 <= p.0 <= p.1 && pk_idx(p.0, p.1) == t);
+}
+
+/// Unpacking inverts packing.
+pub proof fn lemma_pk_unpack_idx(r: int, c: int)
+    requires
+        0 <= r <= c,
+    ensures
+        pk_unpack(pk_idx(r, c)) == (r, c),
+{
+    lemma_pk_idx_bound(r, c, c + 1);
+    lemma_pk_unpack(pk_idx(r, c));
+    let p = pk_unpack(pk_idx(r, c));
+    lemma_pk_idx_injective(p.0, p.1, r, c);
+}
+
 } // verus!
