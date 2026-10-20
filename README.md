@@ -171,7 +171,7 @@ is represented as a `MatrixSym`, defined in `src/sdp.rs` as
 type MatrixSym = Vec<Vec<Vector>>;
 ```
 
-This is a list of `m` vectors, each of length `q(q + 1) / 2`. Each vector represents one packed column of the upper-triangular part of a symmetric matrix:
+This is a list of `m` vectors, each of length `q(q + 1) / 2`. Each vector represents the packed columns of the upper-triangular part of a symmetric matrix:
 
 ```text
 [v(1)_1], [v(2)_1, v(2)_2], ..., [v(q)_1, ..., v(q)_q].
