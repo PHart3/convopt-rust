@@ -524,9 +524,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                         rd == row_dim as int,
                         cd == col_dim as int,
                         mat@.len() == row_dim * col_dim,
-                    row_dim * col_dim <= usize::MAX,
                         row_dim * col_dim <= usize::MAX,
-                row_dim * col_dim <= usize::MAX,
                         before.len() == mat@.len(),
                         forall|i: int, c: int| 0 <= i < rd && 0 <= c < cd
                             ==> #[trigger] cm_entry(rvs(mat@), rd, i, c)
@@ -613,7 +611,6 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     cd == col_dim as int,
                     mat@.len() == row_dim * col_dim,
                     row_dim * col_dim <= usize::MAX,
-                row_dim * col_dim <= usize::MAX,
                     swapped.len() == mat@.len(),
                     n * row_dim + row_dim <= row_dim * col_dim,
                     rv(denom) == cm_entry(swapped, rd, row_search as int, n as int),
@@ -646,9 +643,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                         rd == row_dim as int,
                         cd == col_dim as int,
                         mat@.len() == row_dim * col_dim,
-                    row_dim * col_dim <= usize::MAX,
                         row_dim * col_dim <= usize::MAX,
-                row_dim * col_dim <= usize::MAX,
                         before.len() == mat@.len(),
                         rs == row_search as int,
                         ji == j as int,

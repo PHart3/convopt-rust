@@ -75,27 +75,16 @@ pub struct SdpadSetup {
 /// without LMIs), and psd_blocks lists the diagonal-block partition of the variable.
 pub open spec fn sdpad_setup_ok(sdp: &SDP, check: bool, s: SdpadSetup) -> bool {
     let d = s.var_dim as int;
-    let cols = pk_len(d);
-    let nz = s.zeros@.len() as int;
     let rows = s.c_len as int;
     let bd = dims_of(s.block_dims@);
     let vd = dims_of(s.symm_dims@);
     let bs = psd_partition(bd, vd, d);
     &&& exists|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
             && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d)
-    &&& d >= 1
-    &&& dim_fits(d)
-    &&& dim_fits(rows)
-    &&& s.obj_frob@.len() == cols
-    &&& s.point@.len() == rows + nz
-    &&& s.mat_dense@.len() == rows * cols
-    &&& valid_zero_list(s.zeros@, d)
+    &&& wgy_setup_ok(&s)
     &&& forall|q: int| rows <= q < s.point@.len() ==> rv(#[trigger] s.point@[q]) == 0.0real
-    &&& rows == 0 ==> nz == 0
     &&& s.block_size_sum as int == block_sum(bd)
     &&& (s.block_size_sum == 0) == (sdp.lmi@.len() == 0)
-    &&& rows > 0 ==> is_constraint_gram(rvs(s.gram_small@), rvs(s.mat_dense@), rows, d)
-    &&& rows == 0 ==> s.gram_small@.len() == 0
     &&& block_list_ok(s.psd_blocks@, bs)
     &&& sum_upto(bs, bs.len() as int) == d
     &&& blocks_fit(s.psd_blocks@, pk_len(d) as nat)
@@ -764,7 +753,7 @@ fn kkt_quantities(s: &SdpadSetup, st: &WgyState) -> (q: (f64, f64, f64, f64, f64
         st.diff@.len() == pk_len(s.var_dim as int),
         st.dual_y@.len() == s.point@.len(),
     ensures
-        kkt_ok(s, st, rv(q.0), rv(q.1), rv(q.2), dual_val_r(s, rvs(st.dual_y@)), rv(q.3), rv(q.4)),
+        kkt_ok(s, st, rv(q.0), rv(q.1), rv(q.2), rv(q.3), rv(q.4)),
 {
     let var_dim = s.var_dim;
     let ghost d = var_dim as int;

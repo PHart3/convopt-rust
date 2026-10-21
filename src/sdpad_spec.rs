@@ -595,13 +595,13 @@ pub open spec fn delta_r(pinf: real, dinf: real, gap: real) -> real {
     max_r(max_r(pinf, dinf), gap)
 }
 
-/// The residuals, objective values, gap and delta of the iterate st.
-pub open spec fn kkt_ok(s: &SdpadSetup, st: &WgyState, pinf: real, dinf: real, prim: real, dual: real, gap: real, delta: real) -> bool {
+/// The residuals, primal objective value, gap (against the dual objective value) and delta of
+/// the iterate st.
+pub open spec fn kkt_ok(s: &SdpadSetup, st: &WgyState, pinf: real, dinf: real, prim: real, gap: real, delta: real) -> bool {
     &&& pinf == pinf_r(s, rvs(st.prim_z@))
     &&& dinf == dinf_r(s, rvs(st.diff@), rvs(st.dual_s@))
     &&& prim == prim_val_r(s, rvs(st.prim_z@))
-    &&& dual == dual_val_r(s, rvs(st.dual_y@))
-    &&& gap == gap_r(prim, dual)
+    &&& gap == gap_r(prim, dual_val_r(s, rvs(st.dual_y@)))
     &&& delta == delta_r(pinf, dinf, gap)
 }
 
@@ -816,7 +816,7 @@ pub open spec fn best_record_ok(s: &SdpadSetup, states: Seq<WgyState>, feasible:
     &&& feasible[k - 1]
     &&& states[k].prim_z@ == zb
     &&& psd_blocks_ok(s, rvs(zb))
-    &&& kkt_ok(s, &states[k], pinf, dinf, val, dual_val_r(s, rvs(states[k].dual_y@)), gap, delta)
+    &&& kkt_ok(s, &states[k], pinf, dinf, val, gap, delta)
 }
 
 /// The stagnation stopping rule: more than STAG1 (STAG2, STAG3) iterations without improving
@@ -850,7 +850,7 @@ pub open spec fn outcome_ok(sdp: &SDP, s: &SdpadSetup, check: bool, o: SdpadOutc
     &&& stagnation_ok(deltas, rv(o.best_delta@), o.it_stag@ as int)
     &&& 1 <= k <= n
     &&& solution_ok(s, rvs(st.prim_z@), o.result@)
-    &&& kkt_ok(s, &st, rv(o.pinf), rv(o.dinf), rv(o.value), dual_val_r(s, rvs(st.dual_y@)), rv(o.gap), delta)
+    &&& kkt_ok(s, &st, rv(o.pinf), rv(o.dinf), rv(o.value), rv(o.gap), delta)
     &&& rv(o.value) == objective_r(sdp, rvs(st.prim_z@))
     &&& match o.termination {
             Termination::Accuracy => k == n && psd_blocks_ok(s, rvs(st.prim_z@)) && delta < rv(TOL),
@@ -967,7 +967,6 @@ pub proof fn lemma_setup_gram_hypotheses(sdp: &SDP, check: bool, s: &SdpadSetup)
     let list = s.zeros@;
     let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
         && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
-    let res = (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims);
     if sdp.lmi@.len() == 0 {
         assert(nz == 0);
     } else {

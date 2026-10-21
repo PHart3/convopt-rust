@@ -19,6 +19,8 @@ use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::seq::*;
 #[cfg(verus_keep_ghost)]
+use vstd::arithmetic::div_mod::lemma_fundamental_div_mod;
+#[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
@@ -189,6 +191,18 @@ pub open spec fn rows_of(len: int, col_dim: int) -> int {
     len / col_dim
 }
 
+/// When col_dim divides len, the row count times col_dim is len.
+pub proof fn lemma_rows_of_exact(len: int, col_dim: int)
+    requires
+        col_dim > 0,
+        len % col_dim == 0,
+    ensures
+        rows_of(len, col_dim) * col_dim == len,
+{
+    lemma_fundamental_div_mod(len, col_dim);
+    assert(col_dim * (len / col_dim) == (len / col_dim) * col_dim) by (nonlinear_arith);
+}
+
 /// The zero-pattern list addresses strictly upper-triangular entries of a dim x dim matrix.
 pub open spec fn valid_zero_list(list: Seq<(usize, usize)>, dim: int) -> bool {
     forall|k: int| 0 <= k < list.len() ==> (#[trigger] list[k]).0 < list[k].1 < dim
@@ -301,12 +315,10 @@ pub proof fn lemma_zero_comb_diag(list: Seq<(usize, usize)>, dim: int, row_dim: 
         zero_comb_r(list, row_dim, y, r, r) == 0.0real,
 {
     let f = |k: int| zero_term_r(list, row_dim, y, r, r, k);
-    let z = |k: int| 0.0real;
-    assert forall|k: int| 0 <= k < list.len() implies #[trigger] f(k) == z(k) by {
+    assert forall|k: int| 0 <= k < list.len() implies #[trigger] f(k) == 0.0real by {
         assert(list[k].0 < list[k].1);
     }
-    lemma_sum_fn_ext(f, z, list.len());
-    lemma_sum_fn_zero(list.len());
+    lemma_sum_fn_all_zero(f, list.len());
 }
 
 /// The adjoint identity <A(x), y> = <x, A*(y)>_F, with the factors 1/2 of the
@@ -580,7 +592,7 @@ pub proof fn lemma_col_comb_basis(m: Seq<real>, row_dim: int, l: int, n: int, le
         assert forall|i: int| 0 <= i < row_dim implies #[trigger] f(i) == 0.0real by {
             assert(y[i] == 0.0real);
         }
-        lemma_sum_fn_tail_zero(f, 0, row_dim as nat);
+        lemma_sum_fn_all_zero(f, row_dim as nat);
     }
 }
 
@@ -612,7 +624,7 @@ pub proof fn lemma_zero_comb_basis(list: Seq<(usize, usize)>, row_dim: int, l: i
                 assert(y[row_dim + q] == 0.0real);
             }
         }
-        lemma_sum_fn_tail_zero(f, 0, nz);
+        lemma_sum_fn_all_zero(f, nz);
     }
 }
 

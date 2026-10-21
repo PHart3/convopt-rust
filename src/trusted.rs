@@ -6,7 +6,7 @@
 //
 // Model: `rv(x)` is the exact real value denoted by the f64 `x`.  Primitive
 // f64 operations are abstracted as the corresponding exact-real operations;
-// rounding, overflow, NaN and infinities are not modeled.
+// rounding, overflow, signed zero, NaN and infinities are not modeled.
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -225,15 +225,6 @@ pub assume_specification[ f64::signum ](x: f64) -> (r: f64)
 /// Finiteness is not modeled: the result is unconstrained.
 pub assume_specification[ f64::is_finite ](x: f64) -> bool;
 
-/* ---------- T9: integer square root ---------- */
-
-/// usize::isqrt: the square root rounded down (std documentation).
-pub assume_specification[ usize::isqrt ](x: usize) -> (r: usize)
-    ensures
-        r * r <= x,
-        x < (r + 1) * (r + 1),
-;
-
 /* ---------- T7: executable wrappers for unsupported primitives ---------- */
 
 /// Unary negation (Verus does not support `-x` on f64).
@@ -262,5 +253,14 @@ pub fn pos_infinity() -> f64 {
 pub fn abort(msg: &str) -> ! {
     panic!("{}", msg)
 }
+
+/* ---------- T9: integer square root ---------- */
+
+/// usize::isqrt: the square root rounded down (std documentation).
+pub assume_specification[ usize::isqrt ](x: usize) -> (r: usize)
+    ensures
+        r * r <= x,
+        x < (r + 1) * (r + 1),
+;
 
 } // verus!

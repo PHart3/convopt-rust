@@ -68,8 +68,10 @@ products, `ldlt_decomp`); `hypot` (row norms of `linear_remove_redundant_sym`);
 `linear_remove_redundant_sym`).
 
 **T7**: `neg` in `is_significantly_negative` and `negscal_vect`;
-`pos_infinity` for the five sentinels of `sdpad_loop` (`best_delta` and the
-previous residuals), whose contracts hold for any sentinel value.
+`pos_infinity` for the five sentinels of `sdpad_loop` (`best_delta`,
+`best_feas_delta`, `best_pinf`, `best_dinf`, `best_gap`: the recorded
+quantities of the best candidate so far), whose contracts hold for any
+sentinel value.
 
 **T8**: 19 `abort` calls, all data-dependent exits of the original code:
 - three "division by zero" exits of the triangular and diagonal solvers;

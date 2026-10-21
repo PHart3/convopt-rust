@@ -448,7 +448,6 @@ fn lmi_dims(lmis: &Vec<(Vec<MatrixSym>, Matrix)>) -> (res: (Vec<usize>, Vec<usiz
     let mut map_len_old = 0;
     proof {
         assert forall|i: int| 0 <= i < s implies #[trigger] bd[i] >= 0 by {}
-        lemma_sum_upto_monotone(bd, s, s);
         assert forall|n: int| 0 <= n < nvars implies #[trigger] vd[n] >= 0 by {}
     }
     for i in 0..lmis.len()

@@ -188,10 +188,7 @@ pub proof fn lemma_aug_row_dot(aug: Seq<real>, rows: int, cols: int, i: int, z: 
     ensures
         aug_row_ok(aug, rows, cols + 1, i, z) <==> row_dot_r(aug, rows, i, z) == cm_entry(aug, rows, i, cols),
 {
-    let f = |c: int| cm_entry(aug, rows, i, c) * z[c];
-    let g = |n: int| constr_entry(aug, rows, i, n) * z[n];
-    assert forall|c: int| 0 <= c < cols implies #[trigger] f(c) == g(c) by {}
-    lemma_sum_fn_ext(f, g, cols as nat);
+    lemma_residual_row_dot(aug, rows, cols, i, z);
 }
 
 /// z solves the returned augmented system [mat | point[..rows]] exactly when every dense row's
@@ -208,18 +205,9 @@ pub proof fn lemma_solves_result_aug(mat: Seq<f64>, point: Seq<f64>, rows: int, 
             <==> forall|i: int| 0 <= i < rows ==> #[trigger] row_dot_r(rvs(mat), rows, i, z) == rv(point[i]),
 {
     let res = result_aug(mat, point, rows);
-    assert(cols * rows == rows * cols);
     assert forall|i: int| 0 <= i < rows
         implies (#[trigger] aug_row_ok(res, rows, cols + 1, i, z) <==> row_dot_r(rvs(mat), rows, i, z) == rv(point[i])) by {
-        lemma_aug_row_dot(res, rows, cols, i, z);
-        let f = |n: int| constr_entry(res, rows, i, n) * z[n];
-        let g = |n: int| constr_entry(rvs(mat), rows, i, n) * z[n];
-        assert forall|n: int| 0 <= n < cols implies #[trigger] f(n) == g(n) by {
-            lemma_result_aug_entry(mat, point, rows, cols, i, n);
-        }
-        lemma_sum_fn_ext(f, g, cols as nat);
-        assert(cm_idx(rows, i, cols) == cols * rows + i);
-        assert(res[cols * rows + i] == rvs(point.subrange(0, rows))[i]);
+        lemma_result_aug_residual(mat, point, rows, cols, z, i);
     }
     if solves(res, rows, cols + 1, z) {
         assert forall|i: int| 0 <= i < rows implies #[trigger] row_dot_r(rvs(mat), rows, i, z) == rv(point[i]) by {

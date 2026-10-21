@@ -20,6 +20,14 @@ pub open spec fn min_r(x: real, y: real) -> real {
     if x <= y { x } else { y }
 }
 
+/// x^2 >= 0.
+pub proof fn lemma_sq_nonneg(x: real)
+    ensures
+        x * x >= 0.0real,
+{
+    assert(x * x >= 0.0real) by (nonlinear_arith);
+}
+
 /// |x y| = |x| |y|.
 pub proof fn lemma_abs_mul(x: real, y: real)
     ensures
@@ -88,7 +96,7 @@ pub proof fn lemma_sqrt_square(x: real)
     ensures
         sqrt_r(x * x) == abs_r(x),
 {
-    assert(x * x >= 0.0real) by (nonlinear_arith);
+    lemma_sq_nonneg(x);
     assert(abs_r(x) * abs_r(x) == x * x) by (nonlinear_arith);
     lemma_sqrt_unique(x * x, abs_r(x));
 }

@@ -32,14 +32,14 @@ broadcast use crate::trusted::group_real_model;
 
 /* ---------- the augmented system and its solution set ---------- */
 
-/// Row i of [A | b] is satisfied by x: sum_{c < col_dim - 1} A_ic x_c == b_i.
-pub open spec fn aug_row_ok(m: Seq<real>, row_dim: int, col_dim: int, i: int, x: Seq<real>) -> bool {
-    sum_fn_r(|c: int| cm_entry(m, row_dim, i, c) * x[c], (col_dim - 1) as nat) == cm_entry(m, row_dim, i, col_dim - 1)
-}
-
-/// Residual of row i of [A | b] at x: sum_c A_ic x_c - b_i.
+/// Residual of row i of [A | b] at x: sum_{c < col_dim - 1} A_ic x_c - b_i.
 pub open spec fn row_residual_r(m: Seq<real>, row_dim: int, col_dim: int, i: int, x: Seq<real>) -> real {
     sum_fn_r(|c: int| cm_entry(m, row_dim, i, c) * x[c], (col_dim - 1) as nat) - cm_entry(m, row_dim, i, col_dim - 1)
+}
+
+/// Row i of [A | b] is satisfied by x: its residual vanishes.
+pub open spec fn aug_row_ok(m: Seq<real>, row_dim: int, col_dim: int, i: int, x: Seq<real>) -> bool {
+    row_residual_r(m, row_dim, col_dim, i, x) == 0.0real
 }
 
 /// x solves the augmented system.

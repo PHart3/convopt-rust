@@ -3,13 +3,15 @@
 // `linear_remove_redundant_sym` runs `gauss_elim` on the augmented constraint
 // matrix [A | b] (row i is the packed symmetric matrix M_i followed by b_i),
 // aborts if the elimination finds the system inconsistent, and returns the
-// first `rank` rows of the echelon form, each divided by the Frobenius norm of
-// the symmetric matrix M_i it represents,
+// first `rank` rows of the echelon form, each divided by the Frobenius norm
+// s_i = ||M_i||_F of the symmetric matrix M_i it represents.  The loop
+// accumulates this norm over the packed entries as
 //
-//     s_i = ||M_i||_F = sqrt( sum_{r <= c} pk_wt(r, c) M_i[r, c]^2 )
+//     s_i^2 = sum_{r <= c} pk_wt(r, c) M_i[r, c]^2
 //
-// (off-diagonal packed entries count twice).  This module defines that scale, the
-// result predicate `reduced_system`, and proves what the reduction guarantees:
+// (off-diagonal packed entries count twice); `lemma_row_sq_frob` identifies the
+// two.  This module defines the scale, the result predicate `reduced_system`,
+// and proves what the reduction guarantees:
 // every solution of the input system solves the reduced system, and every
 // solution of the reduced system satisfies the kept echelon rows exactly and
 // each dropped echelon row up to the residual 2^rank * eps * (1 + ||x||_1),
@@ -70,27 +72,28 @@ pub open spec fn row_sq_upto_r(e: Seq<real>, row_dim: int, i: int, k: int) -> re
     tri_sum_r(|r: int, c: int| row_sq_term_r(e, row_dim, i, r, c), k as nat)
 }
 
-/// Squared Frobenius norm of the symmetric matrix of row i: sum_{r <= c < dim} pk_wt(r, c) M_i[r, c]^2.
+/// The weighted packed sum of squares the loop accumulates: sum_{r <= c < dim} pk_wt(r, c) M_i[r, c]^2.
 pub open spec fn row_sq_r(e: Seq<real>, row_dim: int, dim: int, i: int) -> real {
     row_sq_upto_r(e, row_dim, i, dim)
 }
 
-/// The Frobenius norm ||M_i||_F of row i.
-pub open spec fn row_scale_r(e: Seq<real>, row_dim: int, dim: int, i: int) -> real {
-    sqrt_r(row_sq_r(e, row_dim, dim, i))
-}
-
-/// Row i of the stored constraint matrix as a packed symmetric matrix.
+/// Row i of the stored constraint matrix as a packed symmetric matrix M_i.
 pub open spec fn packed_row_r(e: Seq<real>, row_dim: int, dim: int, i: int) -> Seq<real> {
     Seq::new(pk_len(dim) as nat, |n: int| constr_entry(e, row_dim, i, n))
 }
 
-/// The squared row norm is the Frobenius self-product <M_i, M_i>_F of sym_spec.rs.
+/// The scale of row i: the Frobenius norm ||M_i||_F of its symmetric matrix.
+pub open spec fn row_scale_r(e: Seq<real>, row_dim: int, dim: int, i: int) -> real {
+    frob_norm_r(packed_row_r(e, row_dim, dim, i), dim)
+}
+
+/// The packed sum of squares is the Frobenius self-product <M_i, M_i>_F, so the scale is its square root.
 pub proof fn lemma_row_sq_frob(e: Seq<real>, row_dim: int, dim: int, i: int)
     requires
         dim >= 0,
     ensures
         row_sq_r(e, row_dim, dim, i) == frob_r(packed_row_r(e, row_dim, dim, i), packed_row_r(e, row_dim, dim, i), dim),
+        row_scale_r(e, row_dim, dim, i) == sqrt_r(row_sq_r(e, row_dim, dim, i)),
 {
     let m = packed_row_r(e, row_dim, dim, i);
     lemma_frob_tri(m, m, dim as nat);
@@ -176,7 +179,7 @@ pub proof fn lemma_row_scale_pos(e: Seq<real>, row_dim: int, dim: int, pivots: S
     let f = |r: int, c: int| row_sq_term_r(e, row_dim, i, r, c);
     assert forall|r: int, c: int| 0 <= r <= c < dim implies #[trigger] f(r, c) >= 0.0real by {
         let x = constr_entry(e, row_dim, i, pk_idx(r, c));
-        assert(x * x >= 0.0real) by (nonlinear_arith);
+        lemma_sq_nonneg(x);
     }
     lemma_tri_sum_ge_term(f, dim as nat, r0, c0);
     let x = constr_entry(e, row_dim, i, t);
@@ -187,6 +190,7 @@ pub proof fn lemma_row_scale_pos(e: Seq<real>, row_dim: int, dim: int, pivots: S
         requires eps > 0.0real;
     assert(f(r0, c0) == pk_wt(r0, c0) * (x * x));
     let sq = row_sq_r(e, row_dim, dim, i);
+    lemma_row_sq_frob(e, row_dim, dim, i);
     let s = sqrt_r(sq);
     assert(s > 0.0real) by (nonlinear_arith)
         requires s >= 0.0real, s * s == sq, sq > 0.0real;
@@ -282,7 +286,7 @@ pub proof fn lemma_dropped_row_residual(e: Seq<real>, row_dim: int, col_dim: int
 /// is nonzero).
 pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>) -> bool {
     let cd = red_col_dim(dim);
-    let rd = a0.len() as int / cd;
+    let rd = red_row_dim(a0, dim);
     let rank = pivots.len() as int;
     let eps = gauss_eps_r(a0);
     &&& e.len() == a0.len()
@@ -309,7 +313,7 @@ pub open spec fn reduction_transform(a0: Seq<real>, e: Seq<real>, rd: int, cd: i
 
 /// The number of rows of an augmented system over dim x dim symmetric matrices.
 pub open spec fn red_row_dim(a0: Seq<real>, dim: int) -> int {
-    a0.len() as int / red_col_dim(dim)
+    rows_of(a0.len() as int, red_col_dim(dim))
 }
 
 /// The postcondition of `linear_remove_redundant_sym` (a0 the input, e its echelon form, res the result).
@@ -323,31 +327,20 @@ pub proof fn lemma_reduced_of_input_solution(a0: Seq<real>, e: Seq<real>, res: S
         dim >= 0,
         reduced_with(a0, e, res, dim, pivots),
         x.len() == red_col_dim(dim) - 1,
-        solves(a0, a0.len() as int / red_col_dim(dim), red_col_dim(dim), x),
+        solves(a0, red_row_dim(a0, dim), red_col_dim(dim), x),
     ensures
         solves(res, pivots.len() as int, red_col_dim(dim), x),
 {
     let cd = red_col_dim(dim);
-    let rd = a0.len() as int / cd;
+    let rd = red_row_dim(a0, dim);
     let rank = pivots.len() as int;
-    let n = (cd - 1) as nat;
     assert(solves(e, rd, cd, x));
     assert forall|i: int| 0 <= i < rank implies #[trigger] aug_row_ok(res, rank, cd, i, x) by {
         assert(aug_row_ok(e, rd, cd, i, x));
-        let s = row_scale_r(e, rd, dim, i);
-        let f = |c: int| cm_entry(e, rd, i, c) * x[c];
-        let g = |c: int| cm_entry(res, rank, i, c) * x[c];
-        assert forall|c: int| 0 <= c < n implies #[trigger] g(c) == (1.0real / s) * f(c) by {
-            let (u, w) = (cm_entry(e, rd, i, c), x[c]);
-            assert(cm_entry(res, rank, i, c) == u / s);
-            assert((u / s) * w == (1.0real / s) * (u * w)) by (nonlinear_arith)
-                requires s != 0.0real;
-        }
-        lemma_sum_fn_scale(f, g, 1.0real / s, n);
-        let b = cm_entry(e, rd, i, cd - 1);
-        assert(cm_entry(res, rank, i, cd - 1) == b / s);
-        assert((1.0real / s) * b == b / s) by (nonlinear_arith)
-            requires s != 0.0real;
+        lemma_kept_row_residual(a0, e, res, dim, pivots, i, x);
+        let (s, r) = (row_scale_r(e, rd, dim, i), row_residual_r(res, rank, cd, i, x));
+        assert(r == 0.0real) by (nonlinear_arith)
+            requires s != 0.0real, s * r == 0.0real;
     }
 }
 
@@ -360,33 +353,18 @@ pub proof fn lemma_reduced_solution_echelon(a0: Seq<real>, e: Seq<real>, res: Se
         x.len() == red_col_dim(dim) - 1,
         solves(res, pivots.len() as int, red_col_dim(dim), x),
     ensures
-        forall|i: int| 0 <= i < pivots.len() ==> #[trigger] aug_row_ok(e, a0.len() as int / red_col_dim(dim), red_col_dim(dim), i, x),
-        forall|i: int| pivots.len() <= i < a0.len() as int / red_col_dim(dim)
-            ==> abs_r(#[trigger] row_residual_r(e, a0.len() as int / red_col_dim(dim), red_col_dim(dim), i, x))
+        forall|i: int| 0 <= i < pivots.len() ==> #[trigger] aug_row_ok(e, red_row_dim(a0, dim), red_col_dim(dim), i, x),
+        forall|i: int| pivots.len() <= i < red_row_dim(a0, dim)
+            ==> abs_r(#[trigger] row_residual_r(e, red_row_dim(a0, dim), red_col_dim(dim), i, x))
                 <= pow2_r(pivots.len()) * gauss_eps_r(a0) * (1.0real + one_norm_r(x)),
 {
     let cd = red_col_dim(dim);
-    let rd = a0.len() as int / cd;
+    let rd = red_row_dim(a0, dim);
     let rank = pivots.len() as int;
-    let n = (cd - 1) as nat;
     let eps = gauss_eps_r(a0);
     assert forall|i: int| 0 <= i < rank implies #[trigger] aug_row_ok(e, rd, cd, i, x) by {
         assert(aug_row_ok(res, rank, cd, i, x));
-        let s = row_scale_r(e, rd, dim, i);
-        let f = |c: int| cm_entry(e, rd, i, c) * x[c];
-        let g = |c: int| cm_entry(res, rank, i, c) * x[c];
-        assert forall|c: int| 0 <= c < n implies #[trigger] g(c) == (1.0real / s) * f(c) by {
-            let (u, w) = (cm_entry(e, rd, i, c), x[c]);
-            assert(cm_entry(res, rank, i, c) == u / s);
-            assert((u / s) * w == (1.0real / s) * (u * w)) by (nonlinear_arith)
-                requires s != 0.0real;
-        }
-        lemma_sum_fn_scale(f, g, 1.0real / s, n);
-        let (sf, b) = (sum_fn_r(f, n), cm_entry(e, rd, i, cd - 1));
-        assert(cm_entry(res, rank, i, cd - 1) == b / s);
-        assert((1.0real / s) * sf == b / s);
-        assert(sf == b) by (nonlinear_arith)
-            requires s != 0.0real, (1.0real / s) * sf == b / s;
+        lemma_kept_row_residual(a0, e, res, dim, pivots, i, x);
     }
     // eps >= 0
     lemma_max0_fn_bound(|t: int| abs_r(a0[t]), a0.len());

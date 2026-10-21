@@ -14,7 +14,7 @@ use vstd::seq::*;
 #[cfg(verus_keep_ghost)]
 use crate::trusted::sqrt_r;
 #[cfg(verus_keep_ghost)]
-use crate::real_spec::{abs_r, max_r};
+use crate::real_spec::{abs_r, max_r, lemma_sq_nonneg};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 
@@ -245,20 +245,6 @@ pub proof fn lemma_block_prev_end_le(start: int, a: int, b: int)
     }
 }
 
-/// Every block entry has packed index at most that of the last diagonal entry.
-pub proof fn lemma_block_idx_max(start: int, dim: int, t: int)
-    requires
-        start >= 0,
-        dim >= 1,
-        is_block_idx(t, start, dim),
-    ensures
-        t <= pk_idx(start + dim - 1, start + dim - 1),
-{
-    let (a, b) = choose|a: int, b: int| 0 <= a <= b < dim && t == #[trigger] pk_idx(start + a, start + b);
-    lemma_pk_idx_order(start + a, start + b, start + dim - 1, start + dim - 1);
-    lemma_pk_idx_order(start + dim - 1, start + dim - 1, start + a, start + b);
-}
-
 /* ---------- partitioned symmetric matrices (Vec<Vector>) ---------- */
 
 /// A dim x dim symmetric matrix partitioned by the columns of its upper triangle:
@@ -439,6 +425,17 @@ pub proof fn lemma_sum_fn_zero(n: nat)
     if n > 0 {
         lemma_sum_fn_zero((n - 1) as nat);
     }
+}
+
+/// A sum whose terms all vanish is zero.
+pub proof fn lemma_sum_fn_all_zero(f: spec_fn(int) -> real, n: nat)
+    requires
+        forall|i: int| 0 <= i < n ==> #[trigger] f(i) == 0.0real,
+    ensures
+        sum_fn_r(f, n) == 0.0real,
+{
+    lemma_sum_fn_ext(f, |i: int| 0.0real, n);
+    lemma_sum_fn_zero(n);
 }
 
 /// A constant summand sums to n times the constant.
@@ -690,6 +687,20 @@ pub proof fn lemma_sum_fn_transpose(f: spec_fn(int) -> real, n: nat, r1: int, r2
 }
 
 /// Double sums are monotone in the summand.
+/// A double sum of nonnegative terms is nonnegative.
+pub proof fn lemma_sum2_fn_nonneg(f: spec_fn(int, int) -> real, n: nat)
+    requires
+        forall|r: int, c: int| 0 <= r < n && 0 <= c < n ==> #[trigger] f(r, c) >= 0.0real,
+    ensures
+        sum2_fn_r(f, n) >= 0.0real,
+{
+    let rows = |r: int| sum_fn_r(|c: int| f(r, c), n);
+    assert forall|r: int| 0 <= r < n implies #[trigger] rows(r) >= 0.0real by {
+        lemma_sum_fn_nonneg(|c: int| f(r, c), n);
+    }
+    lemma_sum_fn_nonneg(rows, n);
+}
+
 pub proof fn lemma_sum2_fn_le(f: spec_fn(int, int) -> real, g: spec_fn(int, int) -> real, n: nat)
     requires
         forall|r: int, c: int| 0 <= r < n && 0 <= c < n ==> #[trigger] f(r, c) <= g(r, c),
@@ -728,14 +739,10 @@ pub proof fn lemma_frob_self_nonneg(a: Seq<real>, dim: int)
         frob_r(a, a, dim) >= 0.0real,
 {
     let f = |r: int, c: int| sym_entry(a, r, c) * sym_entry(a, r, c);
-    let rows = |r: int| sum_fn_r(|c: int| f(r, c), dim as nat);
-    assert forall|r: int| 0 <= r < dim implies #[trigger] rows(r) >= 0.0real by {
-        assert forall|c: int| 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {
-            assert(sym_entry(a, r, c) * sym_entry(a, r, c) >= 0.0real) by (nonlinear_arith);
-        }
-        lemma_sum_fn_nonneg(|c: int| f(r, c), dim as nat);
+    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {
+        lemma_sq_nonneg(sym_entry(a, r, c));
     }
-    lemma_sum_fn_nonneg(rows, dim as nat);
+    lemma_sum2_fn_nonneg(f, dim as nat);
 }
 
 /// <A, B>_F = <B, A>_F.
@@ -810,10 +817,8 @@ pub proof fn lemma_partial_row_init(t: spec_fn(int, int) -> real, dim: int, k: i
         partial_row(t, dim, k, 0, 0) == 0.0real,
 {
     let f = |l: int| if swept(k, l, 0, 0) { t(k, l) } else { 0.0real };
-    let z = |l: int| 0.0real;
-    assert forall|l: int| 0 <= l < dim implies #[trigger] f(l) == z(l) by {}
-    lemma_sum_fn_ext(f, z, dim as nat);
-    lemma_sum_fn_scale(z, z, 0.0real, dim as nat);
+    assert forall|l: int| 0 <= l < dim implies #[trigger] f(l) == 0.0real by {}
+    lemma_sum_fn_all_zero(f, dim as nat);
 }
 
 /// Finishing column i (position (i, i + 1)) is the same as starting column i + 1.
@@ -908,11 +913,8 @@ pub proof fn lemma_pk_idx_injective(r1: int, c1: int, r2: int, c2: int)
     ensures
         pk_idx(r1, c1) == pk_idx(r2, c2) <==> (r1 == r2 && c1 == c2),
 {
-    if c1 < c2 {
-        lemma_pk_idx_bound(r1, c1, c2);
-    } else if c2 < c1 {
-        lemma_pk_idx_bound(r2, c2, c1);
-    }
+    lemma_pk_idx_order(r1, c1, r2, c2);
+    lemma_pk_idx_order(r2, c2, r1, c1);
 }
 
 /// Every packed index below pk_len(dim) is the index of a triangle position.

@@ -70,20 +70,6 @@ pub proof fn lemma_ldlt_sum_ext(l: Seq<real>, l2: Seq<real>, d: Seq<real>, d2: S
     lemma_sum_fn_ext(f, g, n);
 }
 
-/// The sum is symmetric in i and j.
-pub proof fn lemma_ldlt_sum_comm(l: Seq<real>, d: Seq<real>, dim: int, i: int, j: int, n: nat)
-    ensures
-        ldlt_sum_r(l, d, dim, i, j, n) == ldlt_sum_r(l, d, dim, j, i, n),
-{
-    let f = |k: int| d[k] * lt_entry(l, dim, i, k) * lt_entry(l, dim, j, k);
-    let g = |k: int| d[k] * lt_entry(l, dim, j, k) * lt_entry(l, dim, i, k);
-    assert forall|k: int| 0 <= k < n implies #[trigger] f(k) == g(k) by {
-        let (u, v, w) = (d[k], lt_entry(l, dim, i, k), lt_entry(l, dim, j, k));
-        assert(u * v * w == u * w * v) by (nonlinear_arith);
-    }
-    lemma_sum_fn_ext(f, g, n);
-}
-
 /* ---------- preservation under the algorithm's writes ---------- */
 
 /// Writing position (i, j) of L leaves every other entry (r, c) of the triangle unchanged.

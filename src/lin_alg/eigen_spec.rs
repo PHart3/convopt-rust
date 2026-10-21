@@ -231,7 +231,7 @@ pub proof fn lemma_offdiag_norm_bound(b: Seq<real>, dim: int, thr: real)
     lemma_frob_f_self_nonneg(off, dim);
     assert(cnt >= 0.0real) by (nonlinear_arith)
         requires cnt == (dim as real) * ((dim as real) - 1.0real), dim as real >= 1.0real || dim as real == 0.0real;
-    assert(thr * thr >= 0.0real) by (nonlinear_arith);
+    lemma_sq_nonneg(thr);
     assert(cnt * (thr * thr) >= 0.0real);
     lemma_sqrt_monotone(s, cnt * (thr * thr));
     lemma_sqrt_mul(cnt, thr * thr);
@@ -351,6 +351,7 @@ pub open spec fn visits_each_pair_once(visited: Seq<(int, int)>, dim: int) -> bo
             ==> 0 <= (#[trigger] visited[t]).0 < visited[t].1 < dim && t == cyc_pos(visited[t].0, visited[t].1)
 }
 
+/// The column-cyclic order visits every pair j < k exactly once, at position cyc_pos(j, k).
 pub proof fn lemma_cyc_order_visits_each_pair_once(dim: int)
     requires
         dim >= 1,
@@ -400,9 +401,25 @@ pub proof fn lemma_converged_approx(a: Seq<real>, q: Seq<real>, b: Seq<real>, di
 /// within the stopping bound `jacobi_eps_r`.
 pub open spec fn eigensolver_ok(a: Seq<real>, b: Seq<real>, q: Seq<real>, vals: Seq<real>, dim: int) -> bool {
     &&& q.len() == dim * dim
-    &&& vals.len() == dim
     &&& vals == sym_diag_r(b, dim)
     &&& eigen_decomp_approx(a, q, b, dim, jacobi_eps_r(b, dim))
+}
+
+/// A 1 x 1 matrix is its own eigendecomposition: Q = (1) and B = A have no off-diagonal entries.
+pub proof fn lemma_eigensolver_dim1(a: Seq<real>, q: Seq<real>)
+    requires
+        a.len() >= 1,
+        q.len() == 1,
+        q[0] == 1.0real,
+    ensures
+        eigensolver_ok(a, a, q, sym_diag_r(a, 1), 1),
+{
+    assert forall|r: int, c: int| 0 <= r < 1 && 0 <= c < 1
+        implies #[trigger] cm_entry(q, 1, r, c) == (if r == c { 1.0real } else { 0.0real }) by {
+        assert(cm_idx(1, r, c) == 0);
+    }
+    lemma_eigen_inv_init(a, q, 1);
+    lemma_converged_approx(a, q, a, 1);
 }
 
 } // verus!

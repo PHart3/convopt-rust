@@ -12,6 +12,8 @@ use vstd::seq::*;
 use vstd::seq_lib::*;
 #[cfg(verus_keep_ghost)]
 use crate::trusted::{rv, sqrt_r};
+#[cfg(verus_keep_ghost)]
+use crate::real_spec::lemma_sq_nonneg;
 
 verus! {
 
@@ -293,7 +295,7 @@ pub proof fn lemma_dot_self_nonneg(a: Seq<real>)
         dot_r(a, a) >= 0.0real,
 {
     assert forall|i: int| 0 <= i < vmul_r(a, a).len() implies #[trigger] vmul_r(a, a)[i] >= 0.0real by {
-        assert(a[i] * a[i] >= 0.0real) by (nonlinear_arith);
+        lemma_sq_nonneg(a[i]);
     }
     lemma_sum_r_nonneg(vmul_r(a, a));
 }

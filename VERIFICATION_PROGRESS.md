@@ -43,40 +43,45 @@ All 22 layers (L00-L21) are done. L21 holds the post-hoc proofs of `ADDITIONAL_P
 
 ## Verified-function count
 
-Last full run: **916 verified, 0 errors** (about 28 s). `--time` reports no
+Last full run: **894 verified, 0 errors** (about 28 s). `--time` reports no
 slow proof, and no `rlimit` is raised.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
 items are not counted. The count fell from 999 to 916 when a sweep dropped
 83 `nonlinear_arith` annotations that Verus does not need (listed in the
-appendix of `verification_summary.tex`); 296 remain.
+appendix of `verification_summary.tex`), and from 916 to 894 when a clean-up
+sweep replaced repeated inline `nonlinear_arith` steps by the shared lemmas
+`lemma_sq_nonneg`, `lemma_sum_fn_all_zero`, `lemma_sum2_fn_nonneg`,
+`lemma_rows_of_exact` and `lemma_eigensolver_dim1`, removed four unused
+lemmas and dropped the no-op diagonal loop of `ldlt_decomp`; 274
+`nonlinear_arith` sub-queries remain.
 
 | Module | Verified | Layers |
 |--------|---------:|--------|
 | `trusted` | 0 | trusted items only |
-| `real_spec` | 21 | L00 |
-| `lin_alg::vec_spec` | 21 | L01, L21 |
+| `real_spec` | 22 | L00 |
+| `lin_alg::vec_spec` | 20 | L01, L21 |
 | `lin_alg::sym_spec` | 69 | L02, L03, L21 |
-| `lin_alg::mat_spec` | 92 | L03, L07, L12, L21 |
-| `lin_alg::constr_spec` | 21 | L04 |
+| `lin_alg::mat_spec` | 88 | L03, L07, L12, L21 |
+| `lin_alg::constr_spec` | 23 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
-| `lin_alg::ldlt_spec` | 11 | L06, L07 |
+| `lin_alg::ldlt_spec` | 9 | L06, L07 |
 | `lin_alg::jacobi_spec` | 57 | L08 |
 | `lin_alg::eigen_spec` | 20 | L09-L11 |
 | `lin_alg::spectral_spec` | 9 | L12 |
 | `lin_alg::gauss_spec` | 40 | L13, L21 |
-| `lin_alg::reduce_spec` | 28 | L14, L21 |
+| `lin_alg::reduce_spec` | 24 | L14, L21 |
 | `lin_alg::matrix` | 46 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
-| `lin_alg::sym_matrix` | 153 | L02, L04-L07, L14, L15 |
-| `lin_alg::jacobi` | 40 | L08, L10-L12 |
-| `sdp_spec` | 61 | L16 |
+| `lin_alg::sym_matrix` | 144 | L02, L04-L07, L14, L15 |
+| `lin_alg::jacobi` | 38 | L08, L10-L12 |
+| `sdp_spec` | 58 | L16 |
 | `sdpad_spec` | 34 | L17-L19, L21 |
 | `feas_spec` | 43 | L21 |
 | `sdp` | 98 | L15, L16 |
 | `sdp_altdir` | 35 | L17-L19 |
-| **total** | **916** | |
+| **total** | **894** | |
 
 ## Main contracts
 
@@ -114,7 +119,7 @@ appendix of `verification_summary.tex`); 296 remain.
   (`spectral_part_ok`). Nothing relates them to the exact PSD projection.
 - **Standard form** (`sdp.rs`): `sdp_to_standard` preserves the objective,
   the equality and LMI rows (`std_rows_ok`), the zero pattern (`zeros_ok`)
-  and variable reconstruction (`Z_n = B_{s+2n-1} - B_{s+2n}`); the reduction
+  and variable reconstruction (`Z_n = B_{s+2n} - B_{s+2n+1}`); the reduction
   is exported as `reduced_from`.
 - **Solver** (`sdp_altdir.rs`):
   - `sdpad_setup` (`sdpad_setup_ok`): Frobenius weighting, Gram matrix, PSD
@@ -223,6 +228,8 @@ The four bugs in `EXPOSED_BUGS.md` were fixed. Other changes:
   computed once before the loop; the best-solution copy reuses its buffer.
 - Binary vector operations require equal lengths (the original `zip`
   truncated silently); `constraint_lin_comb` slices its argument accordingly.
+- `ldlt_decomp` no longer rewrites the diagonal of `ident_mat_low_tri(dim)`,
+  which is already 1 (a no-op loop of the original).
 - `jacobi_eigen_cach`: `biggest` starts at `0.0`; the rotation limit uses
   `saturating_mul`; the
   eigenvector matrix is returned without a final copy; regression test
@@ -271,11 +278,13 @@ the installed Verus (0.2026.08.23).
   is possible; prove `a <= b` first or use the named iterator.
 - `nonlinear_arith` sees only its `requires`: prove one algebraic step at a
   time with identically bracketed monomials; use vstd `div_mod` lemmas for
-  `/` and `%`. It is not needed for products with a literal constant, for
-  commutativity, associativity or distribution of products of variables, or
-  for `x * 0 == 0`: the default query normalizes polynomial terms. It is
-  needed for facts that use hypotheses nonlinearly (sign reasoning,
-  cancellation, bounds like `a <= b, c >= 0 ==> a * c <= b * c`, division).
+  `/` and `%`. It is not needed for products with a literal constant or for
+  `x * 0 == 0`. Commutativity, associativity and distribution of products of
+  variables usually go through in the default query, but a bare
+  `assert(p * q == q * p)` can fail when the surrounding context changes;
+  `by (nonlinear_arith)` makes such steps robust. It is needed for facts that
+  use hypotheses nonlinearly (sign reasoning, cancellation, bounds like
+  `a <= b, c >= 0 ==> a * c <= b * c`, division).
 - Closures match across the spec/proof boundary only when built from named
   spec functions and indexing.
 - An `exists` postcondition needs a ground witness with the trigger's exact

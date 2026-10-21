@@ -4,8 +4,8 @@
 // a MatrixSym: a list of partitioned symmetric matrices, each acting on a packed
 // symmetric matrix through the packed dot product. The standard-form variable
 // Z is one large packed symmetric matrix whose diagonal blocks are, in order,
-// the LMI blocks B_1, .., B_s and the pairs B_{s+2n-1}, B_{s+2n} holding the
-// user variables Z_n = B_{s+2n-1} - B_{s+2n}.
+// the LMI blocks B_0, .., B_{s-1} and the pairs B_{s+2n}, B_{s+2n+1} holding the
+// user variables Z_n = B_{s+2n} - B_{s+2n+1}.
 //
 // This module defines the packed views of user maps (`symrow_r`, `part_r`),
 // the block extraction `blk_r` and the variable `zvar_r`, the integer-square-root
@@ -325,7 +325,7 @@ pub proof fn lemma_dot_add_sub(v: Seq<real>, v1: Seq<real>, v2: Seq<real>, v3: S
     lemma_sum_fn_scale(f3, n3, -1.0real, z.len());
 }
 
-/// The packed dot product with the zero vector vanishes.
+/// The packed dot product vanishes when the left factor is zero.
 pub proof fn lemma_dot_zero(v: Seq<real>, z: Seq<real>)
     requires
         v.len() == z.len(),
@@ -334,8 +334,7 @@ pub proof fn lemma_dot_zero(v: Seq<real>, z: Seq<real>)
         dot_r(v, z) == 0.0real,
 {
     lemma_dot_sum_fn(v, z);
-    lemma_sum_fn_ext(|t: int| v[t] * z[t], |t: int| 0.0real, z.len());
-    lemma_sum_fn_zero(z.len());
+    lemma_sum_fn_all_zero(|t: int| v[t] * z[t], z.len());
 }
 
 /* ---------- integer square root and block layout arithmetic ---------- */
@@ -372,22 +371,6 @@ pub proof fn lemma_isqrt_exists(x: int)
             assert(is_isqrt(k, x));
         }
     }
-}
-
-/// The integer square root is unique: a perfect square has its root as integer square root.
-pub proof fn lemma_isqrt_square(k: int)
-    requires
-        k >= 0,
-    ensures
-        isqrt_r(k * k) == k,
-{
-    assert(k * k >= 0);
-    lemma_isqrt_exists(k * k);
-    let q = isqrt_r(k * k);
-    assert(q < k ==> (q + 1) * (q + 1) <= k * k) by (nonlinear_arith)
-        requires q >= 0;
-    assert(q > k ==> q * q > k * k) by (nonlinear_arith)
-        requires k >= 0;
 }
 
 /// Sum of the first n entries of an integer sequence.
@@ -631,7 +614,6 @@ pub proof fn lemma_pk_len_diff(n: int, k: int)
 {
     if k == 0 {
         lemma_pk_col_start_zero();
-        assert(0 * (n - 0) == 0);
     } else {
         lemma_pk_len_diff(n, k - 1);
         lemma_pk_col_start_step(n - k);
@@ -887,7 +869,7 @@ pub proof fn lemma_sum_upto_ge(s: Seq<int>, j: int)
     }
 }
 
-/// Every entry of block_sizes(bd, vd) is one of the given sizes (and nonnegative when they are).
+/// Every entry of block_sizes(bd, vd) is one of the given sizes.
 pub proof fn lemma_block_sizes_entry(bd: Seq<int>, vd: Seq<int>, j: int)
     requires
         0 <= j < bd.len() + 2 * vd.len(),
@@ -920,7 +902,7 @@ pub proof fn lemma_row_dot_basis(m: Seq<real>, row_dim: int, i: int, t0: int, le
     assert(f(t0) == constr_entry(m, row_dim, i, t0) * 1.0real);
 }
 
-/// The packed dot product with the zero vector on the right vanishes.
+/// The packed dot product vanishes when the right factor is zero.
 pub proof fn lemma_dot_zero_right(v: Seq<real>, z: Seq<real>)
     requires
         v.len() == z.len(),
@@ -928,9 +910,8 @@ pub proof fn lemma_dot_zero_right(v: Seq<real>, z: Seq<real>)
     ensures
         dot_r(v, z) == 0.0real,
 {
-    lemma_dot_sum_fn(v, z);
-    lemma_sum_fn_ext(|t: int| v[t] * z[t], |t: int| 0.0real, z.len());
-    lemma_sum_fn_zero(z.len());
+    lemma_dot_comm(v, z);
+    lemma_dot_zero(z, v);
 }
 
 /// A packed index below pk_len(d) addresses a column below d.

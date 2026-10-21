@@ -24,8 +24,6 @@ use crate::lin_alg::vec_spec::*;
 use crate::lin_alg::sym_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::mat_spec::*;
-#[cfg(verus_keep_ghost)]
-use crate::lin_alg::sym_spec::lemma_pk_idx_injective;
 
 verus! {
 
@@ -57,7 +55,7 @@ pub open spec fn rot_entry(a: MatF, j: int, k: int, c: real, s: real, r: int, l:
     else { a(r, l) }
 }
 
-/// J^T A J as an index function (for symmetric A).
+/// J^T A J as an index function.
 pub open spec fn rot_target(a: MatF, j: int, k: int, c: real, s: real) -> MatF {
     |r: int, l: int| rot_entry(a, j, k, c, s, r, l)
 }

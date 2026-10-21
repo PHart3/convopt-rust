@@ -11,7 +11,7 @@ use crate::lin_alg::comparison::{pivot_below_positive_threshold, scaled_near_zer
 #[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
-use crate::real_spec::{abs_r, max_r};
+use crate::real_spec::{abs_r, max_r, lemma_sq_nonneg};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -1260,8 +1260,8 @@ pub fn mat_sym_diagonal_mult_sym(sym_dim: usize, mat: &SymMatrix, start: usize, 
 //
 // Verified against src/lin_alg/reduce_spec.rs: the result consists of the first `rank` rows
 // of the echelon form produced by gauss_elim, each divided by the Frobenius norm of the
-// symmetric matrix it represents, sqrt(sum_{r <= c} pk_wt(r, c) M_rc^2) (off-diagonal packed
-// entries count twice); an inconsistent system aborts.
+// symmetric matrix it represents (accumulated over the packed entries, which count twice
+// off the diagonal); an inconsistent system aborts.
 verus! {
 
 pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Matrix)
@@ -1373,7 +1373,7 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
         scale = scale.hypot(echelon[i]);
         proof {
             let x = rv(echelon@[ii]);
-            assert(x * x >= 0.0real) by (nonlinear_arith);
+            lemma_sq_nonneg(x);
             assert(rv(scale) == sqrt_r(0.0real * 0.0real + x * x));
             assert(constr_entry(e, rd, ii, pk_idx(0, 0)) == x);
             assert(row_sq_term_r(e, rd, ii, 0, 0) == 1.0real * (x * x));
@@ -1455,8 +1455,8 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
                     let (xv, fv) = (rv(v), rv(f));
                     assert(rv(y) * rv(y) == (fv * fv) * (xv * xv)) by (nonlinear_arith)
                         requires rv(y) == xv * fv;
-                    assert(prev * prev >= 0.0real) by (nonlinear_arith);
-                    assert(xv * xv >= 0.0real) by (nonlinear_arith);
+                    lemma_sq_nonneg(prev);
+                    lemma_sq_nonneg(xv);
                     assert(rv(scale) == sqrt_r(prev * prev + rv(y) * rv(y)));
                     assert(constr_entry(e, rd, ii, pk_idx(r, kk)) == xv);
                     assert(row_sq_term_r(e, rd, ii, r, kk) == 2.0real * (xv * xv));
@@ -1471,8 +1471,8 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
             scale = scale.hypot(v);
             proof {
                 let xv = rv(v);
-                assert(prev * prev >= 0.0real) by (nonlinear_arith);
-                assert(xv * xv >= 0.0real) by (nonlinear_arith);
+                lemma_sq_nonneg(prev);
+                lemma_sq_nonneg(xv);
                 assert(rv(scale) == sqrt_r(prev * prev + xv * xv));
                 assert(constr_entry(e, rd, ii, pk_idx(kk, kk)) == xv);
                 assert(row_sq_term_r(e, rd, ii, kk, kk) == 1.0real * (xv * xv));
@@ -1487,6 +1487,7 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
         proof {
             lemma_row_scale_pos(e, rd, d, pivots, eps, ii);
             lemma_sqrt_unique(row_sq_r(e, rd, d, ii), rv(scale));
+            lemma_row_sq_frob(e, rd, d, ii);
             assert(rv(scale) == row_scale_r(e, rd, d, ii));
         }
         let ghost before = rvs(result@);
@@ -1584,9 +1585,8 @@ pub fn constraint_action(constr: &(&Matrix, &Vec<(usize, usize)>), var: &SymMatr
     let mat_len = mat.len();
     let row_dim = mat_len / col_dim;
     proof {
-        lemma_fundamental_div_mod(mat@.len() as int, col_dim as int);
-        assert(row_dim * col_dim == mat@.len()) by (nonlinear_arith)
-            requires mat@.len() as int == col_dim as int * (mat@.len() as int / col_dim as int), row_dim as int == mat@.len() as int / col_dim as int;
+        lemma_rows_of_exact(mat@.len() as int, col_dim as int);
+        assert(row_dim * col_dim == mat@.len());
     }
     let col0 = slice_to_vec(&mat[..row_dim]);
     let mut result = scal_vect(var[0], &col0);
@@ -1706,9 +1706,8 @@ pub fn constraint_lin_comb(dim: usize, constr: &(&Matrix, &Vec<(usize, usize)>),
     }
     let row_dim = mat_len / col_dim;
     proof {
-        lemma_fundamental_div_mod(mat@.len() as int, col_dim as int);
-        assert(row_dim * col_dim == mat@.len()) by (nonlinear_arith)
-            requires mat@.len() as int == col_dim as int * (mat@.len() as int / col_dim as int), row_dim as int == mat@.len() as int / col_dim as int;
+        lemma_rows_of_exact(mat@.len() as int, col_dim as int);
+        assert(row_dim * col_dim == mat@.len());
         lemma_pk_col_start_zero();
     }
     let mut result = Vec::new();
@@ -1864,9 +1863,8 @@ pub fn constraint_gram(dim: usize, mat: &Matrix) -> (result: SymMatrix)
     let mat_len = mat.len();
     let gram_dim = mat_len / col_dim;
     proof {
-        lemma_fundamental_div_mod(mat@.len() as int, col_dim as int);
-        assert(gram_dim * col_dim == mat@.len()) by (nonlinear_arith)
-            requires mat@.len() as int == col_dim as int * (mat@.len() as int / col_dim as int), gram_dim as int == mat@.len() as int / col_dim as int;
+        lemma_rows_of_exact(mat@.len() as int, col_dim as int);
+        assert(gram_dim * col_dim == mat@.len());
         lemma_dim_fits_idx(gram_dim as int, gram_dim as int);
         lemma_pk_col_start_zero();
     }
@@ -2051,9 +2049,8 @@ pub fn diag_scale_gram(d: &Vector, q: &Matrix) -> (result: SymMatrix)
     let q_len = q.len();
     let len = q_len / m;
     proof {
-        lemma_fundamental_div_mod(q@.len() as int, m as int);
-        assert(len * m == q@.len()) by (nonlinear_arith)
-            requires q@.len() as int == m as int * (q@.len() as int / m as int), len as int == q@.len() as int / m as int;
+        lemma_rows_of_exact(q@.len() as int, m as int);
+        assert(len * m == q@.len());
         lemma_dim_fits_idx(len as int, len as int);
     }
     let ghost qv = cm_view(qs, len as int);
@@ -2412,7 +2409,7 @@ pub fn back_subst(mat: &LowTriMatrix, vect: &mut [f64]) -> (solution: Vector)
             vect[i] = vect[i] - solution[j] * mat[i * (2 * dim - i + 1) / 2 + (j - i)];
             proof {
                 let (p, q) = (rv(solution@[j as int]), u(i as int, j as int));
-                assert(p * q == q * p);
+                assert(p * q == q * p) by (nonlinear_arith);
             }
         }
     }
@@ -2450,25 +2447,6 @@ pub fn ldlt_decomp(mat: &SymMatrix, dim: usize) -> (result: Option<(LowTriMatrix
     let mut sum;
     proof {
         lemma_lt_col_start_end(dim as int);
-    }
-    for i in 0..dim
-        invariant
-            dim_fits(dim as int),
-            l@.len() == lt_col_start(dim as int, dim as int),
-            is_lt_ident_r(rvs(l@), dim as int),
-    {
-        proof {
-            lemma_lt_idx_fits(dim as int, i as int);
-            lemma_lt_idx_bound(dim as int, i as int, i as int, dim as int);
-        }
-        let ghost prev = rvs(l@);
-        l[(i * (2 * dim - i + 1)) / 2] = 1.0;
-        proof {
-            // the diagonal entry was already 1, so the real view is unchanged
-            assert(lt_entry(prev, dim as int, i as int, i as int) == 1.0real);
-            assert(lt_idx(dim as int, i as int, i as int) == lt_col_start(dim as int, i as int));
-            assert(rvs(l@) =~= prev);
-        }
     }
     let mut ind;
     for i in 0..dim

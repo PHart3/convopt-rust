@@ -9,7 +9,7 @@ use crate::trusted::abort;
 #[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
-use crate::real_spec::{abs_r, max_r};
+use crate::real_spec::{abs_r, max_r, lemma_sq_nonneg};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -24,8 +24,6 @@ use crate::lin_alg::eigen_spec::*;
 use crate::lin_alg::spectral_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::solve_spec::pivot_scale_r;
-#[cfg(verus_keep_ghost)]
-use crate::lin_alg::sym_spec::lemma_pk_idx_injective;
 
 verus! {
 
@@ -94,7 +92,7 @@ fn jacobi_rot<'a>(mat: &'a mut SymMatrix, orth: &'a mut Matrix, dim: usize, k: u
         let (den, denom) = (2.0real * ajk, abs_r(taur) + sqr);
         assert(den * ((akk - ajj) / den) == akk - ajj) by (nonlinear_arith)
             requires den != 0.0real;
-        assert(taur * taur >= 0.0real) by (nonlinear_arith);
+        lemma_sq_nonneg(taur);
         assert(sg * sg == 1.0real);
         assert(sg * taur == abs_r(taur));
         assert(sqr > 0.0real) by (nonlinear_arith)
@@ -102,7 +100,7 @@ fn jacobi_rot<'a>(mat: &'a mut SymMatrix, orth: &'a mut Matrix, dim: usize, k: u
         assert(denom * (sg / denom) == sg) by (nonlinear_arith)
             requires denom != 0.0real;
         lemma_jacobi_t(taur, sg, sqr, tr);
-        assert(tr * tr >= 0.0real) by (nonlinear_arith);
+        lemma_sq_nonneg(tr);
         assert(sq2r > 0.0real) by (nonlinear_arith)
             requires sq2r >= 0.0real, sq2r * sq2r == 1.0real + tr * tr, tr * tr >= 0.0real;
         assert((1.0real / sq2r) * sq2r == 1.0real) by (nonlinear_arith)
@@ -282,8 +280,6 @@ fn jacobi_rot<'a>(mat: &'a mut SymMatrix, orth: &'a mut Matrix, dim: usize, k: u
         lemma_meq_sym(qj, qtarget, n, n);
         lemma_meq_trans(cm_view(q2, n), qtarget, qj, n, n);
         assert(jacobi_step(rvs(old(mat)@), rvs(old(orth)@), rvs(mat@), rvs(orth@), dim as int, j as int, k as int, cr, sr));
-        assert(exists|c: real, s: real|
-            jacobi_step(rvs(old(mat)@), rvs(old(orth)@), rvs(mat@), rvs(orth@), dim as int, j as int, k as int, c, s));
         // the pivot entry is annihilated
         assert(sym_entry(b2, ji, ki) == target(ji, ki));
     }
@@ -461,12 +457,8 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
     if dim == 1 {
         let res = (vec![a[0]], vec![1.0]);
         proof {
-            // Q = I and B = A: an exact eigendecomposition without off-diagonal entries
-            assert(cm_entry(rvs(res.1@), 1, 0, 0) == 1.0real);
-            assert(is_ident_r(rvs(res.1@), 1));
-            lemma_eigen_inv_init(a0, rvs(res.1@), 1);
             assert(rvs(res.0@) =~= sym_diag_r(a0, 1));
-            lemma_converged_approx(a0, rvs(res.1@), a0, 1);
+            lemma_eigensolver_dim1(a0, rvs(res.1@));
         }
         return res;
     }
@@ -762,12 +754,8 @@ pub fn jacobi_eigen_cyc(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix)
     if dim == 1 {
         let res = (vec![a[0]], vec![1.0]);
         proof {
-            // Q = I and B = A: an exact eigendecomposition without off-diagonal entries
-            assert(cm_entry(rvs(res.1@), 1, 0, 0) == 1.0real);
-            assert(is_ident_r(rvs(res.1@), 1));
-            lemma_eigen_inv_init(a0, rvs(res.1@), 1);
             assert(rvs(res.0@) =~= sym_diag_r(a0, 1));
-            lemma_converged_approx(a0, rvs(res.1@), a0, 1);
+            lemma_eigensolver_dim1(a0, rvs(res.1@));
         }
         return res;
     }

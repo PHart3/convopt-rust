@@ -17,7 +17,7 @@ use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::sym_spec::*;
 #[cfg(verus_keep_ghost)]
-use crate::real_spec::{abs_r, lemma_sqrt_square, lemma_sqrt_monotone};
+use crate::real_spec::{abs_r, lemma_sq_nonneg, lemma_sqrt_square, lemma_sqrt_monotone};
 
 verus! {
 
@@ -589,10 +589,8 @@ pub proof fn lemma_mat_vec_zero(a: MatF, dim: int, x: Seq<real>)
 {
     assert forall|i: int| 0 <= i < dim implies #[trigger] mat_vec(a, dim, x)[i] == 0.0real by {
         let f = |k: int| a(i, k) * x[k];
-        let z = |k: int| 0.0real;
-        assert forall|k: int| 0 <= k < dim implies #[trigger] f(k) == z(k) by {}
-        lemma_sum_fn_ext(f, z, dim as nat);
-        lemma_sum_fn_zero(dim as nat);
+        assert forall|k: int| 0 <= k < dim implies #[trigger] f(k) == 0.0real by {}
+        lemma_sum_fn_all_zero(f, dim as nat);
     }
 }
 
@@ -1083,7 +1081,7 @@ pub proof fn lemma_entry_le_norm(x: Seq<real>, l: int)
     lemma_dot_sum_fn(x, x);
     let sq = |i: int| x[i] * x[i];
     assert forall|i: int| 0 <= i < x.len() implies #[trigger] sq(i) >= 0.0real by {
-        assert(x[i] * x[i] >= 0.0real) by (nonlinear_arith);
+        lemma_sq_nonneg(x[i]);
     }
     lemma_sum_fn_ge_term(sq, x.len(), l);
     lemma_sqrt_square(x[l]);
@@ -1176,12 +1174,10 @@ pub proof fn lemma_quad_split(a: MatF, k: int, m: int, x: Seq<real>)
         let f = |c: int| a(k + i, c) * x[c];
         let g = |j: int| a2(i, j) * x2[j];
         let tail = |j: int| f(k + j);
-        lemma_sum_fn_split(f, k as nat, m as nat);
-        assert forall|c: int| 0 <= c < k implies #[trigger] f(c) == 0.0real by {
+        assert forall|c: int| 0 <= c < n && !(k <= c < k + m) implies #[trigger] f(c) == 0.0real by {
             assert(a(k + i, c) == 0.0real);
         }
-        lemma_sum_fn_ext(f, |c: int| 0.0real, k as nat);
-        lemma_sum_fn_zero(k as nat);
+        lemma_sum_fn_window(f, n as nat, k, m as nat);
         assert forall|j: int| 0 <= j < m implies #[trigger] tail(j) == g(j) by {}
         lemma_sum_fn_ext(tail, g, m as nat);
     }
@@ -1294,7 +1290,7 @@ pub proof fn lemma_psd_shifted_block(m: Seq<real>, dim: int, start: int, k: int,
     let a = sym_view(m);
     let b = block_view(m, start);
     assert forall|r: int, c: int| 0 <= r < k && 0 <= c < k
-        implies #[trigger] shift_view(a, start)(r, c) == #[trigger] b(r, c) by {}
+        implies shift_view(a, start)(r, c) == #[trigger] b(r, c) by {}
     assert forall|x: Seq<real>| x.len() == k
         implies #[trigger] quad_r(b, k, x) + eps * dot_r(x, x) >= 0.0real by {
         let xp = pad_r(x, dim, start);
@@ -1312,12 +1308,8 @@ pub proof fn lemma_abs_sum_nonneg(m: Seq<real>, dim: int)
         abs_sum_r(m, dim) >= 0.0real,
 {
     let f = |r: int, c: int| abs_r(sym_entry(m, r, c));
-    let rows = |r: int| sum_fn_r(|c: int| f(r, c), dim as nat);
-    assert forall|r: int| 0 <= r < dim implies #[trigger] rows(r) >= 0.0real by {
-        assert forall|c: int| 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {}
-        lemma_sum_fn_nonneg(|c: int| f(r, c), dim as nat);
-    }
-    lemma_sum_fn_nonneg(rows, dim as nat);
+    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {}
+    lemma_sum2_fn_nonneg(f, dim as nat);
 }
 
 /// X >= -t I for t = sum_{r, c} |X_rc|: each term X_rc x_r x_c of the quadratic form is at
@@ -1341,7 +1333,7 @@ pub proof fn lemma_psd_shifted_abs_sum(m: Seq<real>, dim: int)
         lemma_dot_sum_fn(x, x);
         let sq = |i: int| x[i] * x[i];
         assert forall|i: int| 0 <= i < dim implies #[trigger] sq(i) >= 0.0real by {
-            assert(x[i] * x[i] >= 0.0real) by (nonlinear_arith);
+            lemma_sq_nonneg(x[i]);
         }
         assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] h(r, c) <= f(r, c) by {
             lemma_sum_fn_ge_term(sq, n, r);
@@ -1384,20 +1376,6 @@ pub proof fn lemma_mul_diag_right(q: MatF, d: Seq<real>, n: int, r: int, k: int)
     let f = |l: int| q(r, l) * diag_view(d)(l, k);
     assert forall|l: int| 0 <= l < n && l != k implies #[trigger] f(l) == 0.0real by {
         assert(diag_view(d)(l, k) == 0.0real);
-    }
-    lemma_sum_fn_single(f, n as nat, k);
-}
-
-/// (D Q)_kc = d_k Q_kc for D = diag(d), k < n.
-pub proof fn lemma_mul_diag_left(d: Seq<real>, q: MatF, n: int, k: int, c: int)
-    requires
-        0 <= k < n,
-    ensures
-        mmul(diag_view(d), q, n)(k, c) == d[k] * q(k, c),
-{
-    let f = |l: int| diag_view(d)(k, l) * q(l, c);
-    assert forall|l: int| 0 <= l < n && l != k implies #[trigger] f(l) == 0.0real by {
-        assert(diag_view(d)(k, l) == 0.0real);
     }
     lemma_sum_fn_single(f, n as nat, k);
 }
@@ -1464,14 +1442,10 @@ pub proof fn lemma_frob_f_self_nonneg(a: MatF, dim: int)
         frob_f(a, a, dim) >= 0.0real,
 {
     let f = |r: int, c: int| a(r, c) * a(r, c);
-    let rows = |r: int| sum_fn_r(|c: int| f(r, c), dim as nat);
-    assert forall|r: int| 0 <= r < dim implies #[trigger] rows(r) >= 0.0real by {
-        assert forall|c: int| 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {
-            assert(a(r, c) * a(r, c) >= 0.0real) by (nonlinear_arith);
-        }
-        lemma_sum_fn_nonneg(|c: int| f(r, c), dim as nat);
+    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {
+        lemma_sq_nonneg(a(r, c));
     }
-    lemma_sum_fn_nonneg(rows, dim as nat);
+    lemma_sum2_fn_nonneg(f, dim as nat);
 }
 
 /// <A, B>_F = <B, A>_F.

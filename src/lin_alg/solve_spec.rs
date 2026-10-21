@@ -167,12 +167,10 @@ pub proof fn lemma_ut_mat_vec(m: Seq<real>, dim: int, x: Seq<real>, i: int)
     let u = mtr(lt_view(m, dim));
     lemma_mat_vec_row_prefix(u, dim, x, i);
     let f = |k: int| u(i, k) * x[k];
-    let z = |k: int| 0.0real;
-    assert forall|k: int| 0 <= k < i implies #[trigger] f(k) == z(k) by {
+    assert forall|k: int| 0 <= k < i implies #[trigger] f(k) == 0.0real by {
         assert(u(i, k) == 0.0real);
     }
-    lemma_sum_fn_ext(f, z, i as nat);
-    lemma_sum_fn_zero(i as nat);
+    lemma_sum_fn_all_zero(f, i as nat);
 }
 
 /// For diagonal D, (D x)_i = d_i x_i.
