@@ -327,14 +327,14 @@ pub proof fn lemma_jacobi_scalars(ajj: real, akk: real, ajk: real, t: real, c: r
     let p = ajk * t * t + (akk - ajj) * t - ajk;
     // monomials in s rewritten with s = c t and c^2 factored out
     assert(c * (c * t) * ajk == c * c * (t * ajk)) by (nonlinear_arith);
-    assert((c * t) * c * ajk == c * c * (t * ajk)) by (nonlinear_arith);
+    assert((c * t) * c * ajk == c * c * (t * ajk));
     assert((c * t) * (c * t) * akk == c * c * (t * t * akk)) by (nonlinear_arith);
     assert((c * t) * (c * t) * ajj == c * c * (t * t * ajj)) by (nonlinear_arith);
     assert((c * t) * (c * t) * ajk == c * c * (t * t * ajk)) by (nonlinear_arith);
     assert((c * t) * c * ajj == c * c * (t * ajj)) by (nonlinear_arith);
-    assert(c * (c * t) * ajj == c * c * (t * ajj)) by (nonlinear_arith);
+    assert(c * (c * t) * ajj == c * c * (t * ajj));
     assert(c * (c * t) * akk == c * c * (t * akk)) by (nonlinear_arith);
-    assert((c * t) * c * akk == c * c * (t * akk)) by (nonlinear_arith);
+    assert((c * t) * c * akk == c * c * (t * akk));
     // the pivot equation and its multiple by t, expanded
     assert(ajk * t * t + (akk - ajj) * t - ajk == t * t * ajk + t * akk - t * ajj - ajk) by (nonlinear_arith);
     assert(t * (ajk * t * t + (akk - ajj) * t - ajk) == t * t * (t * ajk) + t * t * akk - t * t * ajj - t * ajk) by (nonlinear_arith);
@@ -367,7 +367,7 @@ pub proof fn lemma_jacobi_scalars(ajj: real, akk: real, ajk: real, t: real, c: r
     assert(c * c * (-p) == 0.0real);
     assert(c * (s * ajj + c * ajk) == c * s * ajj + c * c * ajk) by (nonlinear_arith);
     assert(s * (s * ajk + c * akk) == s * s * ajk + s * c * akk) by (nonlinear_arith);
-    assert(c * c * (t * ajj) + c * c * ajk - c * c * (t * t * ajk) - c * c * (t * akk) == c * c * (t * ajj + ajk - t * t * ajk - t * akk)) by (nonlinear_arith);
+    assert(c * c * (t * ajj) + c * c * ajk - c * c * (t * t * ajk) - c * c * (t * akk) == c * c * (t * ajj + ajk - t * t * ajk - t * akk));
     assert(t * ajj + ajk - t * t * ajk - t * akk == -p);
 }
 

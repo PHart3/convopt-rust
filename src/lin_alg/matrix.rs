@@ -74,7 +74,7 @@ pub fn ident_mat(dim: usize) -> (result: Matrix)
 {
     let mut result: Matrix = Vec::with_capacity(dim * dim);
     proof {
-        assert(0 * dim == 0) by (nonlinear_arith);
+        assert(0 * dim == 0);
     }
     for i in 0..dim
         invariant
@@ -697,8 +697,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     if abs_max_r(a0) > 0.0real {
                         lemma_row_comb_sub(a0, before, cur, rd, cd, tr, ji, rs, rv(piv));
                         assert(rv(TOL) == 0.0000000001real);
-                        assert(eps > 0.0real) by (nonlinear_arith)
-                            requires rv(TOL) > 0.0real, abs_max_r(a0) > 0.0real, eps == rv(TOL) * abs_max_r(a0);
+                        assert(eps > 0.0real);
                         assert(abs_r(num) <= abs_r(dn));
                         lemma_abs_quotient_le_one(num, dn);
                         let t2 = add_col(tr, rs, ji, rv(piv));
@@ -804,8 +803,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             assert(skip_bound(pivots, c, eps) == pow2_r(0) * eps);
             assert(abs_r(a0[t]) < eps);
             assert(rv(TOL) == 0.0000000001real);
-            assert(false) by (nonlinear_arith)
-                requires abs_r(a0[t]) > 0.0real, abs_r(a0[t]) < 0.0000000001real * abs_r(a0[t]);
+            assert(false);
         }
     }
     let res = (mat, row_search, row_search == coeff_rank);

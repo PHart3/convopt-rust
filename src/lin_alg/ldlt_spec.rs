@@ -162,7 +162,7 @@ pub proof fn lemma_ldlt_product_entry(l: Seq<real>, d: Seq<real>, dim: int, r: i
     assert forall|k: int| c + 1 <= k < dim implies #[trigger] f(k) == 0.0real by {
         assert(q(c, k) == 0.0real);
         let (u, v) = (d[k], q(r, k));
-        assert(u * v * 0.0real == 0.0real) by (nonlinear_arith);
+        assert(u * v * 0.0real == 0.0real);
     }
     lemma_sum_fn_tail_zero(f, (c + 1) as nat, dim as nat);
     // the terms k < c are those of the recurrence sum, and the term k = c is d_c L_rc
@@ -174,7 +174,7 @@ pub proof fn lemma_ldlt_product_entry(l: Seq<real>, d: Seq<real>, dim: int, r: i
     assert(q(r, c) == lt_entry(l, dim, r, c));
     assert(q(c, c) == 1.0real);
     let (u, v) = (d[c], lt_entry(l, dim, r, c));
-    assert(u * v * 1.0real == u * v) by (nonlinear_arith);
+    assert(u * v * 1.0real == u * v);
 }
 
 /// L D L^T = A on the dim x dim block when L is unit lower-triangular and every entry of the

@@ -232,8 +232,7 @@ pub proof fn lemma_offdiag_norm_bound(b: Seq<real>, dim: int, thr: real)
     assert(cnt >= 0.0real) by (nonlinear_arith)
         requires cnt == (dim as real) * ((dim as real) - 1.0real), dim as real >= 1.0real || dim as real == 0.0real;
     assert(thr * thr >= 0.0real) by (nonlinear_arith);
-    assert(cnt * (thr * thr) >= 0.0real) by (nonlinear_arith)
-        requires cnt >= 0.0real, thr * thr >= 0.0real;
+    assert(cnt * (thr * thr) >= 0.0real);
     lemma_sqrt_monotone(s, cnt * (thr * thr));
     lemma_sqrt_mul(cnt, thr * thr);
     lemma_sqrt_square(thr);

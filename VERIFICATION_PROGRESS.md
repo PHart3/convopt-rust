@@ -43,37 +43,40 @@ All 22 layers (L00-L21) are done. L21 holds the post-hoc proofs of `ADDITIONAL_P
 
 ## Verified-function count
 
-Last full run: **999 verified, 0 errors** (about 28 s). `--time` reports no
+Last full run: **916 verified, 0 errors** (about 28 s). `--time` reports no
 slow proof, and no `rlimit` is raised.
 
-Verus counts executable functions, lemmas, recursive spec functions and loop
-bodies; `external_body` items are not counted.
+Verus counts executable functions, lemmas, recursive spec functions, loop
+bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
+items are not counted. The count fell from 999 to 916 when a sweep dropped
+83 `nonlinear_arith` annotations that Verus does not need (listed in the
+appendix of `verification_summary.tex`); 296 remain.
 
 | Module | Verified | Layers |
 |--------|---------:|--------|
 | `trusted` | 0 | trusted items only |
 | `real_spec` | 21 | L00 |
-| `lin_alg::vec_spec` | 25 | L01, L21 |
-| `lin_alg::sym_spec` | 70 | L02, L03, L21 |
-| `lin_alg::mat_spec` | 97 | L03, L07, L12, L21 |
-| `lin_alg::constr_spec` | 29 | L04 |
+| `lin_alg::vec_spec` | 21 | L01, L21 |
+| `lin_alg::sym_spec` | 69 | L02, L03, L21 |
+| `lin_alg::mat_spec` | 92 | L03, L07, L12, L21 |
+| `lin_alg::constr_spec` | 21 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
-| `lin_alg::ldlt_spec` | 13 | L06, L07 |
-| `lin_alg::jacobi_spec` | 61 | L08 |
-| `lin_alg::eigen_spec` | 21 | L09-L11 |
-| `lin_alg::spectral_spec` | 10 | L12 |
-| `lin_alg::gauss_spec` | 41 | L13, L21 |
+| `lin_alg::ldlt_spec` | 11 | L06, L07 |
+| `lin_alg::jacobi_spec` | 57 | L08 |
+| `lin_alg::eigen_spec` | 20 | L09-L11 |
+| `lin_alg::spectral_spec` | 9 | L12 |
+| `lin_alg::gauss_spec` | 40 | L13, L21 |
 | `lin_alg::reduce_spec` | 28 | L14, L21 |
-| `lin_alg::matrix` | 49 | L01, L13 |
+| `lin_alg::matrix` | 46 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
-| `lin_alg::sym_matrix` | 168 | L02, L04-L07, L14, L15 |
-| `lin_alg::jacobi` | 41 | L08, L10-L12 |
-| `sdp_spec` | 70 | L16 |
-| `sdpad_spec` | 39 | L17-L19, L21 |
-| `feas_spec` | 47 | L21 |
-| `sdp` | 114 | L15, L16 |
-| `sdp_altdir` | 38 | L17-L19 |
-| **total** | **999** | |
+| `lin_alg::sym_matrix` | 153 | L02, L04-L07, L14, L15 |
+| `lin_alg::jacobi` | 40 | L08, L10-L12 |
+| `sdp_spec` | 61 | L16 |
+| `sdpad_spec` | 34 | L17-L19, L21 |
+| `feas_spec` | 43 | L21 |
+| `sdp` | 98 | L15, L16 |
+| `sdp_altdir` | 35 | L17-L19 |
+| **total** | **916** | |
 
 ## Main contracts
 
@@ -268,7 +271,11 @@ the installed Verus (0.2026.08.23).
   is possible; prove `a <= b` first or use the named iterator.
 - `nonlinear_arith` sees only its `requires`: prove one algebraic step at a
   time with identically bracketed monomials; use vstd `div_mod` lemmas for
-  `/` and `%`.
+  `/` and `%`. It is not needed for products with a literal constant, for
+  commutativity, associativity or distribution of products of variables, or
+  for `x * 0 == 0`: the default query normalizes polynomial terms. It is
+  needed for facts that use hypotheses nonlinearly (sign reasoning,
+  cancellation, bounds like `a <= b, c >= 0 ==> a * c <= b * c`, division).
 - Closures match across the spec/proof boundary only when built from named
   spec functions and indexing.
 - An `exists` postcondition needs a ground witness with the trigger's exact

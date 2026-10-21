@@ -376,7 +376,7 @@ pub fn sdpad_setup(sdp: &SDP, check_constraints: bool) -> (s: SdpadSetup)
             lemma_div_multiples_vanish(rows, cols);
             assert(rows * cols == cols * rows) by (nonlinear_arith);
         } else {
-            assert(0 * cols == 0) by (nonlinear_arith);
+            assert(0 * cols == 0);
         }
     }
     let gram_small = constraint_gram(var_dim, &mat_dense);
@@ -493,9 +493,8 @@ pub proof fn lemma_setup_rows(s: &SdpadSetup)
     lemma_pk_col_start_monotone(1, d);
     lemma_mod_multiples_basic(rows, cols);
     lemma_div_multiples_vanish(rows, cols);
-    assert(rows * cols == cols * rows) by (nonlinear_arith);
-    assert(s.mat_dense@.len() == 0 ==> rows == 0) by (nonlinear_arith)
-        requires s.mat_dense@.len() == rows * cols, cols >= 1, rows >= 0;
+    assert(rows * cols == cols * rows);
+    assert(s.mat_dense@.len() == 0 ==> rows == 0);
 }
 
 // the constraint operator of the setup applied to x (contract: setup_action_r), with one entry

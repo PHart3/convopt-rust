@@ -456,7 +456,7 @@ pub fn scale_off_diag(s: f64, dim: usize, mat: &mut SymMatrix) -> (result: &mut 
                     lemma_pk_idx_bound(r2, c2, c as int);
                 }
                 let ghost e = rv(old(mat)@[pk_idx(r as int, c as int)]);
-                assert(rv(s) * e == e * rv(s)) by (nonlinear_arith);
+                assert(rv(s) * e == e * rv(s));
             }
         }
         proof {
@@ -869,7 +869,7 @@ pub fn matrix_diagonal_mult_sym(sym_dim: usize, mat: &Matrix, start: usize, dim:
             lemma_pk_col_start_zero();
         }
         lemma_fundamental_div_mod(mat@.len() as int, pk_len(d));
-        assert(pk_len(d) * rd == rd * pk_len(d)) by (nonlinear_arith);
+        assert(pk_len(d) * rd == rd * pk_len(d));
         assert(mat@.len() == rd * pk_len(d));
     }
     let mut offset = 0;
@@ -956,7 +956,7 @@ pub fn matrix_diagonal_mult_sym(sym_dim: usize, mat: &Matrix, start: usize, dim:
             assert((i + 1) * rd == i * rd + rd) by (nonlinear_arith);
             assert(i * rd + rd <= pk_len(d) * rd) by (nonlinear_arith)
                 requires i + 1 <= pk_len(d), rd >= 0;
-            assert(rd * pk_len(d) == pk_len(d) * rd) by (nonlinear_arith);
+            assert(rd * pk_len(d) == pk_len(d) * rd);
             assert((c + 1) * rd == c * rd + rd) by (nonlinear_arith);
             assert(offset * rd <= c * rd) by (nonlinear_arith)
                 requires offset <= c, rd >= 0;
@@ -1291,7 +1291,7 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
     proof {
         assert(col_dim as int == cd);
         lemma_fundamental_div_mod(len, cd);
-        assert(cd * rd == rd * cd) by (nonlinear_arith);
+        assert(cd * rd == rd * cd);
         assert(old(mat)@.len() == row_dim * col_dim);
         assert(len <= usize::MAX);
     }
@@ -1325,10 +1325,9 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
             requires rank <= row_dim;
         assert(cd * rk == rk * cd) by (nonlinear_arith);
         assert(rv(TOL) == 0.0000000001real);
-        assert(eps > 0.0real) by (nonlinear_arith)
-            requires rv(TOL) > 0.0real, abs_max_r(a0) > 0.0real, eps == rv(TOL) * abs_max_r(a0);
+        assert(eps > 0.0real);
         lemma_pk_col_start_zero();
-        assert(0 * rd == 0) by (nonlinear_arith);
+        assert(0 * rd == 0);
     }
     let mut result: Matrix = vec![0.0; col_dim * rank];
     let f = 2.0_f64.sqrt();
@@ -1367,7 +1366,7 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
         proof {
             lemma_cm_idx_bound(rd, ii, 0, cd);
             lemma_pk_col_start_zero();
-            assert(0 * rd == 0) by (nonlinear_arith);
+            assert(0 * rd == 0);
             assert(cm_idx(rd, ii, 0) == ii);
         }
         let mut scale: f64 = 0.0;
@@ -1596,7 +1595,7 @@ pub fn constraint_action(constr: &(&Matrix, &Vec<(usize, usize)>), var: &SymMatr
             implies rv(#[trigger] result@[i]) == sum_fn_r(|n: int| constr_entry(m, row_dim as int, i, n) * x[n], 1) by {
             let f = |n: int| constr_entry(m, row_dim as int, i, n) * x[n];
             assert(sum_fn_r(f, 1) == sum_fn_r(f, 0) + f(0));
-            assert(cm_idx(row_dim as int, i, 0) == i) by (nonlinear_arith);
+            assert(cm_idx(row_dim as int, i, 0) == i);
             assert(rvs(result@)[i] == rv(var@[0]) * rvs(col0@)[i]);
             assert(rvs(col0@)[i] == rv(mat@[i]));
             assert(x[0] * m[i] == m[i] * x[0]) by (nonlinear_arith);
@@ -1635,7 +1634,7 @@ pub fn constraint_action(constr: &(&Matrix, &Vec<(usize, usize)>), var: &SymMatr
                 assert(sum_fn_r(f, (n + 1) as nat) == sum_fn_r(f, n as nat) + f(n as int));
                 assert(cm_idx(row_dim as int, i as int, n as int) == n * row_dim + i);
                 let (u, v) = (m[n * row_dim + i], x[n as int]);
-                assert(v * u == u * v) by (nonlinear_arith);
+                assert(v * u == u * v);
             }
         }
     }
@@ -1754,7 +1753,7 @@ pub fn constraint_lin_comb(dim: usize, constr: &(&Matrix, &Vec<(usize, usize)>),
             proof {
                 assert(j * row_dim + row_dim == (j + 1) * row_dim) by (nonlinear_arith);
                 assert((j + 1) * row_dim <= col_dim * row_dim) by (nonlinear_arith) requires j + 1 <= col_dim;
-                assert(row_dim * col_dim == col_dim * row_dim) by (nonlinear_arith);
+                assert(row_dim * col_dim == col_dim * row_dim);
             }
             let lo = j * row_dim;
             proof {
@@ -2307,7 +2306,7 @@ pub fn forw_subst(mat: &LowTriMatrix, vect: &mut [f64]) -> (solution: Vector)
             vect[i] = vect[i] - solution[j] * mat[j * (2 * dim - j + 1) / 2 + (i - j)];
             proof {
                 let (p, q) = (rv(solution@[j as int]), l(i as int, j as int));
-                assert(p * q == q * p) by (nonlinear_arith);
+                assert(p * q == q * p);
             }
         }
     }
@@ -2413,7 +2412,7 @@ pub fn back_subst(mat: &LowTriMatrix, vect: &mut [f64]) -> (solution: Vector)
             vect[i] = vect[i] - solution[j] * mat[i * (2 * dim - i + 1) / 2 + (j - i)];
             proof {
                 let (p, q) = (rv(solution@[j as int]), u(i as int, j as int));
-                assert(p * q == q * p) by (nonlinear_arith);
+                assert(p * q == q * p);
             }
         }
     }
@@ -2525,8 +2524,7 @@ pub fn ldlt_decomp(mat: &SymMatrix, dim: usize) -> (result: Option<(LowTriMatrix
                 lemma_lt_idx_bound(dim as int, i as int, j as int, dim as int);
                 lemma_dim_fits_idx(dim as int, i as int);
                 lemma_pk_idx_bound(j as int, i as int, dim as int);
-                assert(rv(TOL) * scale >= rv(TOL)) by (nonlinear_arith)
-                    requires scale >= 1.0real, rv(TOL) > 0.0real;
+                assert(rv(TOL) * scale >= rv(TOL));
             }
             let ghost prev = rvs(l@);
             l[j * (2 * dim - j + 1) / 2 + (i - j)] = (mat[(i * (i + 1)) / 2 + j] - sum) / d[j];
@@ -2594,8 +2592,7 @@ pub fn ldlt_decomp(mat: &SymMatrix, dim: usize) -> (result: Option<(LowTriMatrix
             }
             lemma_ldlt_sum_ext(lv, lv, prev_d, dv, dim as int, i as int, i as int, i as nat);
             let (u, v) = (dv[i as int], lt_entry(lv, dim as int, i as int, i as int));
-            assert(u * v == u) by (nonlinear_arith)
-                requires v == 1.0real;
+            assert(u * v == u);
             assert(ldlt_entry_ok(a, lv, dv, dim as int, i as int, i as int));
         }
 
@@ -2805,8 +2802,7 @@ pub fn psd_block_check(mat: &SymMatrix, blocks: &Vec<(usize, usize)>) -> (result
             // positive pivots: d_k >= TOL * max(.., 1) >= TOL > 0
             assert forall|k: int| 0 <= k < n implies #[trigger] dv[k] >= 0.0real by {
                 let scale = max_r(max_abs_diag_r(sv, n), 1.0real);
-                assert(rv(TOL) * scale >= rv(TOL)) by (nonlinear_arith)
-                    requires scale >= 1.0real, rv(TOL) > 0.0real;
+                assert(rv(TOL) * scale >= rv(TOL));
             }
             lemma_meq_trans(mmul(mmul(lt_view(rvs(l@), n), diag_view(dv), n), mtr(lt_view(rvs(l@), n)), n), sym_view(sv), shifted, n, n);
             lemma_shifted_factorization_psd(sym_view(bv), lt_view(rvs(l@), n), dv, n, rv(eps));

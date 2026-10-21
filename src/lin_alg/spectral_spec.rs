@@ -255,7 +255,7 @@ pub proof fn lemma_selected_reconstruction(q: Seq<real>, vals: Seq<real>, sel: s
             } else {
                 assert(md[k] == 0.0real);
                 let (u, w) = (qv(r, k), qv(c, k));
-                assert(0.0real * u * w == 0.0real) by (nonlinear_arith);
+                assert(0.0real * u * w == 0.0real);
             }
         }
         lemma_sum_fn_ext(h, hm, dim as nat);

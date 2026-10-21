@@ -282,7 +282,7 @@ pub proof fn lemma_col_slice_dot(m: Seq<f64>, row_dim: int, y: Seq<f64>, n: int,
 {
     let col = rvs(m.subrange(lo, lo + row_dim));
     let yy = rvs(y.subrange(0, row_dim));
-    assert(lo >= 0) by (nonlinear_arith) requires n >= 0, row_dim >= 0, lo == n * row_dim;
+    assert(lo >= 0);
     lemma_dot_sum_fn(col, yy);
     let f = |i: int| col[i] * yy[i];
     let g = |i: int| constr_entry(rvs(m), row_dim, i, n) * rvs(y)[i];
@@ -341,7 +341,7 @@ pub proof fn lemma_constraint_adjoint(m: Seq<real>, row_dim: int, dim: int, list
         if r == c {
             lemma_zero_comb_diag(list, dim, row_dim, y, r);
             assert(fr(r, c) == 1.0real * (xn * (1.0real * cc + 0.5real * 0.0real)));
-            assert(1.0real * (xn * (1.0real * cc + 0.5real * 0.0real)) == xn * cc + xn * 0.0real) by (nonlinear_arith);
+            assert(1.0real * (xn * (1.0real * cc + 0.5real * 0.0real)) == xn * cc + xn * 0.0real);
         } else {
             assert(fr(r, c) == 2.0real * (xn * (0.5real * cc + 0.5real * zc)));
             assert(2.0real * (xn * (0.5real * cc + 0.5real * zc)) == xn * cc + xn * zc) by (nonlinear_arith);
@@ -378,13 +378,13 @@ pub proof fn lemma_constraint_adjoint(m: Seq<real>, row_dim: int, dim: int, list
         let yj = y[j];
         assert forall|n: int| 0 <= n < np implies #[trigger] h(n) == yj * g(n) by {
             let (u, v) = (constr_entry(m, row_dim, j, n), x[n]);
-            assert(u * v * yj == yj * (u * v)) by (nonlinear_arith);
+            assert(u * v * yj == yj * (u * v));
         }
         lemma_sum_fn_scale(g, h, yj, np);
         assert(ax[j] == row_dot_r(m, row_dim, j, x));
         assert(row_dot_r(m, row_dim, j, x) == sum_fn_r(g, np));
         let s = sum_fn_r(g, np);
-        assert(s * yj == yj * s) by (nonlinear_arith);
+        assert(s * yj == yj * s);
     }
     lemma_sum_fn_ext(axy, dense_cols, row_dim as nat);
     assert(tri_sum_r(dense, d) == sum_fn_r(axy, row_dim as nat));
@@ -410,7 +410,7 @@ pub proof fn lemma_constraint_adjoint(m: Seq<real>, row_dim: int, dim: int, list
         assert forall|r: int, c: int| 0 <= r <= c < dim && !(r == r0 && c == c0) implies #[trigger] f(r, c) == 0.0real by {
             let xn = x[pk_idx(r, c)];
             assert(zero_term_r(list, row_dim, y, r, c, t) == 0.0real);
-            assert(xn * 0.0real == 0.0real) by (nonlinear_arith);
+            assert(xn * 0.0real == 0.0real);
         }
         lemma_tri_sum_single(f, d, r0, c0);
         assert(ax[row_dim + t] == x[zero_idx(list, t)]);
@@ -435,7 +435,7 @@ pub proof fn lemma_gram_entry_sym(m: Seq<real>, row_dim: int, dim: int, a: int, 
     let g = |r: int, c: int| adj_wt(r, c) * (constr_entry(m, row_dim, b, pk_idx(r, c)) * constr_entry(m, row_dim, a, pk_idx(r, c)));
     assert forall|r: int, c: int| 0 <= r <= c < dim implies #[trigger] f(r, c) == g(r, c) by {
         let (u, v) = (constr_entry(m, row_dim, a, pk_idx(r, c)), constr_entry(m, row_dim, b, pk_idx(r, c)));
-        assert(u * v == v * u) by (nonlinear_arith);
+        assert(u * v == v * u);
     }
     lemma_tri_sum_ext(f, g, dim as nat);
 }
@@ -474,12 +474,12 @@ pub proof fn lemma_gram_action(g: Seq<real>, m: Seq<real>, row_dim: int, dim: in
             assert forall|r: int, c: int| 0 <= r <= c < dim implies #[trigger] ft(r, c) == yt * f(r, c) by {
                 let v = f(r, c);
                 assert(ft(r, c) == v * yt);
-                assert(v * yt == yt * v) by (nonlinear_arith);
+                assert(v * yt == yt * v);
             }
             lemma_tri_sum_scale(f, ft, yt, d);
             assert(gram_entry_r(m, row_dim, dim, i, t) == tri_sum_r(f, d));
             let s = tri_sum_r(f, d);
-            assert(s * yt == yt * s) by (nonlinear_arith);
+            assert(s * yt == yt * s);
         }
         lemma_sum_fn_ext(gterm, gterm_tri, nr);
         lemma_tri_sum_swap(trip, d, nr);

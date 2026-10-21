@@ -208,7 +208,7 @@ pub proof fn lemma_solves_result_aug(mat: Seq<f64>, point: Seq<f64>, rows: int, 
             <==> forall|i: int| 0 <= i < rows ==> #[trigger] row_dot_r(rvs(mat), rows, i, z) == rv(point[i]),
 {
     let res = result_aug(mat, point, rows);
-    assert(cols * rows == rows * cols) by (nonlinear_arith);
+    assert(cols * rows == rows * cols);
     assert forall|i: int| 0 <= i < rows
         implies (#[trigger] aug_row_ok(res, rows, cols + 1, i, z) <==> row_dot_r(rvs(mat), rows, i, z) == rv(point[i])) by {
         lemma_aug_row_dot(res, rows, cols, i, z);
@@ -913,8 +913,7 @@ pub proof fn lemma_lift_z_lmi_row(sdp: &SDP, xs: Seq<Seq<real>>, aug: Seq<real>,
     lemma_fundamental_div_mod(e, k);
     let (r, c) = (e % k, e / k);
     lemma_lmi_row_index(bd, i0, r, c);
-    assert(c * k + r == e) by (nonlinear_arith)
-        requires e == k * c + r;
+    assert(c * k + r == e);
     let (lo, hi) = (lmi_row_lo(k, e), lmi_row_hi(k, e));
     lemma_lift_z_block(lmis, xs, bd, vd, i0, lo, hi);
     lemma_aug_row_dot(aug, rows, cols, row_off(bd, i0) + e, z);
@@ -1249,7 +1248,7 @@ pub proof fn lemma_result_aug_residual(mat: Seq<f64>, point: Seq<f64>, rows: int
         row_residual_r(result_aug(mat, point, rows), rows, cols + 1, i, z) == row_dot_r(rvs(mat), rows, i, z) - rv(point[i]),
 {
     let res = result_aug(mat, point, rows);
-    assert(cols * rows == rows * cols) by (nonlinear_arith);
+    assert(cols * rows == rows * cols);
     lemma_residual_row_dot(res, rows, cols, i, z);
     let f = |n: int| constr_entry(res, rows, i, n) * z[n];
     let g = |n: int| constr_entry(rvs(mat), rows, i, n) * z[n];
@@ -1449,8 +1448,7 @@ pub proof fn lemma_approx_sound_reduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
     lemma_sq_sum_upto_monotone(bd, 0, bd.len() as int);
     lemma_reduced_rows(aug, s.mat_dense@, s.point@, rows, total, d, true);
     // the row counts of the echelon form and of the reduced system
-    assert(aug.len() as int == cd * total) by (nonlinear_arith)
-        requires aug.len() as int == total * cd;
+    assert(aug.len() as int == cd * total);
     lemma_div_multiples_vanish(total, cd);
     assert(red_row_dim(aug, d) == total);
     let rank = pivots.len() as int;

@@ -206,7 +206,7 @@ pub proof fn lemma_embed_row_dot(m: Seq<real>, row_dim: int, i: int, w: Seq<real
         row_dot_r(m, row_dim, i, z) == dot_r(w, blk_r(z, st, d)),
 {
     let e = Seq::new(pk_len(sd) as nat, |t: int| cm_entry(m, row_dim, i, t));
-    assert(row_dim * pk_len(sd) == pk_len(sd) * row_dim) by (nonlinear_arith);
+    assert(row_dim * pk_len(sd) == pk_len(sd) * row_dim);
     assert forall|a: int, b: int| 0 <= a <= b < d implies e[#[trigger] pk_idx(st + a, st + b)] == w[pk_idx(a, b)] by {
         lemma_pk_idx_bound(st + a, st + b, sd);
     }
@@ -233,7 +233,7 @@ pub proof fn lemma_row_dot_add_sub(m: Seq<real>, m1: Seq<real>, m2: Seq<real>, m
     let f = |n: int| constr_entry(m, row_dim, i, n) * z[n];
     let f23 = |n: int| f2(n) - f3(n);
     let n3 = |n: int| -f3(n);
-    assert(row_dim * z.len() == z.len() * row_dim) by (nonlinear_arith);
+    assert(row_dim * z.len() == z.len() * row_dim);
     assert forall|n: int| 0 <= n < z.len() implies #[trigger] f(n) == f1(n) + f23(n) by {
         lemma_cm_idx_bound(row_dim, i, n, z.len() as int);
         let t = cm_idx(row_dim, i, n);
@@ -258,7 +258,7 @@ pub proof fn lemma_row_dot_zero(m: Seq<real>, row_dim: int, i: int, z: Seq<real>
 {
     let f = |n: int| constr_entry(m, row_dim, i, n) * z[n];
     let zero = |n: int| 0.0real;
-    assert(row_dim * z.len() == z.len() * row_dim) by (nonlinear_arith);
+    assert(row_dim * z.len() == z.len() * row_dim);
     assert forall|n: int| 0 <= n < z.len() implies #[trigger] f(n) == zero(n) by {
         lemma_cm_idx_bound(row_dim, i, n, z.len() as int);
     }
@@ -279,7 +279,7 @@ pub proof fn lemma_row_dot_update(m: Seq<real>, m2: Seq<real>, row_dim: int, i0:
 {
     let f = |n: int| constr_entry(m, row_dim, i, n) * z[n];
     let g = |n: int| constr_entry(m2, row_dim, i, n) * z[n];
-    assert(row_dim * z.len() == z.len() * row_dim) by (nonlinear_arith);
+    assert(row_dim * z.len() == z.len() * row_dim);
     lemma_cm_idx_bound(row_dim, i0, t0, z.len() as int);
     assert forall|n: int| 0 <= n < z.len() && !(i == i0 && n == t0) implies #[trigger] g(n) == f(n) by {
         lemma_cm_idx_bound(row_dim, i, n, z.len() as int);
@@ -381,7 +381,7 @@ pub proof fn lemma_isqrt_square(k: int)
     ensures
         isqrt_r(k * k) == k,
 {
-    assert(k * k >= 0) by (nonlinear_arith);
+    assert(k * k >= 0);
     lemma_isqrt_exists(k * k);
     let q = isqrt_r(k * k);
     assert(q < k ==> (q + 1) * (q + 1) <= k * k) by (nonlinear_arith)
@@ -631,7 +631,7 @@ pub proof fn lemma_pk_len_diff(n: int, k: int)
 {
     if k == 0 {
         lemma_pk_col_start_zero();
-        assert(0 * (n - 0) == 0) by (nonlinear_arith);
+        assert(0 * (n - 0) == 0);
     } else {
         lemma_pk_len_diff(n, k - 1);
         lemma_pk_col_start_step(n - k);
@@ -706,8 +706,7 @@ pub proof fn lemma_block_triangles_le(bs: Seq<int>, j: int)
         let (s0, k) = (sum_upto(bs, j - 1), bs[j - 1]);
         lemma_sum_upto_monotone(bs, 0, j - 1);
         lemma_pk_len_diff(s0 + k, k);
-        assert(k * (s0 + k - k) >= 0) by (nonlinear_arith)
-            requires k >= 0, s0 >= 0;
+        assert(k * (s0 + k - k) >= 0);
         lemma_pk_col_start_monotone(0, k);
     }
 }
@@ -834,7 +833,7 @@ pub proof fn lemma_stacked_row(aug: Seq<real>, mat: Seq<real>, blk: Seq<real>, r
 {
     let f = |n: int| constr_entry(aug, rows, roff + e, n) * z[n];
     let g = |n: int| constr_entry(blk, brows, e, n) * z[n];
-    assert(rows * z.len() == z.len() * rows) by (nonlinear_arith);
+    assert(rows * z.len() == z.len() * rows);
     assert forall|n: int| 0 <= n < z.len() implies #[trigger] f(n) == g(n) by {
         lemma_cm_idx_bound(rows, roff + e, n, z.len() as int);
     }
@@ -854,8 +853,7 @@ pub proof fn lemma_lmi_row_bounds(k: int, e: int)
     lemma_fundamental_div_mod(e, k);
     lemma_mod_bound(e, k);
     let (q, r) = (e / k, e % k);
-    assert(q >= 0) by (nonlinear_arith)
-        requires k >= 1, e == k * q + r, 0 <= r < k, e >= 0;
+    assert(q >= 0);
     assert(q < k) by (nonlinear_arith)
         requires k >= 1, e == k * q + r, 0 <= r < k, e < k * k;
 }

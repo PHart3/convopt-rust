@@ -977,7 +977,7 @@ fn select_eigenpairs(vals: &Vector, vects: &Matrix, dim: usize, negative: bool, 
     let ghost sel = eig_sel(vs, negative, rv(scale));
     let ghost n = dim as int;
     proof {
-        assert(0 * n == 0) by (nonlinear_arith);
+        assert(0 * n == 0);
         lemma_dim_fits_idx(n, n);
         assert(n * n <= n * (n + 1)) by (nonlinear_arith)
             requires n >= 0;

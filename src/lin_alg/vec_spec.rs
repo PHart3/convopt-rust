@@ -130,8 +130,7 @@ pub proof fn lemma_cm_idx_bound(row_dim: int, r: int, c: int, cols: int)
     assert((c + 1) * row_dim == c * row_dim + row_dim) by (nonlinear_arith);
     assert((c + 1) * row_dim <= cols * row_dim) by (nonlinear_arith)
         requires c + 1 <= cols, row_dim >= 0;
-    assert(c * row_dim >= 0) by (nonlinear_arith)
-        requires c >= 0, row_dim >= 0;
+    assert(c * row_dim >= 0);
 }
 
 /// Writing column-major entry (r0, c0) leaves every other entry unchanged.
@@ -198,7 +197,7 @@ pub proof fn lemma_lt_col_start_end(dim: int)
     ensures
         lt_col_start(dim, dim) == dim * (dim + 1) / 2,
 {
-    assert(dim * (2 * dim - dim + 1) == dim * (dim + 1)) by (nonlinear_arith);
+    assert(dim * (2 * dim - dim + 1) == dim * (dim + 1));
 }
 
 /// Column 0 starts at offset 0.
@@ -206,7 +205,7 @@ pub proof fn lemma_lt_col_start_zero(dim: int)
     ensures
         lt_col_start(dim, 0) == 0,
 {
-    assert(0 * (2 * dim - 0 + 1) == 0) by (nonlinear_arith);
+    assert(0 * (2 * dim - 0 + 1) == 0);
 }
 
 /// Column starts are nondecreasing in the column index.
@@ -308,7 +307,7 @@ pub proof fn lemma_dot_comm(a: Seq<real>, b: Seq<real>)
 {
     assert forall|i: int| 0 <= i < a.len() implies #[trigger] vmul_r(a, b)[i] == vmul_r(b, a)[i] by {
         let (u, v) = (a[i], b[i]);
-        assert(u * v == v * u) by (nonlinear_arith);
+        assert(u * v == v * u);
     }
     assert(vmul_r(a, b) =~= vmul_r(b, a));
 }

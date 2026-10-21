@@ -146,8 +146,7 @@ pub proof fn lemma_reduced_rows(aug: Seq<real>, mat: Seq<f64>, point: Seq<f64>, 
         assert(rank == rows) by (nonlinear_arith)
             requires cd >= 1, cd * rank == rows * cd;
         // the echelon form has rank <= aug.len() / cd == total
-        assert(aug.len() as int == cd * total) by (nonlinear_arith)
-            requires aug.len() as int == total * cd;
+        assert(aug.len() as int == cd * total);
         lemma_div_multiples_vanish(total, cd);
     } else {
         assert(rows == total) by (nonlinear_arith)
@@ -258,7 +257,7 @@ pub proof fn lemma_frob_half_dot(cf: Seq<real>, c: Seq<real>, z: Seq<real>, dim:
         lemma_pk_idx_bound(r, k, dim);
         let (u, w) = (c[pk_idx(r, k)], z[pk_idx(r, k)]);
         if r == k {
-            assert(1.0real * (u * w) == u * w) by (nonlinear_arith);
+            assert(1.0real * (u * w) == u * w);
         } else {
             assert(2.0real * ((0.5real * u) * w) == u * w) by (nonlinear_arith);
         }
@@ -510,7 +509,7 @@ pub proof fn lemma_zero_pos_part(v: Seq<real>, b: Seq<real>, q: Seq<real>, s: Se
             assert(!sel(k));
             assert(md[k] == 0.0real);
             let (u, w) = (qv(r, k), qv(c, k));
-            assert(0.0real * u * w == 0.0real) by (nonlinear_arith);
+            assert(0.0real * u * w == 0.0real);
         }
         lemma_sum_fn_zero(dim as nat);
         lemma_sum_fn_ext(f, |k: int| 0.0real, dim as nat);
@@ -910,7 +909,7 @@ pub proof fn lemma_result_aug_entry(mat: Seq<f64>, point: Seq<f64>, rows: int, c
         cm_entry(result_aug(mat, point, rows), rows, a, t) == constr_entry(rvs(mat), rows, a, t),
 {
     lemma_cm_idx_bound(rows, a, t, cols);
-    assert(cols * rows == rows * cols) by (nonlinear_arith);
+    assert(cols * rows == rows * cols);
     assert((rvs(mat) + rvs(point.subrange(0, rows)))[cm_idx(rows, a, t)] == rvs(mat)[cm_idx(rows, a, t)]);
 }
 
@@ -946,8 +945,7 @@ pub proof fn lemma_reduced_zero_col(a0: Seq<real>, red: Seq<real>, dim: int, tot
         let sc = row_scale_r(e, rd, dim, i);
         assert(cm_entry(red, rank, i, t) == cm_entry(e, rd, i, t) / sc);
         assert(cm_entry(e, rd, i, t) == 0.0real);
-        assert(0.0real / sc == 0.0real) by (nonlinear_arith)
-            requires sc > 0.0real;
+        assert(0.0real / sc == 0.0real);
     }
 }
 

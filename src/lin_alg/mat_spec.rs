@@ -179,7 +179,7 @@ pub proof fn lemma_mul_assoc(a: MatF, b: MatF, c: MatF, n: int, p: int, i: int, 
         let g = |k: int| t(k, l);
         assert forall|k: int| 0 <= k < n implies #[trigger] g(k) == c(l, j) * f(k) by {
             let (x, y, z) = (a(i, k), b(k, l), c(l, j));
-            assert(x * y * z == z * (x * y)) by (nonlinear_arith);
+            assert(x * y * z == z * (x * y));
         }
         lemma_sum_fn_scale(f, g, c(l, j), n as nat);
         assert(lhs(l) == sum_fn_r(f, n as nat) * c(l, j));
@@ -878,7 +878,7 @@ pub proof fn lemma_quad_diag(d: Seq<real>, dim: int, x: Seq<real>)
     let g = |k: int| d[k] * x[k] * x[k];
     assert forall|i: int| 0 <= i < dim implies #[trigger] f(i) == g(i) by {
         let (u, v) = (x[i], d[i]);
-        assert(u * (v * u) == v * u * u) by (nonlinear_arith);
+        assert(u * (v * u) == v * u * u);
     }
     lemma_sum_fn_ext(f, g, dim as nat);
 }
@@ -1240,7 +1240,7 @@ pub proof fn lemma_quad_pad(a: MatF, dim: int, start: int, k: int, x: Seq<real>)
         assert forall|c: int| 0 <= c < dim && !(start <= c < start + k) implies #[trigger] f(c) == 0.0real by {
             assert(xp[c] == 0.0real);
             let u = a(start + i, c);
-            assert(u * 0.0real == 0.0real) by (nonlinear_arith);
+            assert(u * 0.0real == 0.0real);
         }
         lemma_sum_fn_window(f, dim as nat, start, k as nat);
         assert forall|j: int| 0 <= j < k implies #[trigger] win(j) == g(j) by {
@@ -1257,7 +1257,7 @@ pub proof fn lemma_quad_pad(a: MatF, dim: int, start: int, k: int, x: Seq<real>)
     assert forall|i: int| 0 <= i < dim && !(start <= i < start + k) implies #[trigger] f(i) == 0.0real by {
         assert(xp[i] == 0.0real);
         let u = axp[i];
-        assert(0.0real * u == 0.0real) by (nonlinear_arith);
+        assert(0.0real * u == 0.0real);
     }
     lemma_sum_fn_window(f, dim as nat, start, k as nat);
     assert forall|j: int| 0 <= j < k implies #[trigger] win(j) == g(j) by {
@@ -1418,7 +1418,7 @@ pub proof fn lemma_mul_diag_transpose(q: MatF, d: Seq<real>, n: int, r: int, c: 
         let (u, v, w) = (q(r, k), d[k], q(c, k));
         assert(mtr(q)(k, c) == w);
         assert(f(k) == (u * v) * w);
-        assert((u * v) * w == v * u * w) by (nonlinear_arith);
+        assert((u * v) * w == v * u * w);
     }
     lemma_sum_fn_ext(f, g, n as nat);
 }

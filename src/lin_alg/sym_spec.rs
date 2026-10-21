@@ -749,7 +749,7 @@ pub proof fn lemma_frob_comm(a: Seq<real>, b: Seq<real>, dim: int)
     let g = |r: int, c: int| sym_entry(b, r, c) * sym_entry(a, r, c);
     assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] f(r, c) == g(r, c) by {
         let (u, v) = (sym_entry(a, r, c), sym_entry(b, r, c));
-        assert(u * v == v * u) by (nonlinear_arith);
+        assert(u * v == v * u);
     }
     lemma_sum2_fn_ext(f, g, dim as nat);
 }

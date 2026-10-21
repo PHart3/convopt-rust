@@ -270,7 +270,7 @@ pub proof fn lemma_row_comb_residual(a: Seq<real>, b: Seq<real>, row_dim: int, c
         let xc = x[c];
         assert forall|l: int| 0 <= l < row_dim implies #[trigger] h(l) == xc * g(l) by {
             let v = g(l);
-            assert(v * xc == xc * v) by (nonlinear_arith);
+            assert(v * xc == xc * v);
         }
         lemma_sum_fn_scale(g, h, xc, m);
         assert(cm_entry(a, row_dim, i, c) == sum_fn_r(g, m));

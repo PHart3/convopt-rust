@@ -567,7 +567,7 @@ fn maps_sum(maps: &Vec<MatrixSym>, symm_dims: &Vec<usize>, block_size_sum: usize
         lemma_pk_col_start_monotone(0, sd);
         lemma_pk_col_start_monotone(bsum, sd);
         assert(rows * (cols + 1) == rows * cols + rows) by (nonlinear_arith);
-        assert(pk_len(sd) * rows == rows * pk_len(sd)) by (nonlinear_arith);
+        assert(pk_len(sd) * rows == rows * pk_len(sd));
     }
     let total_size = (total_dim * (total_dim + 1)) / 2;
     let mut sum = zero_mat(total_size, rows);
@@ -640,7 +640,7 @@ fn maps_sum(maps: &Vec<MatrixSym>, symm_dims: &Vec<usize>, block_size_sum: usize
                 requires rows == 0 || pk_len(dd) == p;
             lemma_mod_multiples_basic(rows as int, p);
             lemma_div_multiples_vanish(rows as int, p);
-            assert(rows * p == p * rows) by (nonlinear_arith);
+            assert(rows * p == p * rows);
             assert(pk_len(sd) * rows == rows * pk_len(sd)) by (nonlinear_arith);
         }
         let map_flatten = matrixsym_flatten(map);
@@ -764,7 +764,7 @@ fn lmi_block(maps: &Vec<MatrixSym>, symm_dims: &Vec<usize>, block_size_sum: usiz
         lemma_pk_col_start_monotone(bsum, sd);
         assert(rr * cols == cols * rr) by (nonlinear_arith);
         assert(rr * (cols + 1) == rr * cols + rr) by (nonlinear_arith);
-        assert(0 * block_size == 0) by (nonlinear_arith);
+        assert(0 * block_size == 0);
         assert(k * k >= 1) by (nonlinear_arith)
             requires k >= 1;
     }
@@ -1101,8 +1101,7 @@ fn zero_positions(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, total_dim: us
         }
         let ghost len0 = zeros@.len() as int;
         proof {
-            assert(((start + k) as int - (s0 + ki)) * ki == 0) by (nonlinear_arith)
-                requires (start + k) as int == s0 + ki;
+            assert(((start + k) as int - (s0 + ki)) * ki == 0);
         }
         for c in start + k..total_dim
             invariant
@@ -1131,8 +1130,7 @@ fn zero_positions(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, total_dim: us
             let ghost len1 = zeros@.len() as int;
             proof {
                 assert((cc + 1 - (s0 + ki)) * ki == (cc - (s0 + ki)) * ki + ki) by (nonlinear_arith);
-                assert((cc - (s0 + ki)) * ki >= 0) by (nonlinear_arith)
-                    requires cc >= s0 + ki, ki >= 0;
+                assert((cc - (s0 + ki)) * ki >= 0);
                 assert((sd - (s0 + ki)) * ki >= (cc + 1 - (s0 + ki)) * ki) by (nonlinear_arith)
                     requires cc + 1 <= sd, ki >= 0;
             }
@@ -1427,7 +1425,7 @@ fn standard_single(sdp: &SDP, check_constraints: bool)
         if sdp.constraint.0.is_empty() {
             let res = (obj_packed, (vec![], vec![]), vec![], total_dim, vec![], vec![]);
             proof {
-                assert(0 * cols == 0) by (nonlinear_arith);
+                assert(0 * cols == 0);
                 assert(res.3 as int == d);
                 assert(res.0@.len() == cols);
                 assert(rvs(res.0@) == part_r(sdp.objective@[0]@, d));
@@ -1456,10 +1454,9 @@ fn standard_single(sdp: &SDP, check_constraints: bool)
             let mut constraints = matrixsym_flatten(constr);
             let ghost flat = constraints@;
             proof {
-                assert(cols * m == m * cols) by (nonlinear_arith);
+                assert(cols * m == m * cols);
                 assert(flat.len() == m * pk_len(dd));
-                assert(m * pk_len(dd) == m * cols) by (nonlinear_arith)
-                    requires m == 0 || pk_len(dd) == cols;
+                assert(m * pk_len(dd) == m * cols);
                 lemma_single_rows(constr@, sdp.constraint.1@, d, flat);
             }
             if check_constraints {
@@ -1468,7 +1465,7 @@ fn standard_single(sdp: &SDP, check_constraints: bool)
                 let ghost aug = rvs(constraints@);
                 proof {
                     assert(aug =~= rvs(flat) + rvs(sdp.constraint.1@));
-                    assert(m * cols + m == m * (cols + 1)) by (nonlinear_arith);
+                    assert(m * cols + m == m * (cols + 1));
                     lemma_mod_multiples_basic(m, cols + 1);
                     // some entry of the map or of the right-hand side is nonzero
                     if exists|e: int, i: int, j: int| 0 <= e < m && 0 <= j <= i < d
@@ -1564,10 +1561,10 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
             lemma_pk_col_start_monotone(0, sd);
             assert((cols + 1) * (rr + 1) == cols * (rr + 1) + (rr + 1)) by (nonlinear_arith);
             assert(cols * (rr + 1) == cols * rr + cols) by (nonlinear_arith);
-            assert(cols * rr == rr * cols) by (nonlinear_arith);
+            assert(cols * rr == rr * cols);
             assert(rr * (cols + 1) <= (rr + 1) * (cols + 1)) by (nonlinear_arith)
                 requires rr >= 0, cols >= 0;
-            assert((rr + 1) * (cols + 1) == (cols + 1) * (rr + 1)) by (nonlinear_arith);
+            assert((rr + 1) * (cols + 1) == (cols + 1) * (rr + 1));
         }
         proof {
             assert(n_maps(lmis@) == nv);
@@ -1676,7 +1673,7 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
                 abort("empty constraints but nonempty vector");
             }
             proof {
-                assert(0 * cols == 0) by (nonlinear_arith);
+                assert(0 * cols == 0);
             }
             vec![]
         } else {
@@ -1736,7 +1733,7 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
                 assert(rows_upto(blocks@, i) == roff);
                 assert(rows_upto(blocks@, blocks@.len() as int) == rr);
                 assert(blocks@[i].0@.len() == brows * cols);
-                assert(brows * cols == cols * brows) by (nonlinear_arith);
+                assert(brows * cols == cols * brows);
                 assert forall|t: int| 0 <= t < cols implies rvs(mat@)[#[trigger] cm_idx(rr, roff + e, t)] == rvs(blocks@[i].0@)[cm_idx(brows, e, t)] by {
                     lemma_cm_idx_bound(rr, roff + e, t, cols);
                     lemma_cm_idx_bound(brows, e, t, cols);
@@ -1771,7 +1768,7 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
                 assert(rows_upto(blocks@, s) == roff);
                 assert(rows_upto(blocks@, blocks@.len() as int) == rr);
                 assert(blocks@[s].0@.len() == brows * cols);
-                assert(brows * cols == cols * brows) by (nonlinear_arith);
+                assert(brows * cols == cols * brows);
                 assert forall|t: int| 0 <= t < cols implies rvs(mat@)[#[trigger] cm_idx(rr, roff + e, t)] == rvs(blocks@[s].0@)[cm_idx(brows, e, t)] by {
                     lemma_cm_idx_bound(rr, roff + e, t, cols);
                     lemma_cm_idx_bound(brows, e, t, cols);
@@ -1819,7 +1816,7 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
             let ghost aug = rvs(mat@);
             proof {
                 assert(aug =~= aug0);
-                assert(cols * rr + rr == rr * (cols + 1)) by (nonlinear_arith);
+                assert(cols * rr + rr == rr * (cols + 1));
                 lemma_mod_multiples_basic(rr, cols + 1);
                 assert(aug.len() == rr * cols + rr);
                 assert(rr >= 1);
@@ -1912,7 +1909,7 @@ pub fn mk_symmap(sym_dim: usize, output_size: usize, entries: Vector) -> (result
     proof {
         lemma_dim_fits_idx(sd, sd);
         assert(entries.len() >= output_size * tot);
-        assert(0 * tot == 0) by (nonlinear_arith);
+        assert(0 * tot == 0);
     }
     let total = (sym_dim * (sym_dim + 1)) / 2;
     for _k in 0..output_size
