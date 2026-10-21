@@ -14,7 +14,7 @@ build hash, which fails Verus's exact version check. `cargo build` and
 
 ## Layer status
 
-All 22 layers (L00-L21) are done. L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`.
+All 22 layers (L00-L21) are done; L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`.
 
 | Layer | Where |
 |-------|-------|
@@ -39,7 +39,7 @@ All 22 layers (L00-L21) are done. L21 holds the post-hoc proofs of `ADDITIONAL_P
 | L18 Wen-Goldfarb-Yin iteration | `wgy_update`, `penalty_update`, `WgyState` |
 | L19 residuals and KKT quantities | `sdpad_loop`, `kkt_quantities`, `read_solution`, `SdpadOutcome` |
 | L20 final audit | this file, `TRUSTED_BASE.md`, `src/trusted.rs` |
-| L21 post-hoc proofs: gap identity, feasibility correspondence, approximate soundness | `src/feas_spec.rs`; `lemma_gap_identity` in `sdpad_spec.rs`; block-structure PSD lemmas in `mat_spec.rs`; the ghost transformation `A_0 = T E` of `gauss_elim` (`matrix.rs`, lemmas in `gauss_spec.rs`) and the residual bound of the reduction in `reduce_spec.rs` |
+| L21 post-hoc proofs (gap identity, feasibility correspondence, approximate soundness) | `src/feas_spec.rs`; `lemma_gap_identity` in `sdpad_spec.rs`; block PSD lemmas in `mat_spec.rs`; the transformation `A_0 = T E` of `gauss_elim` (`gauss_spec.rs`) and the reduction's residual bound (`reduce_spec.rs`) |
 
 ## Verified-function count
 
@@ -48,18 +48,10 @@ slow proof, and no `rlimit` is raised.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
-items are not counted. The count fell from 999 to 916 when a sweep dropped
-83 `nonlinear_arith` annotations that Verus does not need (listed in the
-appendix of `verification_summary.tex`), and from 916 to 894 when a clean-up
-sweep replaced repeated inline `nonlinear_arith` steps by the shared lemmas
-`lemma_sq_nonneg`, `lemma_sum_fn_all_zero`, `lemma_sum2_fn_nonneg`,
-`lemma_rows_of_exact` and `lemma_eigensolver_dim1`, removed four unused
-lemmas and dropped the no-op diagonal loop of `ldlt_decomp`, then to 892 when
-`frob_r` and `sym_mat_vec_r` became aliases of `frob_f` and `mat_vec` on
-`sym_view` (two bridge lemmas and one duplicated proof went away), and to 893
-with `lemma_setup_obj0`, which exposes the objective witness `setup_obj0` of
-the setup contract once instead of at eleven `choose` sites; 273
-`nonlinear_arith` sub-queries remain.
+items are not counted. Earlier runs reported more (999, then 916) only
+because inline `nonlinear_arith` steps have since been removed or folded into
+shared lemmas (273 remain), so a lower count after such a change is expected
+and is not a lost proof.
 
 | Module | Verified | Layers |
 |--------|---------:|--------|
@@ -183,8 +175,8 @@ the setup contract once instead of at eleven `choose` sites; 273
 - **Floats.** `rv: f64 -> real` is uninterpreted. Broadcast axioms
   (`crate::trusted::group_real_model`) give vstd's operator and comparison
   hooks exact-real meaning; std methods get `assume_specification` contracts,
-  so call sites are unchanged. `abs_r`, `max_r`, `min_r`, `sqrt_r` live in
-  `real_spec.rs`.
+  so call sites are unchanged. `sqrt_r` is the uninterpreted root of
+  `trusted.rs`; `abs_r`, `max_r`, `min_r` live in `real_spec.rs`.
 - **Views.** Vectors are `rvs(v@): Seq<real>`. Packed symmetric entry
   `(r, c)`, `r <= c`, sits at `pk_idx(r, c) = c (c + 1) / 2 + r`; `sym_entry`
   extends it by symmetry. Column-major uses `cm_idx`, packed lower-triangular
@@ -238,9 +230,8 @@ The four bugs in `EXPOSED_BUGS.md` were fixed. Other changes:
 - `ldlt_decomp` no longer rewrites the diagonal of `ident_mat_low_tri(dim)`,
   which is already 1 (a no-op loop of the original).
 - `jacobi_eigen_cach`: `biggest` starts at `0.0`; the rotation limit uses
-  `saturating_mul`; the
-  eigenvector matrix is returned without a final copy; regression test
-  `test_jacobi_cach_cache_update` in `src/sdp_tests.rs`.
+  `saturating_mul`; the eigenvector matrix is returned without a final copy;
+  regression test `test_jacobi_cach_cache_update` in `src/sdp_tests.rs`.
 
 ## Constructs rewritten for Verus compatibility
 
@@ -302,18 +293,16 @@ the installed Verus (0.2026.08.23).
 - `Ghost<T>` fields may hold `int`, `real`, `Seq`s of executable structs and
   `ghost struct`s; such a `ghost struct` needs an unconditional `use`. Unused
   spec-only parameters need `#[allow(unused_variables)]` under `cargo`.
-- Some assertions verify in isolation but not in the full crate. Intermediate
-  assertions or a small wrapping lemma fix this (`standard_lmi`,
-  `lemma_objective_shapes`).
 - A spec function whose body mentions `in_zero_region` (an `exists` whose
   trigger `sum_upto(bs, j)` re-triggers on `sum_upto(bs, j + 1)`) floods the
   prover wherever its value is unfolded; `lift_entry` is `#[verifier::opaque]`
   and revealed only in `lemma_lift_z_entry`, which exposes both cases.
   Likewise `reduction_transform` (a `row_comb` quantifier triggered on
   `cm_entry`) is opaque, since `standard_lmi` handles thousands of entries.
-- `standard_lmi` verifies alone but can fail in the module run at the call of
-  `objective_sum`; naming that quantified precondition (`objective_shapes_ok`)
-  makes the call-site check a ground fact.
+- Large proofs can verify alone but fail in the full crate (`standard_lmi` at
+  its call of `objective_sum`). Intermediate assertions, or naming a quantified
+  precondition as a spec predicate (`objective_shapes_ok`) so that the call-site
+  check is a ground fact, make them stable.
 
 ## Open issues
 
