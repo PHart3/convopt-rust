@@ -13,6 +13,8 @@ use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::seq::*;
 #[cfg(verus_keep_ghost)]
+use crate::trusted::sqrt_r;
+#[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::sym_spec::*;
@@ -1421,17 +1423,14 @@ pub proof fn lemma_mul_diag_transpose_symmetric(q: MatF, d: Seq<real>, n: int, r
 
 /* ---------- Frobenius product ---------- */
 
-/// The packed Frobenius product (sym_spec.rs) is the Frobenius product of the views.
-pub proof fn lemma_frob_sym_view(a: Seq<real>, b: Seq<real>, dim: int)
-    requires
-        dim >= 0,
-    ensures
-        frob_r(a, b, dim) == frob_f(sym_view(a), sym_view(b), dim),
-{
-    let f = |r: int, c: int| sym_entry(a, r, c) * sym_entry(b, r, c);
-    let g = |r: int, c: int| sym_view(a)(r, c) * sym_view(b)(r, c);
-    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] f(r, c) == g(r, c) by {}
-    lemma_sum2_fn_ext(f, g, dim as nat);
+/// Frobenius inner product <A, B>_F = sum_{r, c < dim} A_rc B_rc of two packed symmetric matrices.
+pub open spec fn frob_r(a: Seq<real>, b: Seq<real>, dim: int) -> real {
+    frob_f(sym_view(a), sym_view(b), dim)
+}
+
+/// Frobenius norm of a packed symmetric matrix.
+pub open spec fn frob_norm_r(a: Seq<real>, dim: int) -> real {
+    sqrt_r(frob_r(a, a, dim))
 }
 
 /// <A, A>_F >= 0.
@@ -1511,6 +1510,64 @@ pub proof fn lemma_frob_f_scale(a: MatF, s: real, b: MatF, dim: int)
     lemma_sum2_fn_scale(f, g, s, dim as nat);
 }
 
+/// Column-by-column form of the packed Frobenius product (what the packed loop computes).
+pub proof fn lemma_frob_step(a: Seq<real>, b: Seq<real>, n: int)
+    requires
+        n >= 0,
+    ensures
+        frob_r(a, b, n + 1) == frob_r(a, b, n)
+            + 2.0real * sum_fn_r(|r: int| a[pk_idx(r, n)] * b[pk_idx(r, n)], n as nat)
+            + a[pk_idx(n, n)] * b[pk_idx(n, n)],
+{
+    let f = |r: int, c: int| sym_view(a)(r, c) * sym_view(b)(r, c);
+    lemma_sum2_fn_step_sym(f, n as nat);
+    lemma_sum_fn_ext(|r: int| f(r, n), |r: int| a[pk_idx(r, n)] * b[pk_idx(r, n)], n as nat);
+}
+
+/// <A, A>_F >= 0 for packed A.
+pub proof fn lemma_frob_self_nonneg(a: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+    ensures
+        frob_r(a, a, dim) >= 0.0real,
+{
+    lemma_frob_f_self_nonneg(sym_view(a), dim);
+}
+
+/// <A, B>_F = <B, A>_F for packed A, B.
+pub proof fn lemma_frob_comm(a: Seq<real>, b: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+    ensures
+        frob_r(a, b, dim) == frob_r(b, a, dim),
+{
+    lemma_frob_f_comm(sym_view(a), sym_view(b), dim);
+}
+
+/// <A, B - C>_F = <A, B>_F - <A, C>_F for packed matrices B, C of order dim.
+pub proof fn lemma_frob_sub_right(a: Seq<real>, b: Seq<real>, c: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+        b.len() == pk_len(dim),
+        c.len() == pk_len(dim),
+    ensures
+        frob_r(a, vsub_r(b, c), dim) == frob_r(a, b, dim) - frob_r(a, c, dim),
+{
+    let (av, bv, cv) = (sym_view(a), sym_view(b), sym_view(c));
+    let dv = madd(bv, mscale(-1.0real, cv));
+    assert forall|r: int, k: int| 0 <= r < dim && 0 <= k < dim
+        implies #[trigger] sym_view(vsub_r(b, c))(r, k) == dv(r, k) by {
+        if r <= k {
+            lemma_pk_idx_bound(r, k, dim);
+        } else {
+            lemma_pk_idx_bound(k, r, dim);
+        }
+    }
+    lemma_frob_f_meq(av, av, sym_view(vsub_r(b, c)), dv, dim);
+    lemma_frob_f_add(av, bv, mscale(-1.0real, cv), dim);
+    lemma_frob_f_scale(av, -1.0real, cv, dim);
+}
+
 /* ---------- connecting the stored-matrix specifications to the algebra ---------- */
 
 /// The packed symmetric view is symmetric.
@@ -1521,22 +1578,23 @@ pub proof fn lemma_sym_view_symmetric(m: Seq<real>, dim: int)
     assert forall|i: int, j: int| 0 <= i < dim && 0 <= j < dim implies #[trigger] sym_view(m)(i, j) == sym_view(m)(j, i) by {}
 }
 
-/// The packed matrix-vector product (sym_spec.rs) is the product of the view.
-pub proof fn lemma_sym_mat_vec_view(a: Seq<real>, dim: int, x: Seq<real>)
+/// Matrix-vector product A x of a packed symmetric matrix.
+pub open spec fn sym_mat_vec_r(a: Seq<real>, dim: int, x: Seq<real>) -> Seq<real> {
+    mat_vec(sym_view(a), dim, x)
+}
+
+/// Entry i of A x as the sum over the packed row: sum_j A_ij x_j.
+pub proof fn lemma_sym_mat_vec_entry(a: Seq<real>, dim: int, x: Seq<real>, i: int)
     requires
-        dim >= 0,
+        0 <= i < dim,
     ensures
-        sym_mat_vec_r(a, dim, x) == mat_vec(sym_view(a), dim, x),
+        sym_mat_vec_r(a, dim, x)[i] == sum_fn_r(|j: int| sym_entry(a, i, j) * x[j], dim as nat),
 {
-    assert forall|i: int| 0 <= i < dim implies #[trigger] sym_mat_vec_r(a, dim, x)[i] == mat_vec(sym_view(a), dim, x)[i] by {
-        let f = |j: int| sym_entry(a, i, j) * x[j];
-        let g = |k: int| sym_view(a)(i, k) * x[k];
-        assert forall|j: int| 0 <= j < dim implies #[trigger] f(j) == g(j) by {}
-        lemma_sum_fn_ext(f, g, dim as nat);
-        assert(sym_mat_vec_r(a, dim, x)[i] == sum_fn_r(f, dim as nat));
-        assert(mat_vec(sym_view(a), dim, x)[i] == sum_fn_r(g, dim as nat));
-    }
-    assert(sym_mat_vec_r(a, dim, x) =~= mat_vec(sym_view(a), dim, x));
+    let f = |j: int| sym_view(a)(i, j) * x[j];
+    let g = |j: int| sym_entry(a, i, j) * x[j];
+    assert forall|j: int| 0 <= j < dim implies #[trigger] f(j) == g(j) by {}
+    lemma_sum_fn_ext(f, g, dim as nat);
+    assert(mat_vec(sym_view(a), dim, x)[i] == sum_fn_r(f, dim as nat));
 }
 
 /// The identity predicates of the stored representations give the identity view.

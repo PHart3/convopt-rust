@@ -470,6 +470,7 @@ pub proof fn lemma_gram_action(g: Seq<real>, m: Seq<real>, row_dim: int, dim: in
     let ax = constraint_action_r(m, row_dim, Seq::empty(), a_star);
     assert forall|i: int| 0 <= i < row_dim implies gy[i] == ax[i] by {
         // (G y)_i = sum_t G_it y_t, with G_it the triangle sum of adj_wt M_i[n] M_t[n]
+        lemma_sym_mat_vec_entry(g, row_dim, y, i);
         let gterm = |j: int| sym_entry(g, i, j) * y[j];
         let trip = |r: int, c: int, t: int| adj_wt(r, c) * (constr_entry(m, row_dim, i, pk_idx(r, c)) * constr_entry(m, row_dim, t, pk_idx(r, c))) * y[t];
         let gterm_tri = |t: int| tri_sum_r(|r: int, c: int| trip(r, c, t), d);
@@ -698,6 +699,7 @@ pub proof fn lemma_full_gram_block(g: Seq<real>, m: Seq<real>, row_dim: int, lis
             if k < row_dim {
                 // (G e_l)_k = G_kl
                 let gy = sym_mat_vec_r(g, row_dim, yd);
+                lemma_sym_mat_vec_entry(g, row_dim, yd, k);
                 let gt = |j: int| sym_entry(g, k, j) * yd[j];
                 assert forall|j: int| 0 <= j < row_dim && j != l implies #[trigger] gt(j) == 0.0real by {
                     assert(yd[j] == 0.0real);

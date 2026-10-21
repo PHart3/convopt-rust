@@ -31,7 +31,7 @@ use crate::lin_alg::sym_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::solve_spec::abs_max_r;
 #[cfg(verus_keep_ghost)]
-use crate::lin_alg::mat_spec::MatF;
+use crate::lin_alg::mat_spec::{MatF, frob_r, frob_norm_r};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]

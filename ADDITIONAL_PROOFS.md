@@ -17,7 +17,8 @@ Corollary: if `A(Z) = b` and `C_F - A*(y) = S`, then `pobj - dobj = <Z, S>_F`.
 - `lemma_constraint_adjoint` (`lin_alg/constr_spec.rs`) proves `<A(X), y> = <X, A*(y)>_F`.
   Write `A*(y)` as `adjoint_r` (see `lemma_adjoint_r_ok`) and `A(Z)` as `setup_action_r`.
 - Distributivity of `frob_r` and `dot_r` over `vsub_r`. Check the existing sum lemmas first,
-  e.g. `lemma_dot_add_right`, `lemma_frob_f_add`, `lemma_frob_sym_view`.
+  e.g. `lemma_dot_sub_right`, `lemma_frob_sub_right` (`mat_spec.rs`, where the packed
+  `frob_r` is `frob_f` on `sym_view`).
 - Place the lemma in `sdpad_spec.rs` and state it with `prim_val_r` and `dual_val_r`.
 
 ## 2. Soundness: a feasible standard-form point gives a feasible user point

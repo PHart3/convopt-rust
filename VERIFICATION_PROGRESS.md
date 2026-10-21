@@ -43,7 +43,7 @@ All 22 layers (L00-L21) are done. L21 holds the post-hoc proofs of `ADDITIONAL_P
 
 ## Verified-function count
 
-Last full run: **894 verified, 0 errors** (about 28 s). `--time` reports no
+Last full run: **892 verified, 0 errors** (about 28 s). `--time` reports no
 slow proof, and no `rlimit` is raised.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
@@ -54,7 +54,9 @@ appendix of `verification_summary.tex`), and from 916 to 894 when a clean-up
 sweep replaced repeated inline `nonlinear_arith` steps by the shared lemmas
 `lemma_sq_nonneg`, `lemma_sum_fn_all_zero`, `lemma_sum2_fn_nonneg`,
 `lemma_rows_of_exact` and `lemma_eigensolver_dim1`, removed four unused
-lemmas and dropped the no-op diagonal loop of `ldlt_decomp`; 274
+lemmas and dropped the no-op diagonal loop of `ldlt_decomp`, then to 892 when
+`frob_r` and `sym_mat_vec_r` became aliases of `frob_f` and `mat_vec` on
+`sym_view` (two bridge lemmas and one duplicated proof went away); 273
 `nonlinear_arith` sub-queries remain.
 
 | Module | Verified | Layers |
@@ -62,8 +64,8 @@ lemmas and dropped the no-op diagonal loop of `ldlt_decomp`; 274
 | `trusted` | 0 | trusted items only |
 | `real_spec` | 22 | L00 |
 | `lin_alg::vec_spec` | 20 | L01, L21 |
-| `lin_alg::sym_spec` | 69 | L02, L03, L21 |
-| `lin_alg::mat_spec` | 88 | L03, L07, L12, L21 |
+| `lin_alg::sym_spec` | 64 | L02, L03, L21 |
+| `lin_alg::mat_spec` | 91 | L03, L07, L12, L21 |
 | `lin_alg::constr_spec` | 23 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
 | `lin_alg::ldlt_spec` | 9 | L06, L07 |
@@ -81,7 +83,7 @@ lemmas and dropped the no-op diagonal loop of `ldlt_decomp`; 274
 | `feas_spec` | 43 | L21 |
 | `sdp` | 98 | L15, L16 |
 | `sdp_altdir` | 35 | L17-L19 |
-| **total** | **894** | |
+| **total** | **892** | |
 
 ## Main contracts
 
@@ -189,9 +191,11 @@ lemmas and dropped the no-op diagonal loop of `ldlt_decomp`; 274
   `block_view`. `dim_fits(dim) := (dim + 2)^2 <= usize::MAX` covers all packed
   index arithmetic.
 - **Sums.** `sum_fn_r` over closures, `sum2_fn_r` for square double sums,
-  `tri_sum_r` for triangles. The Frobenius product `frob_r` counts
-  off-diagonal entries twice by proof, not by definition. Per-term spec
-  functions are named so that closures match syntactically at call sites.
+  `tri_sum_r` for triangles. The packed Frobenius product `frob_r` and
+  matrix-vector product `sym_mat_vec_r` (`mat_spec.rs`) are `frob_f` and
+  `mat_vec` applied to `sym_view`; `frob_r` counts off-diagonal entries twice
+  by proof (`lemma_frob_tri`), not by definition. Per-term spec functions are
+  named so that closures match syntactically at call sites.
 - **Matrix algebra** (`mat_spec.rs`): products, transposes, orthogonality,
   eigenvalues and similarity invariance, the order `psd_shifted(A, dim, eps)`
   (`x^T A x + eps |x|^2 >= 0`), congruence and diagonal lemmas shared by L07

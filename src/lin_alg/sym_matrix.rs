@@ -393,6 +393,9 @@ pub fn sym_mat_act(mat: &SymMatrix, v: &[f64]) -> (result: Vector)
             lemma_partial_row_done(t, dim as int, k);
             lemma_sum_fn_ext(|l: int| t(k, l), |l: int| sym_entry(a, k, l) * x[l], dim as nat);
         }
+        assert forall|k: int| 0 <= k < dim implies rvs(result@)[k] == #[trigger] sym_mat_vec_r(a, dim as int, x)[k] by {
+            lemma_sym_mat_vec_entry(a, dim as int, x, k);
+        }
         assert(rvs(result@) =~= sym_mat_vec_r(a, dim as int, x));
     }
     result

@@ -12,9 +12,7 @@ use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::seq::*;
 #[cfg(verus_keep_ghost)]
-use crate::trusted::sqrt_r;
-#[cfg(verus_keep_ghost)]
-use crate::real_spec::{abs_r, max_r, lemma_sq_nonneg};
+use crate::real_spec::{abs_r, max_r};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 
@@ -276,21 +274,6 @@ pub open spec fn sym_diag_r(m: Seq<real>, dim: int) -> Seq<real> {
 /// Largest absolute diagonal entry (folded from 0).
 pub open spec fn max_abs_diag_r(m: Seq<real>, dim: int) -> real {
     max0_fn_r(|i: int| abs_r(sym_diag(m, i)), dim as nat)
-}
-
-/// Frobenius inner product sum_{r, c < dim} A_rc B_rc over the full matrices.
-pub open spec fn frob_r(a: Seq<real>, b: Seq<real>, dim: int) -> real {
-    sum2_fn_r(|r: int, c: int| sym_entry(a, r, c) * sym_entry(b, r, c), dim as nat)
-}
-
-/// Frobenius norm.
-pub open spec fn frob_norm_r(a: Seq<real>, dim: int) -> real {
-    sqrt_r(frob_r(a, a, dim))
-}
-
-/// Matrix-vector product A x as a vector.
-pub open spec fn sym_mat_vec_r(a: Seq<real>, dim: int, x: Seq<real>) -> Seq<real> {
-    Seq::new(dim as nat, |i: int| sum_fn_r(|j: int| sym_entry(a, i, j) * x[j], dim as nat))
 }
 
 /// Induced 1-norm max_i sum_j |A_ij| (folded from 0).
@@ -713,80 +696,6 @@ pub proof fn lemma_sum2_fn_le(f: spec_fn(int, int) -> real, g: spec_fn(int, int)
         lemma_sum_fn_le(|c: int| f(r, c), |c: int| g(r, c), n);
     }
     lemma_sum_fn_le(rows_f, rows_g, n);
-}
-
-/* ---------- Frobenius product facts ---------- */
-
-/// Column-by-column form of the Frobenius product (what the packed loop computes).
-pub proof fn lemma_frob_step(a: Seq<real>, b: Seq<real>, n: int)
-    requires
-        n >= 0,
-    ensures
-        frob_r(a, b, n + 1) == frob_r(a, b, n)
-            + 2.0real * sum_fn_r(|r: int| a[pk_idx(r, n)] * b[pk_idx(r, n)], n as nat)
-            + a[pk_idx(n, n)] * b[pk_idx(n, n)],
-{
-    let f = |r: int, c: int| sym_entry(a, r, c) * sym_entry(b, r, c);
-    lemma_sum2_fn_step_sym(f, n as nat);
-    lemma_sum_fn_ext(|r: int| f(r, n), |r: int| a[pk_idx(r, n)] * b[pk_idx(r, n)], n as nat);
-}
-
-/// <A, A>_F >= 0.
-pub proof fn lemma_frob_self_nonneg(a: Seq<real>, dim: int)
-    requires
-        dim >= 0,
-    ensures
-        frob_r(a, a, dim) >= 0.0real,
-{
-    let f = |r: int, c: int| sym_entry(a, r, c) * sym_entry(a, r, c);
-    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {
-        lemma_sq_nonneg(sym_entry(a, r, c));
-    }
-    lemma_sum2_fn_nonneg(f, dim as nat);
-}
-
-/// <A, B>_F = <B, A>_F.
-pub proof fn lemma_frob_comm(a: Seq<real>, b: Seq<real>, dim: int)
-    requires
-        dim >= 0,
-    ensures
-        frob_r(a, b, dim) == frob_r(b, a, dim),
-{
-    let f = |r: int, c: int| sym_entry(a, r, c) * sym_entry(b, r, c);
-    let g = |r: int, c: int| sym_entry(b, r, c) * sym_entry(a, r, c);
-    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] f(r, c) == g(r, c) by {
-        let (u, v) = (sym_entry(a, r, c), sym_entry(b, r, c));
-        assert(u * v == v * u);
-    }
-    lemma_sum2_fn_ext(f, g, dim as nat);
-}
-
-/// <A, B - C>_F = <A, B>_F - <A, C>_F for packed matrices B, C of order dim.
-pub proof fn lemma_frob_sub_right(a: Seq<real>, b: Seq<real>, c: Seq<real>, dim: int)
-    requires
-        dim >= 0,
-        b.len() == pk_len(dim),
-        c.len() == pk_len(dim),
-    ensures
-        frob_r(a, vsub_r(b, c), dim) == frob_r(a, b, dim) - frob_r(a, c, dim),
-{
-    let d = vsub_r(b, c);
-    let f = |r: int, k: int| sym_entry(a, r, k) * sym_entry(b, r, k);
-    let g = |r: int, k: int| sym_entry(a, r, k) * sym_entry(c, r, k);
-    let ng = |r: int, k: int| (-1.0real) * g(r, k);
-    let h = |r: int, k: int| sym_entry(a, r, k) * sym_entry(d, r, k);
-    assert forall|r: int, k: int| 0 <= r < dim && 0 <= k < dim implies #[trigger] h(r, k) == f(r, k) + ng(r, k) by {
-        if r <= k {
-            lemma_pk_idx_bound(r, k, dim);
-        } else {
-            lemma_pk_idx_bound(k, r, dim);
-        }
-        assert(sym_entry(d, r, k) == sym_entry(b, r, k) - sym_entry(c, r, k));
-        let (u, v, w) = (sym_entry(a, r, k), sym_entry(b, r, k), sym_entry(c, r, k));
-        assert(u * (v - w) == u * v + (-1.0real) * (u * w)) by (nonlinear_arith);
-    }
-    lemma_sum2_fn_add(f, ng, h, dim as nat);
-    lemma_sum2_fn_scale(g, ng, -1.0real, dim as nat);
 }
 
 /* ---------- sweep bookkeeping ---------- */
