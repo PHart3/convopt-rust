@@ -299,4 +299,18 @@ pub proof fn lemma_dot_self_nonneg(a: Seq<real>)
     lemma_sum_r_nonneg(vmul_r(a, a));
 }
 
+/// <a, b> = <b, a>.
+pub proof fn lemma_dot_comm(a: Seq<real>, b: Seq<real>)
+    requires
+        a.len() == b.len(),
+    ensures
+        dot_r(a, b) == dot_r(b, a),
+{
+    assert forall|i: int| 0 <= i < a.len() implies #[trigger] vmul_r(a, b)[i] == vmul_r(b, a)[i] by {
+        let (u, v) = (a[i], b[i]);
+        assert(u * v == v * u) by (nonlinear_arith);
+    }
+    assert(vmul_r(a, b) =~= vmul_r(b, a));
+}
+
 } // verus!

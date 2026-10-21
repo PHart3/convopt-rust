@@ -49,17 +49,6 @@ pub open spec fn adj_wt(r: int, c: int) -> real {
     if r == c { 1.0real } else { 0.5real }
 }
 
-/// A sum over 0..a+b splits at a.
-pub proof fn lemma_sum_fn_split(f: spec_fn(int) -> real, a: nat, b: nat)
-    ensures
-        sum_fn_r(f, a + b) == sum_fn_r(f, a) + sum_fn_r(|i: int| f(a + i), b),
-    decreases b,
-{
-    if b > 0 {
-        lemma_sum_fn_split(f, a, (b - 1) as nat);
-    }
-}
-
 /// Triangle sums only depend on the summand on the triangle.
 pub proof fn lemma_tri_sum_ext(f: spec_fn(int, int) -> real, g: spec_fn(int, int) -> real, dim: nat)
     requires

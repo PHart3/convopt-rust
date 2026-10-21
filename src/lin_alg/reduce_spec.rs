@@ -138,20 +138,6 @@ pub proof fn lemma_row_sq_upto_step(e: Seq<real>, row_dim: int, i: int, k: int)
 
 /* ---------- positivity of the row norm ---------- */
 
-/// Sums of nonnegative terms dominate each term.
-pub proof fn lemma_sum_fn_ge_term(f: spec_fn(int) -> real, n: nat, k: int)
-    requires
-        0 <= k < n,
-        forall|i: int| 0 <= i < n ==> #[trigger] f(i) >= 0.0real,
-    ensures
-        sum_fn_r(f, n) >= f(k),
-{
-    let g = |i: int| if i == k { f(k) } else { 0.0real };
-    assert forall|i: int| 0 <= i < n implies #[trigger] g(i) <= f(i) by {}
-    lemma_sum_fn_le(g, f, n);
-    lemma_sum_fn_single(g, n, k);
-}
-
 /// Triangle sums of nonnegative terms dominate each term.
 pub proof fn lemma_tri_sum_ge_term(f: spec_fn(int, int) -> real, dim: nat, r0: int, c0: int)
     requires

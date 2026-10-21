@@ -16,6 +16,8 @@ use vstd::seq::*;
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::sym_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::real_spec::abs_r;
 
 verus! {
 
@@ -53,6 +55,21 @@ pub open spec fn block_half_view(a: MatF, n: int) -> MatF {
 /// The diagonal block of a packed symmetric matrix starting at row/column `start`.
 pub open spec fn block_view(m: Seq<real>, start: int) -> MatF {
     |r: int, c: int| sym_entry(m, start + r, start + c)
+}
+
+/// The diagonal block of an index-function matrix starting at row/column k.
+pub open spec fn shift_view(a: MatF, k: int) -> MatF {
+    |r: int, c: int| a(k + r, k + c)
+}
+
+/// x placed at offset start in a zero vector of length dim.
+pub open spec fn pad_r(x: Seq<real>, dim: int, start: int) -> Seq<real> {
+    Seq::new(dim as nat, |i: int| if start <= i < start + x.len() { x[i - start] } else { 0.0real })
+}
+
+/// The sum of the magnitudes of all entries of a packed matrix of order dim.
+pub open spec fn abs_sum_r(m: Seq<real>, dim: int) -> real {
+    sum2_fn_r(|r: int, c: int| abs_r(sym_entry(m, r, c)), dim as nat)
 }
 
 /* ---------- matrix operations ---------- */
@@ -1053,6 +1070,288 @@ pub proof fn lemma_psd_shifted_iff(a: MatF, dim: int, eps: real)
             assert(quad_r(sh, dim, x) + 0.0real * dot_r(x, x) >= 0.0real);
             assert(0.0real * dot_r(x, x) == 0.0real);
         }
+    }
+}
+
+/* ---------- block structure of the semidefinite order ---------- */
+
+/// x^T A x = sum_{r, c} x_r A_rc x_c.
+pub proof fn lemma_quad_sum2(a: MatF, dim: int, x: Seq<real>)
+    requires
+        dim >= 0,
+        x.len() == dim,
+    ensures
+        quad_r(a, dim, x) == sum2_fn_r(|r: int, c: int| x[r] * (a(r, c) * x[c]), dim as nat),
+{
+    let n = dim as nat;
+    let ax = mat_vec(a, dim, x);
+    lemma_dot_sum_fn(x, ax);
+    let t = |r: int, c: int| x[r] * (a(r, c) * x[c]);
+    let lhs = |r: int| x[r] * ax[r];
+    let rows = |r: int| sum_fn_r(|c: int| t(r, c), n);
+    assert forall|r: int| 0 <= r < dim implies #[trigger] lhs(r) == rows(r) by {
+        let f = |c: int| a(r, c) * x[c];
+        let g = |c: int| t(r, c);
+        assert forall|c: int| 0 <= c < dim implies #[trigger] g(c) == x[r] * f(c) by {}
+        lemma_sum_fn_scale(f, g, x[r], n);
+    }
+    lemma_sum_fn_ext(lhs, rows, n);
+}
+
+/// <x, y> = <x[..k], y[..k]> + <x[k..], y[k..]>.
+pub proof fn lemma_dot_split(x: Seq<real>, y: Seq<real>, k: int)
+    requires
+        x.len() == y.len(),
+        0 <= k <= x.len(),
+    ensures
+        dot_r(x, y) == dot_r(x.subrange(0, k), y.subrange(0, k))
+            + dot_r(x.subrange(k, x.len() as int), y.subrange(k, x.len() as int)),
+{
+    let n = x.len() as int;
+    let (x1, y1) = (x.subrange(0, k), y.subrange(0, k));
+    let (x2, y2) = (x.subrange(k, n), y.subrange(k, n));
+    lemma_dot_sum_fn(x, y);
+    lemma_dot_sum_fn(x1, y1);
+    lemma_dot_sum_fn(x2, y2);
+    let f = |i: int| x[i] * y[i];
+    let f1 = |i: int| x1[i] * y1[i];
+    let f2 = |i: int| x2[i] * y2[i];
+    let tail = |i: int| f(k + i);
+    lemma_sum_fn_split(f, k as nat, (n - k) as nat);
+    assert forall|i: int| 0 <= i < k implies #[trigger] f(i) == f1(i) by {}
+    lemma_sum_fn_ext(f, f1, k as nat);
+    assert forall|i: int| 0 <= i < n - k implies #[trigger] tail(i) == f2(i) by {}
+    lemma_sum_fn_ext(tail, f2, (n - k) as nat);
+}
+
+/// For a matrix with no coupling between the leading k rows/columns and the trailing m, the
+/// quadratic form splits: x^T A x = x1^T A x1 + x2^T (shift_view(A, k)) x2 with x = (x1, x2).
+pub proof fn lemma_quad_split(a: MatF, k: int, m: int, x: Seq<real>)
+    requires
+        k >= 0,
+        m >= 0,
+        x.len() == k + m,
+        forall|r: int, c: int| #![trigger a(r, c)] #![trigger a(c, r)]
+            0 <= r < k && k <= c < k + m ==> a(r, c) == 0.0real && a(c, r) == 0.0real,
+    ensures
+        quad_r(a, k + m, x) == quad_r(a, k, x.subrange(0, k)) + quad_r(shift_view(a, k), m, x.subrange(k, k + m)),
+{
+    let n = k + m;
+    let x1 = x.subrange(0, k);
+    let x2 = x.subrange(k, n);
+    let a2 = shift_view(a, k);
+    let ax = mat_vec(a, n, x);
+    let ax1 = mat_vec(a, k, x1);
+    let ax2 = mat_vec(a2, m, x2);
+    // (A x)_r = (A x1)_r for r < k: the trailing coefficients vanish
+    assert forall|r: int| 0 <= r < k implies #[trigger] ax[r] == ax1[r] by {
+        let f = |c: int| a(r, c) * x[c];
+        let g = |c: int| a(r, c) * x1[c];
+        assert forall|c: int| k <= c < n implies #[trigger] f(c) == 0.0real by {
+            assert(a(r, c) == 0.0real);
+        }
+        lemma_sum_fn_tail_zero(f, k as nat, n as nat);
+        assert forall|c: int| 0 <= c < k implies #[trigger] f(c) == g(c) by {}
+        lemma_sum_fn_ext(f, g, k as nat);
+    }
+    // (A x)_{k + i} = (A22 x2)_i for i < m: the leading coefficients vanish
+    assert forall|i: int| 0 <= i < m implies #[trigger] ax[k + i] == ax2[i] by {
+        let f = |c: int| a(k + i, c) * x[c];
+        let g = |j: int| a2(i, j) * x2[j];
+        let tail = |j: int| f(k + j);
+        lemma_sum_fn_split(f, k as nat, m as nat);
+        assert forall|c: int| 0 <= c < k implies #[trigger] f(c) == 0.0real by {
+            assert(a(k + i, c) == 0.0real);
+        }
+        lemma_sum_fn_ext(f, |c: int| 0.0real, k as nat);
+        lemma_sum_fn_zero(k as nat);
+        assert forall|j: int| 0 <= j < m implies #[trigger] tail(j) == g(j) by {}
+        lemma_sum_fn_ext(tail, g, m as nat);
+    }
+    lemma_dot_split(x, ax, k);
+    assert(ax.subrange(0, k) =~= ax1);
+    assert(ax.subrange(k, n) =~= ax2);
+}
+
+/// A block-diagonal matrix with blocks A11 (order k) and A22 = shift_view(A, k) (order m)
+/// satisfies A >= -eps I when both blocks do: the quadratic form and the norm split by block.
+pub proof fn lemma_psd_shifted_two_blocks(a: MatF, k: int, m: int, eps: real)
+    requires
+        k >= 0,
+        m >= 0,
+        forall|r: int, c: int| #![trigger a(r, c)] #![trigger a(c, r)]
+            0 <= r < k && k <= c < k + m ==> a(r, c) == 0.0real && a(c, r) == 0.0real,
+        psd_shifted(a, k, eps),
+        psd_shifted(shift_view(a, k), m, eps),
+    ensures
+        psd_shifted(a, k + m, eps),
+{
+    let n = k + m;
+    assert forall|x: Seq<real>| x.len() == n
+        implies #[trigger] quad_r(a, n, x) + eps * dot_r(x, x) >= 0.0real by {
+        let x1 = x.subrange(0, k);
+        let x2 = x.subrange(k, n);
+        lemma_quad_split(a, k, m, x);
+        lemma_dot_split(x, x, k);
+        assert(quad_r(a, k, x1) + eps * dot_r(x1, x1) >= 0.0real);
+        assert(quad_r(shift_view(a, k), m, x2) + eps * dot_r(x2, x2) >= 0.0real);
+        assert(eps * (dot_r(x1, x1) + dot_r(x2, x2)) == eps * dot_r(x1, x1) + eps * dot_r(x2, x2)) by (nonlinear_arith);
+    }
+}
+
+/// The padded vector has the quadratic form of the block, x_pad^T A x_pad = x^T A_blk x with
+/// A_blk = shift_view(A, start), and the norm of x.
+pub proof fn lemma_quad_pad(a: MatF, dim: int, start: int, k: int, x: Seq<real>)
+    requires
+        0 <= start,
+        0 <= k,
+        start + k <= dim,
+        x.len() == k,
+    ensures
+        quad_r(a, dim, pad_r(x, dim, start)) == quad_r(shift_view(a, start), k, x),
+        dot_r(pad_r(x, dim, start), pad_r(x, dim, start)) == dot_r(x, x),
+{
+    let xp = pad_r(x, dim, start);
+    let axp = mat_vec(a, dim, xp);
+    let ab = shift_view(a, start);
+    let abx = mat_vec(ab, k, x);
+    // (A x_pad)_{start + i} = (A_blk x)_i
+    assert forall|i: int| 0 <= i < k implies #[trigger] axp[start + i] == abx[i] by {
+        let f = |c: int| a(start + i, c) * xp[c];
+        let g = |j: int| ab(i, j) * x[j];
+        let win = |j: int| f(start + j);
+        assert forall|c: int| 0 <= c < dim && !(start <= c < start + k) implies #[trigger] f(c) == 0.0real by {
+            assert(xp[c] == 0.0real);
+            let u = a(start + i, c);
+            assert(u * 0.0real == 0.0real) by (nonlinear_arith);
+        }
+        lemma_sum_fn_window(f, dim as nat, start, k as nat);
+        assert forall|j: int| 0 <= j < k implies #[trigger] win(j) == g(j) by {
+            assert(xp[start + j] == x[j]);
+        }
+        lemma_sum_fn_ext(win, g, k as nat);
+    }
+    // <x_pad, A x_pad> is the sum over the window
+    lemma_dot_sum_fn(xp, axp);
+    lemma_dot_sum_fn(x, abx);
+    let f = |i: int| xp[i] * axp[i];
+    let g = |i: int| x[i] * abx[i];
+    let win = |j: int| f(start + j);
+    assert forall|i: int| 0 <= i < dim && !(start <= i < start + k) implies #[trigger] f(i) == 0.0real by {
+        assert(xp[i] == 0.0real);
+        let u = axp[i];
+        assert(0.0real * u == 0.0real) by (nonlinear_arith);
+    }
+    lemma_sum_fn_window(f, dim as nat, start, k as nat);
+    assert forall|j: int| 0 <= j < k implies #[trigger] win(j) == g(j) by {
+        assert(xp[start + j] == x[j]);
+    }
+    lemma_sum_fn_ext(win, g, k as nat);
+    // |x_pad|^2 = |x|^2
+    lemma_dot_sum_fn(xp, xp);
+    lemma_dot_sum_fn(x, x);
+    let f2 = |i: int| xp[i] * xp[i];
+    let g2 = |i: int| x[i] * x[i];
+    let win2 = |j: int| f2(start + j);
+    assert forall|i: int| 0 <= i < dim && !(start <= i < start + k) implies #[trigger] f2(i) == 0.0real by {
+        assert(xp[i] == 0.0real);
+    }
+    lemma_sum_fn_window(f2, dim as nat, start, k as nat);
+    assert forall|j: int| 0 <= j < k implies #[trigger] win2(j) == g2(j) by {
+        assert(xp[start + j] == x[j]);
+    }
+    lemma_sum_fn_ext(win2, g2, k as nat);
+}
+
+/// A diagonal block of a matrix with A >= -eps I satisfies the same bound: a test vector of
+/// the block is padded with zeros to a test vector of A.
+pub proof fn lemma_psd_shifted_block(m: Seq<real>, dim: int, start: int, k: int, eps: real)
+    requires
+        0 <= start,
+        0 <= k,
+        start + k <= dim,
+        psd_shifted(sym_view(m), dim, eps),
+    ensures
+        psd_shifted(block_view(m, start), k, eps),
+{
+    let a = sym_view(m);
+    let b = block_view(m, start);
+    assert forall|r: int, c: int| 0 <= r < k && 0 <= c < k
+        implies #[trigger] shift_view(a, start)(r, c) == #[trigger] b(r, c) by {}
+    assert forall|x: Seq<real>| x.len() == k
+        implies #[trigger] quad_r(b, k, x) + eps * dot_r(x, x) >= 0.0real by {
+        let xp = pad_r(x, dim, start);
+        lemma_quad_pad(a, dim, start, k, x);
+        assert(quad_r(a, dim, xp) + eps * dot_r(xp, xp) >= 0.0real);
+        lemma_quad_meq(shift_view(a, start), b, k, x);
+    }
+}
+
+/// The sum of the magnitudes of the entries is nonnegative.
+pub proof fn lemma_abs_sum_nonneg(m: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+    ensures
+        abs_sum_r(m, dim) >= 0.0real,
+{
+    let f = |r: int, c: int| abs_r(sym_entry(m, r, c));
+    let rows = |r: int| sum_fn_r(|c: int| f(r, c), dim as nat);
+    assert forall|r: int| 0 <= r < dim implies #[trigger] rows(r) >= 0.0real by {
+        assert forall|c: int| 0 <= c < dim implies #[trigger] f(r, c) >= 0.0real by {}
+        lemma_sum_fn_nonneg(|c: int| f(r, c), dim as nat);
+    }
+    lemma_sum_fn_nonneg(rows, dim as nat);
+}
+
+/// X >= -t I for t = sum_{r, c} |X_rc|: each term X_rc x_r x_c of the quadratic form is at
+/// least -|X_rc| |x|^2, because |x_r x_c| <= (x_r^2 + x_c^2) / 2 <= |x|^2.
+pub proof fn lemma_psd_shifted_abs_sum(m: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+    ensures
+        psd_shifted(sym_view(m), dim, abs_sum_r(m, dim)),
+{
+    let a = sym_view(m);
+    let t = abs_sum_r(m, dim);
+    let n = dim as nat;
+    assert forall|x: Seq<real>| x.len() == dim
+        implies #[trigger] quad_r(a, dim, x) + t * dot_r(x, x) >= 0.0real by {
+        lemma_quad_sum2(a, dim, x);
+        let xx = dot_r(x, x);
+        let f = |r: int, c: int| x[r] * (a(r, c) * x[c]);
+        let g = |r: int, c: int| abs_r(sym_entry(m, r, c));
+        let h = |r: int, c: int| (-xx) * g(r, c);
+        lemma_dot_sum_fn(x, x);
+        let sq = |i: int| x[i] * x[i];
+        assert forall|i: int| 0 <= i < dim implies #[trigger] sq(i) >= 0.0real by {
+            assert(x[i] * x[i] >= 0.0real) by (nonlinear_arith);
+        }
+        assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] h(r, c) <= f(r, c) by {
+            lemma_sum_fn_ge_term(sq, n, r);
+            lemma_sum_fn_ge_term(sq, n, c);
+            let (u, v, w) = (x[r], sym_entry(m, r, c), x[c]);
+            let av = abs_r(v);
+            let p = u * w;
+            assert(f(r, c) == u * (v * w));
+            assert(u * (v * w) == v * (u * w)) by (nonlinear_arith);
+            // |u w| <= |x|^2 from 2 |u w| <= u^2 + w^2
+            assert(p <= xx && -p <= xx) by (nonlinear_arith)
+                requires p == u * w, u * u <= xx, w * w <= xx;
+            if v >= 0.0real {
+                assert(v * p >= -(v * xx)) by (nonlinear_arith)
+                    requires v >= 0.0real, -p <= xx;
+                assert(h(r, c) == (-xx) * v);
+                assert((-xx) * v == -(v * xx)) by (nonlinear_arith);
+            } else {
+                assert(v * p >= v * xx) by (nonlinear_arith)
+                    requires v < 0.0real, p <= xx;
+                assert(h(r, c) == (-xx) * (-v));
+                assert((-xx) * (-v) == v * xx) by (nonlinear_arith);
+            }
+        }
+        lemma_sum2_fn_le(h, f, n);
+        lemma_sum2_fn_scale(g, h, -xx, n);
+        assert((-xx) * t == -(t * xx)) by (nonlinear_arith);
     }
 }
 

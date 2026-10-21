@@ -1132,4 +1132,69 @@ pub proof fn lemma_wgy_dual_gram(sdp: &SDP, check: bool, s: &SdpadSetup, mu: rea
     lemma_dual_solve_gram(rvs(s.gram_small@), rvs(s.mat_dense@), s.zeros@, s.var_dim as int, s.c_len as int, check, rhs, rvs(st1.dual_y@));
 }
 
+/* ---------- the duality gap ---------- */
+
+/// The dual slack C_F - A*(y) of the setup's constraint operator, as a packed matrix of order d.
+pub open spec fn setup_slack_r(s: &SdpadSetup, y: Seq<real>) -> Seq<real> {
+    vsub_r(rvs(s.obj_frob@), adjoint_r(rvs(s.mat_dense@), s.c_len as int, s.zeros@, y, s.var_dim as int))
+}
+
+/// The gap identity: for packed Z, S of order d and multipliers y,
+///
+///     <C_F, Z>_F - b . y = <Z, S>_F + <Z, C_F - A*(y) - S>_F + y . (A(Z) - b),
+///
+/// by the adjoint identity <A(Z), y> = <Z, A*(y)>_F and linearity.
+pub proof fn lemma_gap_identity(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>, sm: Seq<real>, y: Seq<real>)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+        z.len() == pk_len(s.var_dim as int),
+        sm.len() == pk_len(s.var_dim as int),
+        y.len() == s.point@.len(),
+    ensures
+        prim_val_r(s, z) - dual_val_r(s, y)
+            == frob_r(z, sm, s.var_dim as int)
+                + frob_r(z, vsub_r(setup_slack_r(s, y), sm), s.var_dim as int)
+                + dot_r(y, vsub_r(setup_action_r(s, z), rvs(s.point@))),
+{
+    let d = s.var_dim as int;
+    let cf = rvs(s.obj_frob@);
+    let m = rvs(s.mat_dense@);
+    let (rows, list) = (s.c_len as int, s.zeros@);
+    let b = rvs(s.point@);
+    let a = adjoint_r(m, rows, list, y, d);
+    let az = setup_action_r(s, z);
+    lemma_pk_col_start_monotone(0, d);
+    // <Z, S> + <Z, (C_F - A*(y)) - S> = <Z, C_F> - <Z, A*(y)>
+    lemma_frob_sub_right(z, setup_slack_r(s, y), sm, d);
+    lemma_frob_sub_right(z, cf, a, d);
+    lemma_frob_comm(z, cf, d);
+    // <Z, A*(y)> = <A(Z), y>
+    lemma_adjoint_r_ok(m, rows, list, y, d);
+    lemma_constraint_adjoint(m, rows, d, list, z, y, a);
+    lemma_dot_comm(az, y);
+    // y . (A(Z) - b) = y . A(Z) - b . y
+    lemma_dot_sub_right(y, az, b);
+    lemma_dot_comm(y, b);
+}
+
+/// Complementarity: with A(Z) = b and C_F - A*(y) = S the objective values differ by <Z, S>_F.
+pub proof fn lemma_gap_complementarity(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>, sm: Seq<real>, y: Seq<real>)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+        z.len() == pk_len(s.var_dim as int),
+        y.len() == s.point@.len(),
+        setup_action_r(s, z) == rvs(s.point@),
+        setup_slack_r(s, y) == sm,
+    ensures
+        prim_val_r(s, z) - dual_val_r(s, y) == frob_r(z, sm, s.var_dim as int),
+{
+    let d = s.var_dim as int;
+    let b = rvs(s.point@);
+    lemma_pk_col_start_monotone(0, d);
+    lemma_gap_identity(sdp, check, s, z, sm, y);
+    // both residual terms vanish
+    lemma_frob_sub_right(z, sm, sm, d);
+    lemma_dot_sub_right(y, b, b);
+}
+
 } // verus!

@@ -14,7 +14,7 @@ build hash, which fails Verus's exact version check. `cargo build` and
 
 ## Layer status
 
-All 21 layers (L00-L20) are done.
+All 22 layers (L00-L21) are done. L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`.
 
 | Layer | Where |
 |-------|-------|
@@ -39,10 +39,11 @@ All 21 layers (L00-L20) are done.
 | L18 Wen-Goldfarb-Yin iteration | `wgy_update`, `penalty_update`, `WgyState` |
 | L19 residuals and KKT quantities | `sdpad_loop`, `kkt_quantities`, `read_solution`, `SdpadOutcome` |
 | L20 final audit | this file, `TRUSTED_BASE.md`, `src/trusted.rs` |
+| L21 post-hoc proofs: gap identity, feasibility correspondence | `src/feas_spec.rs`; `lemma_gap_identity` in `sdpad_spec.rs`; block-structure PSD lemmas in `mat_spec.rs` |
 
 ## Verified-function count
 
-Last full run: **902 verified, 0 errors** (about 30 s). `--time` reports no
+Last full run: **965 verified, 0 errors** (about 28 s). `--time` reports no
 slow proof, and no `rlimit` is raised.
 
 Verus counts executable functions, lemmas, recursive spec functions and loop
@@ -52,26 +53,27 @@ bodies; `external_body` items are not counted.
 |--------|---------:|--------|
 | `trusted` | 0 | trusted items only |
 | `real_spec` | 21 | L00 |
-| `lin_alg::vec_spec` | 23 | L01 |
-| `lin_alg::sym_spec` | 60 | L02, L03 |
-| `lin_alg::mat_spec` | 76 | L03, L07, L12 |
-| `lin_alg::constr_spec` | 30 | L04 |
+| `lin_alg::vec_spec` | 25 | L01, L21 |
+| `lin_alg::sym_spec` | 68 | L02, L03, L21 |
+| `lin_alg::mat_spec` | 95 | L03, L07, L12, L21 |
+| `lin_alg::constr_spec` | 29 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
 | `lin_alg::ldlt_spec` | 13 | L06, L07 |
 | `lin_alg::jacobi_spec` | 61 | L08 |
 | `lin_alg::eigen_spec` | 21 | L09-L11 |
 | `lin_alg::spectral_spec` | 10 | L12 |
 | `lin_alg::gauss_spec` | 29 | L13 |
-| `lin_alg::reduce_spec` | 26 | L14 |
+| `lin_alg::reduce_spec` | 25 | L14 |
 | `lin_alg::matrix` | 47 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
 | `lin_alg::sym_matrix` | 168 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 41 | L08, L10-L12 |
 | `sdp_spec` | 70 | L16 |
-| `sdpad_spec` | 37 | L17-L19 |
+| `sdpad_spec` | 39 | L17-L19, L21 |
+| `feas_spec` | 34 | L21 |
 | `sdp` | 114 | L15, L16 |
 | `sdp_altdir` | 38 | L17-L19 |
-| **total** | **902** | |
+| **total** | **965** | |
 
 ## Main contracts
 
@@ -118,6 +120,30 @@ bodies; `external_body` items are not counted.
     and each penalty the verified update from the new infeasibilities. The
     returned solution, its objective value, the recorded deltas and the
     termination reason all refer to indices into this trajectory.
+- **Gap identity** (`sdpad_spec.rs`): for packed `Z`, `S` and multipliers `y`,
+  `<C_F, Z>_F - b . y = <Z, S>_F + <Z, C_F - A*(y) - S>_F + y . (A(Z) - b)`
+  (`lemma_gap_identity`); with `A(Z) = b` and `C_F - A*(y) = S` the gap is
+  `<Z, S>_F` (`lemma_gap_complementarity`).
+- **Feasibility correspondence** (`feas_spec.rs`): `user_feasible` states the
+  user's problem with LMIs (`sum_n A_n(X_n) = b`, every slack `H_i(X) - M_i`
+  symmetric PSD), `user_feasible_single` the problem without LMIs.
+  - Soundness: a `Z` solving every row of the unreduced system, vanishing on
+    the zero pattern and PSD is block diagonal, its LMI blocks are the PSD
+    slacks, `vars_of(Z)` (what `read_solution` returns) is feasible and
+    `<C_F, Z>_F` is its objective (`lemma_standard_feasible_sound`); without
+    reduction this follows from `A(Z) = b` (`lemma_action_feasible_sound`,
+    `lemma_action_feasible_sound_single`). With reduction, nothing exact is
+    claimed about the dropped rows.
+  - Converse: feasible `X_n` lift to `lift_z`, block diagonal with blocks
+    `H_i(X) - M_i`, `X_n + t_n I`, `t_n I` (`t_n = sum |X_n|`), which reads back
+    the `X_n`, is PSD, solves the unreduced and hence the reduced system, so
+    `A(Z) = b` for both `check` values, and has the user's objective value
+    (`lemma_user_feasible_lifts`, `lemma_user_feasible_lifts_single`).
+  - Supporting algebra (`mat_spec.rs`): a diagonal block of `A >= -eps I`
+    satisfies the bound (`lemma_psd_shifted_block`), a block-diagonal matrix
+    with such blocks does (`lemma_psd_shifted_two_blocks`, iterated in
+    `lemma_block_diag_psd_shifted`), and `X >= -(sum |X_rc|) I`
+    (`lemma_psd_shifted_abs_sum`).
 - **Gram system** (`constr_spec.rs`, `sdpad_spec.rs`): `full_gram_view` is
   `A A*` for the full constraint operator (dense rows, then zero rows).
   `lemma_full_gram_block` shows it equals `(G, I/2)` when the dense rows
@@ -242,6 +268,10 @@ the installed Verus (0.2026.08.23).
 - Some assertions verify in isolation but not in the full crate. Intermediate
   assertions or a small wrapping lemma fix this (`standard_lmi`,
   `lemma_objective_shapes`).
+- A spec function whose body mentions `in_zero_region` (an `exists` whose
+  trigger `sum_upto(bs, j)` re-triggers on `sum_upto(bs, j + 1)`) floods the
+  prover wherever its value is unfolded; `lift_entry` is `#[verifier::opaque]`
+  and revealed only in `lemma_lift_z_entry`, which exposes both cases.
 
 ## Open issues
 

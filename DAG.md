@@ -102,3 +102,8 @@ L20 | Final audit: full-crate verification, cargo build and test, trusted-base a
 deps: L19 |
 targets: (all) |
 status: done
+
+L21 | Post-hoc proofs (ADDITIONAL_PROOFS.md): the gap identity <C_F, Z>_F - b . y = <Z, S>_F + <Z, C_F - A*(y) - S>_F + y . (A(Z) - b); soundness (a feasible standard-form point gives feasible user variables) and the converse (feasible user variables lift to a PSD block-diagonal standard-form point with A(Z) = b); block-structure lemmas for the semidefinite order |
+deps: L20 |
+targets: (spec/proof only: lemma_gap_identity, lemma_gap_complementarity, lemma_standard_feasible_sound, lemma_action_feasible_sound, lemma_user_feasible_lifts, lemma_user_feasible_lifts_single, lemma_psd_shifted_block, lemma_psd_shifted_two_blocks, lemma_psd_shifted_abs_sum) |
+status: done

@@ -484,6 +484,48 @@ pub proof fn lemma_sum_fn_le(f: spec_fn(int) -> real, g: spec_fn(int) -> real, n
     }
 }
 
+/// A sum over 0..a+b splits at a.
+pub proof fn lemma_sum_fn_split(f: spec_fn(int) -> real, a: nat, b: nat)
+    ensures
+        sum_fn_r(f, a + b) == sum_fn_r(f, a) + sum_fn_r(|i: int| f(a + i), b),
+    decreases b,
+{
+    if b > 0 {
+        lemma_sum_fn_split(f, a, (b - 1) as nat);
+    }
+}
+
+/// Sums of nonnegative terms dominate each term.
+pub proof fn lemma_sum_fn_ge_term(f: spec_fn(int) -> real, n: nat, k: int)
+    requires
+        0 <= k < n,
+        forall|i: int| 0 <= i < n ==> #[trigger] f(i) >= 0.0real,
+    ensures
+        sum_fn_r(f, n) >= f(k),
+{
+    let g = |i: int| if i == k { f(k) } else { 0.0real };
+    assert forall|i: int| 0 <= i < n implies #[trigger] g(i) <= f(i) by {}
+    lemma_sum_fn_le(g, f, n);
+    lemma_sum_fn_single(g, n, k);
+}
+
+/// A summand that vanishes outside the window [start, start + k) sums to the sum over the
+/// window, shifted to 0..k.
+pub proof fn lemma_sum_fn_window(f: spec_fn(int) -> real, n: nat, start: int, k: nat)
+    requires
+        0 <= start,
+        start + k <= n,
+        forall|i: int| 0 <= i < n && !(start <= i < start + k) ==> #[trigger] f(i) == 0.0real,
+    ensures
+        sum_fn_r(f, n) == sum_fn_r(|i: int| f(start + i), k),
+{
+    let zero = |i: int| 0.0real;
+    lemma_sum_fn_tail_zero(f, (start + k) as nat, n);
+    lemma_sum_fn_split(f, start as nat, k);
+    lemma_sum_fn_ext(f, zero, start as nat);
+    lemma_sum_fn_zero(start as nat);
+}
+
 /// Exchange of the order of summation in a finite double sum.
 pub proof fn lemma_sum_fn_swap(f: spec_fn(int, int) -> real, m: nat, n: nat)
     ensures
@@ -615,6 +657,21 @@ pub proof fn lemma_sum2_fn_scale(f: spec_fn(int, int) -> real, g: spec_fn(int, i
     lemma_sum_fn_scale(rows_f, rows_g, s, n);
 }
 
+/// Double sums are monotone in the summand.
+pub proof fn lemma_sum2_fn_le(f: spec_fn(int, int) -> real, g: spec_fn(int, int) -> real, n: nat)
+    requires
+        forall|r: int, c: int| 0 <= r < n && 0 <= c < n ==> #[trigger] f(r, c) <= g(r, c),
+    ensures
+        sum2_fn_r(f, n) <= sum2_fn_r(g, n),
+{
+    let rows_f = |r: int| sum_fn_r(|c: int| f(r, c), n);
+    let rows_g = |r: int| sum_fn_r(|c: int| g(r, c), n);
+    assert forall|r: int| 0 <= r < n implies #[trigger] rows_f(r) <= rows_g(r) by {
+        lemma_sum_fn_le(|c: int| f(r, c), |c: int| g(r, c), n);
+    }
+    lemma_sum_fn_le(rows_f, rows_g, n);
+}
+
 /* ---------- Frobenius product facts ---------- */
 
 /// Column-by-column form of the Frobenius product (what the packed loop computes).
@@ -647,6 +704,50 @@ pub proof fn lemma_frob_self_nonneg(a: Seq<real>, dim: int)
         lemma_sum_fn_nonneg(|c: int| f(r, c), dim as nat);
     }
     lemma_sum_fn_nonneg(rows, dim as nat);
+}
+
+/// <A, B>_F = <B, A>_F.
+pub proof fn lemma_frob_comm(a: Seq<real>, b: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+    ensures
+        frob_r(a, b, dim) == frob_r(b, a, dim),
+{
+    let f = |r: int, c: int| sym_entry(a, r, c) * sym_entry(b, r, c);
+    let g = |r: int, c: int| sym_entry(b, r, c) * sym_entry(a, r, c);
+    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim implies #[trigger] f(r, c) == g(r, c) by {
+        let (u, v) = (sym_entry(a, r, c), sym_entry(b, r, c));
+        assert(u * v == v * u) by (nonlinear_arith);
+    }
+    lemma_sum2_fn_ext(f, g, dim as nat);
+}
+
+/// <A, B - C>_F = <A, B>_F - <A, C>_F for packed matrices B, C of order dim.
+pub proof fn lemma_frob_sub_right(a: Seq<real>, b: Seq<real>, c: Seq<real>, dim: int)
+    requires
+        dim >= 0,
+        b.len() == pk_len(dim),
+        c.len() == pk_len(dim),
+    ensures
+        frob_r(a, vsub_r(b, c), dim) == frob_r(a, b, dim) - frob_r(a, c, dim),
+{
+    let d = vsub_r(b, c);
+    let f = |r: int, k: int| sym_entry(a, r, k) * sym_entry(b, r, k);
+    let g = |r: int, k: int| sym_entry(a, r, k) * sym_entry(c, r, k);
+    let ng = |r: int, k: int| (-1.0real) * g(r, k);
+    let h = |r: int, k: int| sym_entry(a, r, k) * sym_entry(d, r, k);
+    assert forall|r: int, k: int| 0 <= r < dim && 0 <= k < dim implies #[trigger] h(r, k) == f(r, k) + ng(r, k) by {
+        if r <= k {
+            lemma_pk_idx_bound(r, k, dim);
+        } else {
+            lemma_pk_idx_bound(k, r, dim);
+        }
+        assert(sym_entry(d, r, k) == sym_entry(b, r, k) - sym_entry(c, r, k));
+        let (u, v, w) = (sym_entry(a, r, k), sym_entry(b, r, k), sym_entry(c, r, k));
+        assert(u * (v - w) == u * v + (-1.0real) * (u * w)) by (nonlinear_arith);
+    }
+    lemma_sum2_fn_add(f, ng, h, dim as nat);
+    lemma_sum2_fn_scale(g, ng, -1.0real, dim as nat);
 }
 
 /* ---------- sweep bookkeeping ---------- */
