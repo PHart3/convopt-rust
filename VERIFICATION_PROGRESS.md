@@ -39,11 +39,11 @@ All 22 layers (L00-L21) are done. L21 holds the post-hoc proofs of `ADDITIONAL_P
 | L18 Wen-Goldfarb-Yin iteration | `wgy_update`, `penalty_update`, `WgyState` |
 | L19 residuals and KKT quantities | `sdpad_loop`, `kkt_quantities`, `read_solution`, `SdpadOutcome` |
 | L20 final audit | this file, `TRUSTED_BASE.md`, `src/trusted.rs` |
-| L21 post-hoc proofs: gap identity, feasibility correspondence | `src/feas_spec.rs`; `lemma_gap_identity` in `sdpad_spec.rs`; block-structure PSD lemmas in `mat_spec.rs` |
+| L21 post-hoc proofs: gap identity, feasibility correspondence, approximate soundness | `src/feas_spec.rs`; `lemma_gap_identity` in `sdpad_spec.rs`; block-structure PSD lemmas in `mat_spec.rs`; the ghost transformation `A_0 = T E` of `gauss_elim` (`matrix.rs`, lemmas in `gauss_spec.rs`) and the residual bound of the reduction in `reduce_spec.rs` |
 
 ## Verified-function count
 
-Last full run: **965 verified, 0 errors** (about 28 s). `--time` reports no
+Last full run: **999 verified, 0 errors** (about 28 s). `--time` reports no
 slow proof, and no `rlimit` is raised.
 
 Verus counts executable functions, lemmas, recursive spec functions and loop
@@ -54,26 +54,26 @@ bodies; `external_body` items are not counted.
 | `trusted` | 0 | trusted items only |
 | `real_spec` | 21 | L00 |
 | `lin_alg::vec_spec` | 25 | L01, L21 |
-| `lin_alg::sym_spec` | 68 | L02, L03, L21 |
-| `lin_alg::mat_spec` | 95 | L03, L07, L12, L21 |
+| `lin_alg::sym_spec` | 70 | L02, L03, L21 |
+| `lin_alg::mat_spec` | 97 | L03, L07, L12, L21 |
 | `lin_alg::constr_spec` | 29 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
 | `lin_alg::ldlt_spec` | 13 | L06, L07 |
 | `lin_alg::jacobi_spec` | 61 | L08 |
 | `lin_alg::eigen_spec` | 21 | L09-L11 |
 | `lin_alg::spectral_spec` | 10 | L12 |
-| `lin_alg::gauss_spec` | 29 | L13 |
-| `lin_alg::reduce_spec` | 25 | L14 |
-| `lin_alg::matrix` | 47 | L01, L13 |
+| `lin_alg::gauss_spec` | 41 | L13, L21 |
+| `lin_alg::reduce_spec` | 28 | L14, L21 |
+| `lin_alg::matrix` | 49 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
 | `lin_alg::sym_matrix` | 168 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 41 | L08, L10-L12 |
 | `sdp_spec` | 70 | L16 |
 | `sdpad_spec` | 39 | L17-L19, L21 |
-| `feas_spec` | 34 | L21 |
+| `feas_spec` | 47 | L21 |
 | `sdp` | 114 | L15, L16 |
 | `sdp_altdir` | 38 | L17-L19 |
-| **total** | **965** | |
+| **total** | **999** | |
 
 ## Main contracts
 
@@ -81,7 +81,12 @@ bodies; `external_body` items are not counted.
   test, e.g. `scaled_near_zero(x, s, tol)` iff `|x| < tol * s`.
 - **Dense matrices** (`matrix.rs`): `gauss_elim` preserves the solution set,
   keeps zero columns, produces echelon form under the tolerance-based
-  pivot/skip rules, and has `rank >= 1` for nonzero input.
+  pivot/skip rules, has `rank >= 1` for nonzero input, and recovers the input
+  as `A_0 = T E` with absolute column sums of `T` at most the row count on
+  pivot columns and 1 elsewhere (`row_comb`, `cols_bounded`); hence for any
+  `x` the residual of row `i` of `A_0` is at most the row count times the
+  residuals of the first `rank` rows of `E` plus those of the rest
+  (`lemma_row_comb_residual_bound`, `gauss_spec.rs`).
 - **Constraint operator** (`sym_matrix.rs`): `constraint_action` is `A(X)`;
   `constraint_lin_comb` is `A*(y)` with the off-diagonal factors 1/2 and
   satisfies `<A(X), y> = <X, A*(y)>_F`; `diag_scale_gram` is `Q D Q^T`.
@@ -92,7 +97,9 @@ bodies; `external_body` items are not counted.
 - **PSD check**: success of `psd_block_check` gives `B >= -eps I` for each
   block, `eps = 1e-9 * max(max_i |B_ii|, 1)`.
 - **Reduction**: `linear_remove_redundant_sym` returns the first `rank`
-  echelon rows divided by their Frobenius norms.
+  echelon rows divided by their Frobenius norms; for any `x` every original
+  row's residual is at most `rows * sum_{l<rank} ||E_l||_F |res_l(x)| +
+  (rows - rank) 2^rank eps_G (1 + ||x||_1)` (`lemma_reduced_residual_bound`).
 - **Jacobi** (`jacobi.rs`): `jacobi_rot` gives `c^2 + s^2 = 1`,
   `A' = J^T A J`, `Q' = Q J`, `A'_jk = 0`. Both eigensolvers establish
   `eigensolver_ok`: `Q^T Q = Q Q^T = I`, `A = Q B Q^T`, `vals = diag(B)`,
@@ -139,6 +146,13 @@ bodies; `external_body` items are not counted.
     the `X_n`, is PSD, solves the unreduced and hence the reduced system, so
     `A(Z) = b` for both `check` values, and has the user's objective value
     (`lemma_user_feasible_lifts`, `lemma_user_feasible_lifts_single`).
+  - Approximate soundness, for any `Z`: the user-level residuals at
+    `vars_of(Z)` are the residuals of the unreduced rows
+    (`lemma_user_residuals`); without reduction these are entries of
+    `A(Z) - b` (`lemma_approx_sound_unreduced`), with reduction they are
+    bounded by `reduction_bound_r` (`lemma_approx_sound_reduced`); a
+    successful PSD check gives the LMI blocks `B_i >= -eps_i I`
+    (`lemma_lmi_blocks_checked`), and `|res_l| <= pinf (1 + ||b||)`.
   - Supporting algebra (`mat_spec.rs`): a diagonal block of `A >= -eps I`
     satisfies the bound (`lemma_psd_shifted_block`), a block-diagonal matrix
     with such blocks does (`lemma_psd_shifted_two_blocks`, iterated in
@@ -272,6 +286,11 @@ the installed Verus (0.2026.08.23).
   trigger `sum_upto(bs, j)` re-triggers on `sum_upto(bs, j + 1)`) floods the
   prover wherever its value is unfolded; `lift_entry` is `#[verifier::opaque]`
   and revealed only in `lemma_lift_z_entry`, which exposes both cases.
+  Likewise `reduction_transform` (a `row_comb` quantifier triggered on
+  `cm_entry`) is opaque, since `standard_lmi` handles thousands of entries.
+- `standard_lmi` verifies alone but can fail in the module run at the call of
+  `objective_sum`; naming that quantified precondition (`objective_shapes_ok`)
+  makes the call-site check a ground fact.
 
 ## Open issues
 

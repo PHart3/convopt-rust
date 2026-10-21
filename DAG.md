@@ -63,12 +63,12 @@ deps: L10, L11, L04 |
 targets: poseigendecomp, negeigendecomp |
 status: done
 
-L13 | Gaussian elimination: echelon invariants, partial-pivot selection, tolerance-based skip rule, solution set preserved, rank and consistency outputs |
+L13 | Gaussian elimination: echelon invariants, partial-pivot selection, tolerance-based skip rule, solution set preserved, rank and consistency outputs; the input is recovered as A_0 = T E with absolute column sums of T at most row_dim on pivot columns and 1 elsewhere, so residuals transfer from E back to A_0 (lemma_row_comb_residual_bound) |
 deps: L02 |
 targets: gauss_elim |
 status: done
 
-L14 | Constraint reduction: the first rank echelon rows, each divided by its Frobenius norm; input solutions solve the reduced system; reduced solutions satisfy each dropped row up to a residual bounded by a multiple of eps; inconsistency aborts |
+L14 | Constraint reduction: the first rank echelon rows, each divided by its Frobenius norm; input solutions solve the reduced system; reduced solutions satisfy the kept echelon rows exactly and each dropped echelon row up to a residual bounded by a multiple of eps; for any x, every original row has residual at most rows * sum_{l<rank} ||E_l||_F |res_l(x)| + (rows - rank) 2^rank eps (1 + ||x||_1) (lemma_reduced_residual_bound); inconsistency aborts |
 deps: L13 |
 targets: linear_remove_redundant_sym |
 status: done
@@ -103,7 +103,7 @@ deps: L19 |
 targets: (all) |
 status: done
 
-L21 | Post-hoc proofs (ADDITIONAL_PROOFS.md): the gap identity <C_F, Z>_F - b . y = <Z, S>_F + <Z, C_F - A*(y) - S>_F + y . (A(Z) - b); soundness (a feasible standard-form point gives feasible user variables) and the converse (feasible user variables lift to a PSD block-diagonal standard-form point with A(Z) = b); block-structure lemmas for the semidefinite order |
-deps: L20 |
-targets: (spec/proof only: lemma_gap_identity, lemma_gap_complementarity, lemma_standard_feasible_sound, lemma_action_feasible_sound, lemma_user_feasible_lifts, lemma_user_feasible_lifts_single, lemma_psd_shifted_block, lemma_psd_shifted_two_blocks, lemma_psd_shifted_abs_sum) |
+L21 | Post-hoc proofs (ADDITIONAL_PROOFS.md): the gap identity <C_F, Z>_F - b . y = <Z, S>_F + <Z, C_F - A*(y) - S>_F + y . (A(Z) - b); soundness (a feasible standard-form point gives feasible user variables) and the converse (feasible user variables lift to a PSD block-diagonal standard-form point with A(Z) = b); approximate soundness (the user-level residuals at the variables read from any Z are the entries of A(Z) - b without reduction, and bounded by the reduction bound with it); block-structure lemmas for the semidefinite order |
+deps: L20, L13, L14 |
+targets: (spec/proof only: lemma_gap_identity, lemma_gap_complementarity, lemma_standard_feasible_sound, lemma_action_feasible_sound, lemma_user_feasible_lifts, lemma_user_feasible_lifts_single, lemma_user_residuals, lemma_approx_sound_unreduced, lemma_approx_sound_reduced, lemma_psd_shifted_block, lemma_psd_shifted_two_blocks, lemma_psd_shifted_abs_sum) |
 status: done

@@ -25,6 +25,15 @@
 //
 // Without LMIs the variable is Z = X itself (`user_feasible_single`, `lemma_action_feasible_sound_single`,
 // `lemma_user_feasible_lifts_single`).
+//
+// Approximate soundness, for the iterates the solver actually returns: the user-level
+// residuals at vars_of(Z), namely sum_n A_n(X_n) - b and (H_i(X) - M_i) - B_i, are the
+// residuals of the unreduced rows at Z (`lemma_user_residuals`). Without reduction these are
+// entries of A(Z) - b (`lemma_approx_sound_unreduced`); with reduction they are bounded by the
+// dense residual of A(Z) - b weighted by the Frobenius norms of the echelon rows, plus the
+// reduction residual of the dropped rows (`lemma_approx_sound_reduced`, `reduction_bound_r`).
+// The blocks B_i are the LMI blocks of the PSD partition, so a successful PSD check gives
+// B_i >= -eps_i I (`lemma_lmi_blocks_checked`).
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -43,6 +52,10 @@ use crate::lin_alg::constr_spec::*;
 use crate::lin_alg::gauss_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::reduce_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::ldlt_spec::block_psd_ok;
+#[cfg(verus_keep_ghost)]
+use crate::real_spec::abs_r;
 #[cfg(verus_keep_ghost)]
 use crate::sdp_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -1145,6 +1158,353 @@ pub proof fn lemma_user_feasible_lifts_single(sdp: &SDP, check: bool, s: &SdpadS
     }
     lemma_setup_action_point(sdp, check, s, x);
     lemma_objective_value(sdp, check, s, x);
+}
+
+/* ---------- approximate soundness: residuals ---------- */
+
+/// The residual A(z) - b of the setup's constraint operator at z.
+pub open spec fn action_residual_r(s: &SdpadSetup, z: Seq<real>) -> Seq<real> {
+    vsub_r(setup_action_r(s, z), rvs(s.point@))
+}
+
+/// The residual of row i of the unreduced standard-form system aug at z.
+pub open spec fn std_residual_r(sdp: &SDP, aug: Seq<real>, i: int, z: Seq<real>) -> real {
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, n_vars(sdp));
+    row_residual_r(aug, lmi_rows(bd) + sdp.constraint.1@.len() as int, pk_len(std_dim(bd, vd)) + 1, i, z)
+}
+
+/// The user-level residuals at the variables read from z are bounded by bnd: those of the
+/// equality constraints, and those of the LMI entries against the LMI blocks of z.
+pub open spec fn user_residuals_bounded(sdp: &SDP, s: &SdpadSetup, z: Seq<real>, bnd: real) -> bool {
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, n_vars(sdp));
+    let xs = vars_of(z, block_sum(bd), vd);
+    &&& forall|e: int| 0 <= e < sdp.constraint.1@.len()
+            ==> abs_r(#[trigger] user_row_r(sdp.constraint.0@, vd, e, xs) - rv(sdp.constraint.1@[e])) <= bnd
+    &&& forall|i: int, r: int, c: int| 0 <= i < bd.len() && 0 <= r < bd[i] && 0 <= c < bd[i]
+            ==> abs_r(#[trigger] user_lmi_view(sdp.lmi@[i].0@, sdp.lmi@[i].1@, vd, bd[i], xs)(r, c)
+                - block_view(z, block_off(bd, i))(r, c)) <= bnd
+}
+
+/// The bound of the reduced case for the echelon form e of the unreduced system aug:
+/// rows * sum_{l < rank} ||E_l||_F |(A(z) - b)_l| + (rows - rank) * 2^rank * eps_G * (1 + ||vec z||_1),
+/// with rows the number of unreduced rows, rank = c_len the number of kept rows, and
+/// eps_G = TOL * max |entry of aug| the elimination tolerance.
+pub open spec fn reduction_bound_r(sdp: &SDP, s: &SdpadSetup, e: Seq<real>, aug: Seq<real>, z: Seq<real>) -> real {
+    let bd = bdims_r(sdp.lmi@);
+    let d = s.var_dim as int;
+    let rows = lmi_rows(bd) + sdp.constraint.1@.len() as int;
+    let rank = s.c_len as nat;
+    let res = action_residual_r(s, z);
+    (rows as real) * sum_fn_r(|l: int| row_scale_r(e, rows, d, l) * abs_r(res[l]), rank)
+        + ((rows - rank) as real) * (pow2_r(rank) * gauss_eps_r(aug) * (1.0real + one_norm_r(z)))
+}
+
+/// The residual of a row is its dot product less its right-hand side.
+pub proof fn lemma_residual_row_dot(aug: Seq<real>, rows: int, cols: int, i: int, z: Seq<real>)
+    requires
+        cols >= 0,
+        z.len() == cols,
+    ensures
+        row_residual_r(aug, rows, cols + 1, i, z) == row_dot_r(aug, rows, i, z) - cm_entry(aug, rows, i, cols),
+{
+    let f = |c: int| cm_entry(aug, rows, i, c) * z[c];
+    let g = |n: int| constr_entry(aug, rows, i, n) * z[n];
+    assert forall|c: int| 0 <= c < cols implies #[trigger] f(c) == g(c) by {}
+    lemma_sum_fn_ext(f, g, cols as nat);
+}
+
+/// The entries of A(z) - b: the dense rows' residuals, then the zero-pattern entries of z.
+pub proof fn lemma_action_residual_entries(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+        z.len() == pk_len(s.var_dim as int),
+    ensures
+        action_residual_r(s, z).len() == s.point@.len(),
+        forall|i: int| 0 <= i < s.c_len
+            ==> #[trigger] action_residual_r(s, z)[i] == row_dot_r(rvs(s.mat_dense@), s.c_len as int, i, z) - rv(s.point@[i]),
+        forall|q: int| 0 <= q < s.zeros@.len()
+            ==> z[#[trigger] zero_idx(s.zeros@, q)] == action_residual_r(s, z)[s.c_len + q],
+{
+    let rows = s.c_len as int;
+    let res = action_residual_r(s, z);
+    assert forall|q: int| 0 <= q < s.zeros@.len()
+        implies z[#[trigger] zero_idx(s.zeros@, q)] == res[rows + q] by {
+        assert(rv(s.point@[rows + q]) == 0.0real);
+    }
+}
+
+/// The residual of a row of the returned system [mat | point] is the dense row's dot product
+/// less its right-hand side.
+pub proof fn lemma_result_aug_residual(mat: Seq<f64>, point: Seq<f64>, rows: int, cols: int, z: Seq<real>, i: int)
+    requires
+        rows >= 0,
+        cols >= 0,
+        mat.len() == rows * cols,
+        point.len() >= rows,
+        z.len() == cols,
+        0 <= i < rows,
+    ensures
+        row_residual_r(result_aug(mat, point, rows), rows, cols + 1, i, z) == row_dot_r(rvs(mat), rows, i, z) - rv(point[i]),
+{
+    let res = result_aug(mat, point, rows);
+    assert(cols * rows == rows * cols) by (nonlinear_arith);
+    lemma_residual_row_dot(res, rows, cols, i, z);
+    let f = |n: int| constr_entry(res, rows, i, n) * z[n];
+    let g = |n: int| constr_entry(rvs(mat), rows, i, n) * z[n];
+    assert forall|n: int| 0 <= n < cols implies #[trigger] f(n) == g(n) by {
+        lemma_result_aug_entry(mat, point, rows, cols, i, n);
+    }
+    lemma_sum_fn_ext(f, g, cols as nat);
+    assert(cm_idx(rows, i, cols) == cols * rows + i);
+    assert(res[cols * rows + i] == rvs(point.subrange(0, rows))[i]);
+}
+
+/// The user-level residuals at the variables read from z are the residuals of the unreduced
+/// rows: sum_n A_n(X_n)_e - b_e is that of equality row e, and (H_i(X) - M_i)_rc - (B_i)_rc that
+/// of LMI row c k_i + r, for every z.
+pub proof fn lemma_user_residuals(sdp: &SDP, aug: Seq<real>, z: Seq<real>)
+    requires
+        sdp_lmi_input_ok(sdp),
+        std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bdims_r(sdp.lmi@), vdims_r(sdp.lmi@, n_vars(sdp)), aug),
+        z.len() == pk_len(std_dim(bdims_r(sdp.lmi@), vdims_r(sdp.lmi@, n_vars(sdp)))),
+    ensures
+        ({
+            let bd = bdims_r(sdp.lmi@);
+            let vd = vdims_r(sdp.lmi@, n_vars(sdp));
+            let xs = vars_of(z, block_sum(bd), vd);
+            &&& forall|e: int| 0 <= e < sdp.constraint.1@.len()
+                    ==> #[trigger] user_row_r(sdp.constraint.0@, vd, e, xs) - rv(sdp.constraint.1@[e])
+                        == std_residual_r(sdp, aug, lmi_rows(bd) + e, z)
+            &&& forall|i: int, r: int, c: int| 0 <= i < bd.len() && 0 <= r < bd[i] && 0 <= c < bd[i]
+                    ==> #[trigger] user_lmi_view(sdp.lmi@[i].0@, sdp.lmi@[i].1@, vd, bd[i], xs)(r, c)
+                        == block_view(z, block_off(bd, i))(r, c) + std_residual_r(sdp, aug, row_off(bd, i) + c * bd[i] + r, z)
+        }),
+{
+    let nv = n_vars(sdp);
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, nv);
+    let bsum = block_sum(bd);
+    let cols = pk_len(std_dim(bd, vd));
+    let m = sdp.constraint.1@.len() as int;
+    let rows = lmi_rows(bd) + m;
+    let xs = vars_of(z, bsum, vd);
+    assert forall|i: int| 0 <= i < bd.len() implies #[trigger] bd[i] >= 1 by {}
+    assert forall|e: int| 0 <= e < m
+        implies #[trigger] user_row_r(sdp.constraint.0@, vd, e, xs) - rv(sdp.constraint.1@[e])
+            == std_residual_r(sdp, aug, lmi_rows(bd) + e, z) by {
+        lemma_residual_row_dot(aug, rows, cols, lmi_rows(bd) + e, z);
+        assert(row_dot_r(aug, rows, lmi_rows(bd) + e, z) == maps_row_r(sdp.constraint.0@, bsum, vd, e, z));
+        assert(cm_entry(aug, rows, lmi_rows(bd) + e, cols) == rv(sdp.constraint.1@[e]));
+        lemma_user_row_of_vars(sdp.constraint.0@, bsum, vd, e, z);
+    }
+    assert forall|i: int, r: int, c: int| 0 <= i < bd.len() && 0 <= r < bd[i] && 0 <= c < bd[i]
+        implies #[trigger] user_lmi_view(sdp.lmi@[i].0@, sdp.lmi@[i].1@, vd, bd[i], xs)(r, c)
+            == block_view(z, block_off(bd, i))(r, c) + std_residual_r(sdp, aug, row_off(bd, i) + c * bd[i] + r, z) by {
+        let k = bd[i];
+        let off = block_off(bd, i);
+        lemma_lmi_row_index(bd, i, r, c);
+        let e = c * k + r;
+        lemma_residual_row_dot(aug, rows, cols, row_off(bd, i) + e, z);
+        assert(row_dot_r(aug, rows, row_off(bd, i) + e, z)
+            == maps_row_r(sdp.lmi@[i].0@, bsum, vd, e, z) - sym_entry(z, off + lmi_row_lo(k, e), off + lmi_row_hi(k, e)));
+        assert(cm_entry(aug, rows, row_off(bd, i) + e, cols) == rv(sdp.lmi@[i].1@[e]));
+        lemma_user_row_of_vars(sdp.lmi@[i].0@, bsum, vd, e, z);
+    }
+}
+
+/// The LMI blocks of z are blocks of the PSD partition, so a successful PSD check establishes
+/// B_i >= -eps_i I with the implementation's tolerance eps_i (block_psd_ok).
+pub proof fn lemma_lmi_blocks_checked(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>)
+    requires
+        sdpad_input_ok(sdp, check),
+        sdpad_setup_ok(sdp, check, *s),
+        sdp.lmi@.len() >= 1,
+        psd_blocks_ok(s, z),
+    ensures
+        forall|i: int| 0 <= i < bdims_r(sdp.lmi@).len() ==> #[trigger] block_psd_ok(z, block_off(bdims_r(sdp.lmi@), i), bdims_r(sdp.lmi@)[i]),
+{
+    let d = s.var_dim as int;
+    let nv = n_vars(sdp);
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, nv);
+    let bs = block_sizes(bd, vd);
+    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
+        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    assert(dims_of(s.block_dims@) == bd);
+    assert(dims_of(s.symm_dims@) == vd);
+    assert forall|i: int| 0 <= i < bd.len() implies #[trigger] bd[i] >= 1 by {}
+    assert forall|n: int| 0 <= n < vd.len() implies #[trigger] vd[n] >= 1 by {}
+    lemma_block_sizes_facts(bd, vd);
+    lemma_sum_upto_ge(bd, bd.len() as int);
+    assert(block_sum(bd) >= 1);
+    assert(psd_partition(bd, vd, d) == bs);
+    assert forall|i: int| 0 <= i < bd.len() implies #[trigger] block_psd_ok(z, block_off(bd, i), bd[i]) by {
+        assert(s.psd_blocks@[i].0 as int == sum_upto(bs, i));
+        assert(s.psd_blocks@[i].1 as int == bs[i]);
+        assert(block_psd_ok(z, s.psd_blocks@[i].0 as int, s.psd_blocks@[i].1 as int));
+    }
+}
+
+/// Approximate soundness without reduction: the user-level residuals at the variables read
+/// from z are entries of A(z) - b (the dense rows carry the unreduced rows), the zero-pattern
+/// entries of z are the remaining entries, and <C_F, z>_F is the user's objective.
+pub proof fn lemma_approx_sound_unreduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
+    requires
+        sdpad_input_ok(sdp, false),
+        sdpad_setup_ok(sdp, false, *s),
+        sdp.lmi@.len() >= 1,
+        z.len() == pk_len(s.var_dim as int),
+    ensures
+        ({
+            let bd = bdims_r(sdp.lmi@);
+            let vd = vdims_r(sdp.lmi@, n_vars(sdp));
+            let xs = vars_of(z, block_sum(bd), vd);
+            let res = action_residual_r(s, z);
+            &&& res.len() == s.point@.len()
+            &&& forall|q: int| 0 <= q < s.zeros@.len() ==> z[#[trigger] zero_idx(s.zeros@, q)] == res[s.c_len + q]
+            &&& forall|e: int| 0 <= e < sdp.constraint.1@.len()
+                    ==> #[trigger] user_row_r(sdp.constraint.0@, vd, e, xs) - rv(sdp.constraint.1@[e]) == res[lmi_rows(bd) + e]
+            &&& forall|i: int, r: int, c: int| 0 <= i < bd.len() && 0 <= r < bd[i] && 0 <= c < bd[i]
+                    ==> #[trigger] user_lmi_view(sdp.lmi@[i].0@, sdp.lmi@[i].1@, vd, bd[i], xs)(r, c)
+                        == block_view(z, block_off(bd, i))(r, c) + res[row_off(bd, i) + c * bd[i] + r]
+            &&& prim_val_r(s, z) == user_obj_r(sdp.objective@, vd, xs)
+        }),
+{
+    let d = s.var_dim as int;
+    let cols = pk_len(d);
+    let nv = n_vars(sdp);
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, nv);
+    let bsum = block_sum(bd);
+    let m = sdp.constraint.1@.len() as int;
+    let total = lmi_rows(bd) + m;
+    let rows = s.c_len as int;
+    let xs = vars_of(z, bsum, vd);
+    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), false)
+        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let aug = choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
+        && result_aug(s.mat_dense@, s.point@, rows) == aug;
+    assert(d == std_dim(bd, vd));
+    lemma_pk_col_start_monotone(0, d);
+    lemma_sq_sum_upto_monotone(bd, 0, bd.len() as int);
+    lemma_reduced_rows(aug, s.mat_dense@, s.point@, rows, total, d, false);
+    lemma_user_residuals(sdp, aug, z);
+    lemma_action_residual_entries(sdp, false, s, z);
+    // the unreduced rows are the dense rows: their residuals are the entries of A(z) - b
+    assert forall|i: int| 0 <= i < rows implies #[trigger] std_residual_r(sdp, aug, i, z) == action_residual_r(s, z)[i] by {
+        lemma_result_aug_residual(s.mat_dense@, s.point@, rows, cols, z, i);
+    }
+    assert forall|i: int, r: int, c: int| 0 <= i < bd.len() && 0 <= r < bd[i] && 0 <= c < bd[i]
+        implies #[trigger] user_lmi_view(sdp.lmi@[i].0@, sdp.lmi@[i].1@, vd, bd[i], xs)(r, c)
+            == block_view(z, block_off(bd, i))(r, c) + action_residual_r(s, z)[row_off(bd, i) + c * bd[i] + r] by {
+        lemma_lmi_row_index(bd, i, r, c);
+        assert(std_residual_r(sdp, aug, row_off(bd, i) + c * bd[i] + r, z) == action_residual_r(s, z)[row_off(bd, i) + c * bd[i] + r]);
+    }
+    lemma_objective_value(sdp, false, s, z);
+    lemma_user_obj_of_vars(sdp.objective@, bsum, vd, z);
+}
+
+/// Approximate soundness with reduction: for the echelon form e of the unreduced system aug
+/// (reduced_with), the user-level residuals at the variables read from z are bounded by
+/// reduction_bound_r (the dense residual of A(z) - b, weighted by the Frobenius norms of the
+/// echelon rows, plus the reduction residual of the dropped rows); the zero-pattern entries of z
+/// are the remaining entries of A(z) - b, and <C_F, z>_F is the user's objective.
+pub proof fn lemma_approx_sound_reduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
+    requires
+        sdpad_input_ok(sdp, true),
+        sdpad_setup_ok(sdp, true, *s),
+        sdp.lmi@.len() >= 1,
+        z.len() == pk_len(s.var_dim as int),
+    ensures
+        action_residual_r(s, z).len() == s.point@.len(),
+        forall|q: int| 0 <= q < s.zeros@.len() ==> z[#[trigger] zero_idx(s.zeros@, q)] == action_residual_r(s, z)[s.c_len + q],
+        prim_val_r(s, z) == user_obj_r(sdp.objective@, vdims_r(sdp.lmi@, n_vars(sdp)), vars_of(z, block_sum(bdims_r(sdp.lmi@)), vdims_r(sdp.lmi@, n_vars(sdp)))),
+        exists|e: Seq<real>, aug: Seq<real>, pivots: Seq<int>|
+            #[trigger] reduced_with(aug, e, result_aug(s.mat_dense@, s.point@, s.c_len as int), s.var_dim as int, pivots)
+            && std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bdims_r(sdp.lmi@), vdims_r(sdp.lmi@, n_vars(sdp)), aug)
+            && user_residuals_bounded(sdp, s, z, reduction_bound_r(sdp, s, e, aug, z)),
+{
+    let d = s.var_dim as int;
+    let cols = pk_len(d);
+    let cd = red_col_dim(d);
+    let nv = n_vars(sdp);
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, nv);
+    let bsum = block_sum(bd);
+    let xs = vars_of(z, bsum, vd);
+    let m = sdp.constraint.1@.len() as int;
+    let total = lmi_rows(bd) + m;
+    let rows = s.c_len as int;
+    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), true)
+        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let red = result_aug(s.mat_dense@, s.point@, rows);
+    let aug = choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
+        && reduced_from(aug, red, d);
+    let e = choose|e: Seq<real>| reduced_system(aug, e, red, d);
+    let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(aug, e, red, d, pivots);
+    assert(d == std_dim(bd, vd));
+    lemma_pk_col_start_monotone(0, d);
+    lemma_sq_sum_upto_monotone(bd, 0, bd.len() as int);
+    lemma_reduced_rows(aug, s.mat_dense@, s.point@, rows, total, d, true);
+    // the row counts of the echelon form and of the reduced system
+    assert(aug.len() as int == cd * total) by (nonlinear_arith)
+        requires aug.len() as int == total * cd;
+    lemma_div_multiples_vanish(total, cd);
+    assert(red_row_dim(aug, d) == total);
+    let rank = pivots.len() as int;
+    assert(red.len() == rows * cols + rows);
+    assert(rows * cols + rows == rows * (cols + 1)) by (nonlinear_arith);
+    assert(rank == rows) by (nonlinear_arith)
+        requires cd >= 1, cd * rank == rows * cd;
+    lemma_user_residuals(sdp, aug, z);
+    lemma_action_residual_entries(sdp, true, s, z);
+    let res = action_residual_r(s, z);
+    let bnd = reduction_bound_r(sdp, s, e, aug, z);
+    // the residuals of the reduced rows are the dense entries of A(z) - b
+    let f = |l: int| row_scale_r(e, total, d, l) * abs_r(row_residual_r(red, rank, cd, l, z));
+    let g = |l: int| row_scale_r(e, total, d, l) * abs_r(res[l]);
+    assert forall|l: int| 0 <= l < rank implies #[trigger] f(l) == g(l) by {
+        lemma_result_aug_residual(s.mat_dense@, s.point@, rows, cols, z, l);
+    }
+    lemma_sum_fn_ext(f, g, pivots.len());
+    // every unreduced row is bounded
+    assert forall|i: int| 0 <= i < total implies abs_r(#[trigger] std_residual_r(sdp, aug, i, z)) <= bnd by {
+        lemma_reduced_residual_bound(aug, e, red, d, pivots, z, i);
+    }
+    assert forall|ee: int| 0 <= ee < m
+        implies abs_r(#[trigger] user_row_r(sdp.constraint.0@, vd, ee, xs) - rv(sdp.constraint.1@[ee])) <= bnd by {
+        assert(abs_r(std_residual_r(sdp, aug, lmi_rows(bd) + ee, z)) <= bnd);
+    }
+    assert forall|i: int, r: int, c: int| 0 <= i < bd.len() && 0 <= r < bd[i] && 0 <= c < bd[i]
+        implies abs_r(#[trigger] user_lmi_view(sdp.lmi@[i].0@, sdp.lmi@[i].1@, vd, bd[i], xs)(r, c)
+            - block_view(z, block_off(bd, i))(r, c)) <= bnd by {
+        lemma_lmi_row_index(bd, i, r, c);
+        assert(abs_r(std_residual_r(sdp, aug, row_off(bd, i) + c * bd[i] + r, z)) <= bnd);
+    }
+    assert(user_residuals_bounded(sdp, s, z, bnd));
+    lemma_objective_value(sdp, true, s, z);
+    lemma_user_obj_of_vars(sdp.objective@, bsum, vd, z);
+}
+
+/// Each entry of A(z) - b is at most pinf * (1 + ||b||), the reported primal infeasibility
+/// scaled back to an absolute residual.
+pub proof fn lemma_residual_entry_pinf(s: &SdpadSetup, z: Seq<real>, l: int)
+    requires
+        setup_action_r(s, z).len() == s.point@.len(),
+        0 <= l < s.point@.len(),
+    ensures
+        abs_r(action_residual_r(s, z)[l]) <= pinf_r(s, z) * (1.0real + norm_r(rvs(s.point@))),
+{
+    let res = action_residual_r(s, z);
+    let b = rvs(s.point@);
+    lemma_entry_le_norm(res, l);
+    lemma_dot_self_nonneg(b);
+    let den = 1.0real + norm_r(b);
+    assert(pinf_r(s, z) == norm_r(res) / den);
+    assert((norm_r(res) / den) * den == norm_r(res)) by (nonlinear_arith)
+        requires den != 0.0real;
 }
 
 } // verus!

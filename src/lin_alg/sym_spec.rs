@@ -657,6 +657,38 @@ pub proof fn lemma_sum2_fn_scale(f: spec_fn(int, int) -> real, g: spec_fn(int, i
     lemma_sum_fn_scale(rows_f, rows_g, s, n);
 }
 
+/// |sum f| <= sum |f|.
+pub proof fn lemma_abs_sum_fn_le(f: spec_fn(int) -> real, n: nat)
+    ensures
+        abs_r(sum_fn_r(f, n)) <= sum_fn_r(|i: int| abs_r(f(i)), n),
+    decreases n,
+{
+    if n > 0 {
+        lemma_abs_sum_fn_le(f, (n - 1) as nat);
+    }
+}
+
+/// A sum is invariant under exchanging two indices of the summand.
+pub proof fn lemma_sum_fn_transpose(f: spec_fn(int) -> real, n: nat, r1: int, r2: int)
+    requires
+        0 <= r1 < n,
+        0 <= r2 < n,
+    ensures
+        sum_fn_r(|l: int| f(if l == r1 { r2 } else if l == r2 { r1 } else { l }), n) == sum_fn_r(f, n),
+{
+    let g = |l: int| f(if l == r1 { r2 } else if l == r2 { r1 } else { l });
+    if r1 == r2 {
+        assert forall|l: int| 0 <= l < n implies #[trigger] g(l) == f(l) by {}
+        lemma_sum_fn_ext(g, f, n);
+    } else {
+        let h = |l: int| if l == r1 { f(r2) } else { f(l) };
+        assert forall|l: int| 0 <= l < n && l != r1 implies #[trigger] h(l) == f(l) by {}
+        lemma_sum_fn_update(f, h, n, r1, f(r2) - f(r1));
+        assert forall|l: int| 0 <= l < n && l != r2 implies #[trigger] g(l) == h(l) by {}
+        lemma_sum_fn_update(h, g, n, r2, f(r1) - f(r2));
+    }
+}
+
 /// Double sums are monotone in the summand.
 pub proof fn lemma_sum2_fn_le(f: spec_fn(int, int) -> real, g: spec_fn(int, int) -> real, n: nat)
     requires

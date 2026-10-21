@@ -29,6 +29,8 @@ use crate::lin_alg::sym_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::solve_spec::abs_max_r;
 #[cfg(verus_keep_ghost)]
+use crate::lin_alg::mat_spec::MatF;
+#[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::gauss_spec::*;
@@ -197,22 +199,6 @@ pub open spec fn one_norm_r(x: Seq<real>) -> real {
     sum_fn_r(|c: int| abs_r(x[c]), x.len())
 }
 
-/// Residual of row i of [A | b] at x: sum_c A_ic x_c - b_i.
-pub open spec fn row_residual_r(m: Seq<real>, row_dim: int, col_dim: int, i: int, x: Seq<real>) -> real {
-    sum_fn_r(|c: int| cm_entry(m, row_dim, i, c) * x[c], (col_dim - 1) as nat) - cm_entry(m, row_dim, i, col_dim - 1)
-}
-
-/// |sum f| <= sum |f|.
-pub proof fn lemma_abs_sum_fn_le(f: spec_fn(int) -> real, n: nat)
-    ensures
-        abs_r(sum_fn_r(f, n)) <= sum_fn_r(|i: int| abs_r(f(i)), n),
-    decreases n,
-{
-    if n > 0 {
-        lemma_abs_sum_fn_le(f, (n - 1) as nat);
-    }
-}
-
 pub proof fn lemma_pow2_monotone(k1: nat, k2: nat)
     requires
         k1 <= k2,
@@ -310,6 +296,20 @@ pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
     &&& forall|i: int| 0 <= i < rank ==> #[trigger] row_scale_r(e, rd, dim, i) > 0.0real
     &&& forall|i: int, j: int| 0 <= i < rank && 0 <= j < cd
             ==> #[trigger] cm_entry(res, rank, i, j) == cm_entry(e, rd, i, j) / row_scale_r(e, rd, dim, i)
+    &&& reduction_transform(a0, e, rd, cd, rank)
+}
+
+/// The input is recovered from the echelon form, a0 = T e, by a transformation with bounded
+/// columns (gauss_elim). Opaque: its quantifier would be instantiated at every entry of the
+/// large matrices the conversion handles; it is revealed where it is established and used.
+#[verifier::opaque]
+pub open spec fn reduction_transform(a0: Seq<real>, e: Seq<real>, rd: int, cd: int, rank: int) -> bool {
+    exists|t: MatF| #[trigger] row_comb(a0, e, rd, cd, t) && cols_bounded(t, rd, rank)
+}
+
+/// The number of rows of an augmented system over dim x dim symmetric matrices.
+pub open spec fn red_row_dim(a0: Seq<real>, dim: int) -> int {
+    a0.len() as int / red_col_dim(dim)
 }
 
 /// The postcondition of `linear_remove_redundant_sym` (a0 the input, e its echelon form, res the result).
@@ -395,6 +395,90 @@ pub proof fn lemma_reduced_solution_echelon(a0: Seq<real>, e: Seq<real>, res: Se
         implies abs_r(#[trigger] row_residual_r(e, rd, cd, i, x)) <= pow2_r(pivots.len()) * eps * (1.0real + one_norm_r(x)) by {
         lemma_dropped_row_residual(e, rd, cd, pivots, eps, i, x);
     }
+}
+
+/* ---------- residuals of the original rows ---------- */
+
+/// The residual of a kept echelon row is its Frobenius norm times the residual of the
+/// corresponding reduced row.
+pub proof fn lemma_kept_row_residual(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, l: int, x: Seq<real>)
+    requires
+        dim >= 0,
+        reduced_with(a0, e, res, dim, pivots),
+        x.len() == red_col_dim(dim) - 1,
+        0 <= l < pivots.len(),
+    ensures
+        row_residual_r(e, red_row_dim(a0, dim), red_col_dim(dim), l, x)
+            == row_scale_r(e, red_row_dim(a0, dim), dim, l) * row_residual_r(res, pivots.len() as int, red_col_dim(dim), l, x),
+{
+    let cd = red_col_dim(dim);
+    let rd = red_row_dim(a0, dim);
+    let rank = pivots.len() as int;
+    let n = (cd - 1) as nat;
+    let s = row_scale_r(e, rd, dim, l);
+    let f = |c: int| cm_entry(e, rd, l, c) * x[c];
+    let g = |c: int| cm_entry(res, rank, l, c) * x[c];
+    assert forall|c: int| 0 <= c < n implies #[trigger] g(c) == (1.0real / s) * f(c) by {
+        let (u, w) = (cm_entry(e, rd, l, c), x[c]);
+        assert(cm_entry(res, rank, l, c) == u / s);
+        assert((u / s) * w == (1.0real / s) * (u * w)) by (nonlinear_arith)
+            requires s != 0.0real;
+    }
+    lemma_sum_fn_scale(f, g, 1.0real / s, n);
+    let (sf, b) = (sum_fn_r(f, n), cm_entry(e, rd, l, cd - 1));
+    assert(cm_entry(res, rank, l, cd - 1) == b / s);
+    assert(row_residual_r(res, rank, cd, l, x) == (1.0real / s) * sf - b / s);
+    assert(s * ((1.0real / s) * sf - b / s) == sf - b) by (nonlinear_arith)
+        requires s != 0.0real;
+}
+
+/// The residual bound of the reduction: for any x, every original row has residual at most
+/// rd * sum_{l < rank} ||E_l||_F |res_l(x)| + (rd - rank) * 2^rank * eps * (1 + ||x||_1), where
+/// res_l is the residual of reduced row l, ||E_l||_F the scale of echelon row l, and the
+/// second term bounds the dropped echelon rows (lemma_dropped_row_residual).
+pub proof fn lemma_reduced_residual_bound(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, x: Seq<real>, i: int)
+    requires
+        dim >= 0,
+        reduced_with(a0, e, res, dim, pivots),
+        x.len() == red_col_dim(dim) - 1,
+        0 <= i < red_row_dim(a0, dim),
+    ensures
+        abs_r(row_residual_r(a0, red_row_dim(a0, dim), red_col_dim(dim), i, x))
+            <= (red_row_dim(a0, dim) as real)
+                * sum_fn_r(|l: int| row_scale_r(e, red_row_dim(a0, dim), dim, l)
+                    * abs_r(row_residual_r(res, pivots.len() as int, red_col_dim(dim), l, x)), pivots.len())
+               + ((red_row_dim(a0, dim) - pivots.len()) as real)
+                * (pow2_r(pivots.len()) * gauss_eps_r(a0) * (1.0real + one_norm_r(x))),
+{
+    let cd = red_col_dim(dim);
+    let rd = red_row_dim(a0, dim);
+    let rank = pivots.len() as int;
+    let eps = gauss_eps_r(a0);
+    lemma_pk_col_start_monotone(0, dim);
+    reveal(reduction_transform);
+    let t = choose|t: MatF| #[trigger] row_comb(a0, e, rd, cd, t) && cols_bounded(t, rd, rank);
+    lemma_row_comb_residual_bound(a0, e, rd, cd, t, rank, i, x);
+    // kept rows: scale times the reduced residual
+    let ar = |l: int| abs_r(row_residual_r(e, rd, cd, l, x));
+    let kept = |l: int| row_scale_r(e, rd, dim, l) * abs_r(row_residual_r(res, rank, cd, l, x));
+    assert forall|l: int| 0 <= l < rank implies #[trigger] ar(l) == kept(l) by {
+        lemma_kept_row_residual(a0, e, res, dim, pivots, l, x);
+        let (s, v) = (row_scale_r(e, rd, dim, l), row_residual_r(res, rank, cd, l, x));
+        lemma_abs_mul(s, v);
+        assert(abs_r(s) == s);
+    }
+    lemma_sum_fn_ext(ar, kept, pivots.len());
+    // dropped rows: the uniform bound
+    lemma_max0_fn_bound(|k: int| abs_r(a0[k]), a0.len());
+    assert(rv(TOL) == 0.0000000001real);
+    let bnd = pow2_r(pivots.len()) * eps * (1.0real + one_norm_r(x));
+    let ar2 = |l: int| abs_r(row_residual_r(e, rd, cd, rank + l, x));
+    let cb = |l: int| bnd;
+    assert forall|l: int| 0 <= l < rd - rank implies #[trigger] ar2(l) <= cb(l) by {
+        lemma_dropped_row_residual(e, rd, cd, pivots, eps, rank + l, x);
+    }
+    lemma_sum_fn_le(ar2, cb, (rd - rank) as nat);
+    lemma_sum_fn_const(bnd, (rd - rank) as nat);
 }
 
 } // verus!

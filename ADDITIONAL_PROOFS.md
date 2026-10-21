@@ -1,6 +1,6 @@
-# Additional proofs: three statements to prove in Verus
+# Additional proofs: four statements to prove in Verus
 
-This file gives three new statements for the agent to prove in Verus. Prove each as a lemma.
+This file gives four new statements for the agent to prove in Verus. Prove each as a lemma.
 Follow `CLAUDE.md`: add no trusted items, and reuse existing lemmas.
 
 ## 1. Gap identity
@@ -41,9 +41,9 @@ for `block_view`: pad the test vector with zeros outside the block and use `psd_
 `eps = 0`.
 
 **With `check`.** The rows are reduced, and a solution of the reduced system satisfies the
-dropped rows only up to the bound of `lemma_reduced_solution_echelon`. State the theorem for
-`Z` solving the unreduced system `aug` of `std_rows_ok`. Do not claim exact feasibility from
-the reduced system.
+dropped rows of the echelon form only up to the bound of `lemma_reduced_solution_echelon`.
+State the theorem for `Z` solving the unreduced system `aug` of `std_rows_ok`. Do not claim
+exact feasibility from the reduced system; the quantitative statement is 4.
 
 ## 3. Converse: a feasible user point lifts to a feasible standard-form point
 
@@ -81,9 +81,47 @@ indices (via `pk_unpack`), zero off the blocks.
 **Not in Verus.** Statements 2 and 3 together imply that the two problems have the same
 optimal value. Do not prove this in Verus.
 
+## 4. Approximate soundness
+
+**Statement.** Assume the case with LMIs and let `Z` be any packed matrix of order `d`
+(`z.len() == pk_len(d)`). Let `res = A(Z) - b` (`action_residual_r`) and
+`X_j = zvar_r(Z, var_off(..), r_j)`. For every `Z` (`lemma_user_residuals`):
+
+    sum_j A_j(X_j)_e - b_e            = residual of unreduced equality row e at Z
+    (H_i(X) - M_i)[r, c] - B_i[r, c]  = residual of unreduced LMI row c k_i + r at Z
+
+where `B_i = block_view(Z, block_off(bd, i))`. Hence:
+
+1. Without `check` (`lemma_approx_sound_unreduced`): both residuals are the entries of `res`
+   at the corresponding row, `Z_rc = res[c_len + q]` at listed position `q`, and
+   `<C_F, Z>_F = sum_j C_j(X_j)`.
+2. With `check` (`lemma_approx_sound_reduced`): for the echelon form `E` of the unreduced
+   system (`reduced_with`), both residuals are bounded by `reduction_bound_r`,
+
+       rows * sum_{l < rank} ||E_l||_F |res_l| + (rows - rank) * 2^rank * eps_G * (1 + ||vec Z||_1),
+
+   with `rows` the number of unreduced rows, `rank = c_len`, `||E_l||_F` the scale of kept
+   echelon row `l` (`row_scale_r`), and `eps_G = TOL * max |entry|` the elimination tolerance;
+   the zero-pattern entries and the objective are as in case 1.
+3. A successful PSD check (`psd_blocks_ok`) gives `B_i >= -eps_i I` with the implementation's
+   tolerance (`lemma_lmi_blocks_checked`), and `|res_l| <= pinf * (1 + ||b||)`
+   (`lemma_residual_entry_pinf`).
+
+**Ingredients.** The `check` case needs the original rows as a bounded combination of the
+echelon rows, which solution-set equivalence (`same_solutions`) does not provide.
+- **Transformation**, in `gauss_spec.rs` and `gauss_elim`: a ghost `T` with `A_0 = T E`
+  (`row_comb`); a row swap exchanges two columns of `T`, a row subtraction adds `piv` times a
+  column (`|piv| <= 1` by partial pivoting), so the absolute column sums of `T` stay at most
+  `rows` on the pivot columns and `1` elsewhere (`cols_bounded`). Residuals transfer along
+  `T` (`lemma_row_comb_residual_bound`).
+- **Reduction bound**, in `reduce_spec.rs`: `reduced_with` records the transformation as the
+  opaque `reduction_transform`; `lemma_reduced_residual_bound` combines it with the scaling
+  of the kept echelon rows and `lemma_dropped_row_residual`, which holds for every `x`.
+- The row identities of `std_rows_ok` give the residual identities above for every `Z`.
+
 ## Done when
 
-- All three lemmas verify, and
+- All lemmas verify, and
   `verus src/lib.rs --crate-type=lib --edition=2024 -V no-solver-version-check` passes.
 - `VERIFICATION_PROGRESS.md` is updated and records the new verified count.
 

@@ -252,6 +252,12 @@ pub open spec fn sdp_lmi_input_ok(sdp: &SDP) -> bool {
     &&& (pk_len(sd) + 1) * (lmi_rows(bd) + m + 1) <= usize::MAX
 }
 
+/// The objective maps have the shapes of the variable orders symm_dims, which are at least 1.
+pub open spec fn objective_shapes_ok(objective: Seq<Vec<Vec<f64>>>, symm_dims: Seq<usize>) -> bool {
+    forall|n: int| 0 <= n < objective.len()
+        ==> part_shape((#[trigger] objective[n])@, symm_dims[n] as int) && symm_dims[n] >= 1
+}
+
 /// The objective maps have the shapes of their variables (sdp_lmi_input_ok), stated on the
 /// returned variable orders.
 proof fn lemma_objective_shapes(sdp: &SDP, symm_dims: Seq<usize>)
@@ -259,8 +265,7 @@ proof fn lemma_objective_shapes(sdp: &SDP, symm_dims: Seq<usize>)
         sdp_lmi_input_ok(sdp),
         dims_of(symm_dims) == vdims_r(sdp.lmi@, n_vars(sdp)),
     ensures
-        forall|n: int| 0 <= n < sdp.objective@.len()
-            ==> part_shape((#[trigger] sdp.objective@[n])@, symm_dims[n] as int) && symm_dims[n] >= 1,
+        objective_shapes_ok(sdp.objective@, symm_dims),
 {
     let nv = n_vars(sdp);
     let vd = vdims_r(sdp.lmi@, nv);
@@ -913,7 +918,7 @@ fn lmi_block(maps: &Vec<MatrixSym>, symm_dims: &Vec<usize>, block_size_sum: usiz
 fn objective_sum(objective: &MatrixSym, symm_dims: &Vec<usize>, block_size_sum: usize, total_dim: usize) -> (obj_sum: SymMatrix)
     requires
         objective@.len() == symm_dims@.len(),
-        forall|n: int| 0 <= n < objective@.len() ==> part_shape((#[trigger] objective@[n])@, symm_dims@[n] as int) && symm_dims@[n] >= 1,
+        objective_shapes_ok(objective@, symm_dims@),
         dim_fits(total_dim as int),
         var_off(block_size_sum as int, dims_of(symm_dims@), symm_dims@.len() as int) <= total_dim,
     ensures

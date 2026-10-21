@@ -21,6 +21,10 @@ use crate::lin_alg::solve_spec::{abs_max_prefix_r, abs_max_r, lemma_abs_max_pref
 use vstd::arithmetic::div_mod::{lemma_fundamental_div_mod, lemma_mod_bound};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::gauss_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::mat_spec::{MatF, mident};
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::sym_spec::lemma_sum_fn_nonneg;
 
 // column vector
 pub type Vector = Vec<f64>;
@@ -428,6 +432,9 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             &&& res.2 == (pivots.len() == 0 || pivots.last() < col_dim - 1)
         },
         abs_max_r(rvs(old(mat)@)) > 0.0real ==> res.1 >= 1,
+        abs_max_r(rvs(old(mat)@)) > 0.0real
+            ==> exists|t: MatF| #[trigger] row_comb(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int, t)
+                && cols_bounded(t, row_dim as int, res.1 as int),
 {
     let ghost a0 = rvs(old(mat)@);
     let ghost (rd, cd) = (row_dim as int, col_dim as int);
@@ -447,9 +454,12 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
     }
     let ghost eps = rv(TOL) * abs_max_r(a0);
     let ghost mut pivots: Seq<int> = Seq::empty();
+    // the transformation recovering the input from the current matrix: a0 = T * mat
+    let ghost mut tr: MatF = mident();
     proof {
         lemma_same_solutions_refl(a0, rd, cd);
         lemma_zero_cols_refl(a0, rd, cd);
+        lemma_row_comb_refl(a0, rd, cd);
     }
     let mut n = 0;
     while n < col_dim && row_search < row_dim
@@ -471,6 +481,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             skipped_bounded(rvs(mat@), rd, cd, pivots, eps, n as int),
             same_solutions(a0, rvs(mat@), rd, cd),
             zero_cols_kept(a0, rvs(mat@), rd, cd),
+            abs_max_r(a0) > 0.0real ==> row_comb(a0, rvs(mat@), rd, cd, tr) && cols_bounded(tr, rd, row_search as int),
             coeff_rank as int == row_search - (if row_search > 0 && pivots.last() == cd - 1 { 1int } else { 0int }),
         decreases col_dim - n,
     {
@@ -520,6 +531,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                         forall|i: int, c: int| 0 <= i < rd && 0 <= c < cd
                             ==> #[trigger] cm_entry(rvs(mat@), rd, i, c)
                                 == cm_entry(before, rd, (if c < m3 { if i == row_search { pivot_row as int } else if i == pivot_row { row_search as int } else { i } } else { i }), c),
+                        abs_max_r(a0) > 0.0real ==> row_comb(a0, before, rd, cd, tr) && cols_bounded(tr, rd, row_search as int),
                 {
                     proof {
                         assert(mat.len() == row_dim * col_dim);
@@ -563,6 +575,18 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     lemma_zero_cols_trans(a0, before, cur, rd, cd);
                     lemma_echelon_swap(before, cur, rd, cd, pivots, eps, row_search as int, pivot_row as int);
                     lemma_skipped_swap(before, cur, rd, cd, pivots, eps, n as int, row_search as int, pivot_row as int);
+                    // the transformation exchanges the two columns; both lie beyond the pivot columns
+                    let (rs, pr) = (row_search as int, pivot_row as int);
+                    if abs_max_r(a0) > 0.0real {
+                        lemma_row_comb_swap(a0, before, cur, rd, cd, tr, rs, pr);
+                        let t2 = swap_cols(tr, rs, pr);
+                        assert forall|l: int| 0 <= l < rd
+                            implies #[trigger] col_abs_sum(t2, rd, l) <= (if l < rs { rd as real } else { 1.0real }) by {
+                            let src = if l == rs { pr } else if l == pr { rs } else { l };
+                            assert(col_abs_sum(tr, rd, src) <= (if src < rs { rd as real } else { 1.0real }));
+                        }
+                    }
+                    tr = swap_cols(tr, rs, pr);
                 }
             }
             // row row_search now holds the pivot: of maximal magnitude among the remaining rows and >= TOL * scale
@@ -594,6 +618,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     n * row_dim + row_dim <= row_dim * col_dim,
                     rv(denom) == cm_entry(swapped, rd, row_search as int, n as int),
                     abs_r(cm_entry(swapped, rd, row_search as int, n as int)) >= eps,
+                    eps == rv(TOL) * abs_max_r(a0),
                     pivots.len() == row_search,
                     forall|i: int, c: int| 0 <= i < rd && 0 <= c < cd && (i == row_search || i >= j)
                         ==> #[trigger] cm_entry(rvs(mat@), rd, i, c) == cm_entry(swapped, rd, i, c),
@@ -607,6 +632,9 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     forall|c: int, i: int| 0 <= c < n && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= i < rd
                         ==> abs_r(#[trigger] cm_entry(rvs(mat@), rd, i, c))
                             < skip_bound(pivots, c, eps) + (if row_search < i < j { skip_bound(pivots, c, eps) } else { 0.0real }),
+                    abs_max_r(a0) > 0.0real ==> row_comb(a0, rvs(mat@), rd, cd, tr)
+                        && (forall|l: int| 0 <= l < rd ==> #[trigger] col_abs_sum(tr, rd, l)
+                            <= (if l < row_search { rd as real } else if l == row_search { (j - row_search) as real } else { 1.0real })),
             {
                 let piv = mat[n * row_dim + j] / denom;
                 let ghost before = rvs(mat@);
@@ -627,6 +655,9 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                         forall|i: int, c: int| 0 <= i < rd && 0 <= c < cd
                             ==> #[trigger] cm_entry(rvs(mat@), rd, i, c)
                                 == (if i == ji && c < m { cm_entry(before, rd, ji, c) - rv(piv) * cm_entry(before, rd, rs, c) } else { cm_entry(before, rd, i, c) }),
+                        abs_max_r(a0) > 0.0real ==> row_comb(a0, before, rd, cd, tr)
+                            && (forall|l: int| 0 <= l < rd ==> #[trigger] col_abs_sum(tr, rd, l)
+                                <= (if l < rs { rd as real } else if l == rs { (ji - rs) as real } else { 1.0real })),
                 {
                     proof {
                         assert(mat.len() == row_dim * col_dim);
@@ -662,6 +693,28 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     lemma_echelon_row_sub(before, cur, rd, cd, pivots, eps, ji, rs, rv(piv));
                     // the entry (j, n) is annihilated: A_jn - (A_jn / A_rn) A_rn = 0
                     let (num, dn) = (cm_entry(before, rd, ji, ni), rv(denom));
+                    // the transformation gains piv times column j on column row_search; |piv| <= 1
+                    if abs_max_r(a0) > 0.0real {
+                        lemma_row_comb_sub(a0, before, cur, rd, cd, tr, ji, rs, rv(piv));
+                        assert(rv(TOL) == 0.0000000001real);
+                        assert(eps > 0.0real) by (nonlinear_arith)
+                            requires rv(TOL) > 0.0real, abs_max_r(a0) > 0.0real, eps == rv(TOL) * abs_max_r(a0);
+                        assert(abs_r(num) <= abs_r(dn));
+                        lemma_abs_quotient_le_one(num, dn);
+                        let t2 = add_col(tr, rs, ji, rv(piv));
+                        let cj = col_abs_sum(tr, rd, ji);
+                        lemma_sum_fn_nonneg(|i: int| abs_r(tr(i, ji)), rd as nat);
+                        assert(abs_r(rv(piv)) * cj <= cj) by (nonlinear_arith)
+                            requires abs_r(rv(piv)) <= 1.0real, cj >= 0.0real;
+                        assert forall|l: int| 0 <= l < rd
+                            implies #[trigger] col_abs_sum(t2, rd, l)
+                                <= (if l < rs { rd as real } else if l == rs { (ji + 1 - rs) as real } else { 1.0real }) by {
+                            if l != rs {
+                                assert(col_abs_sum(t2, rd, l) == col_abs_sum(tr, rd, l));
+                            }
+                        }
+                    }
+                    tr = add_col(tr, rs, ji, rv(piv));
                     assert(num == cm_entry(swapped, rd, ji, ni));
                     assert(cm_entry(cur, rd, ji, ni) == num - rv(piv) * dn);
                     if dn != 0.0real {
@@ -706,6 +759,14 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                 lemma_skipped_after_pivot(cur, rd, cd, pivots, eps, n as int);
                 lemma_echelon_push(cur, rd, cd, pivots, eps, n as int);
                 pivots = pivots.push(n as int);
+                // column row_search of the transformation now has sum at most rd - row_search <= rd
+                if abs_max_r(a0) > 0.0real {
+                    assert forall|l: int| 0 <= l < rd
+                        implies #[trigger] col_abs_sum(tr, rd, l) <= (if l < row_search + 1 { rd as real } else { 1.0real }) by {
+                        assert(col_abs_sum(tr, rd, l)
+                            <= (if l < row_search { rd as real } else if l == row_search { (row_dim - row_search) as real } else { 1.0real }));
+                    }
+                }
             }
             row_search += 1;
             if n < col_dim - 1 {
@@ -754,6 +815,9 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         assert(echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, rv(TOL) * abs_max_r(rvs(old(mat)@))));
         assert(skipped_bounded(rvs(res.0@), row_dim as int, col_dim as int, pivots, rv(TOL) * abs_max_r(rvs(old(mat)@)), col_dim as int));
         assert(res.2 == (pivots.len() == 0 || pivots.last() < col_dim - 1));
+        if abs_max_r(a0) > 0.0real {
+            assert(row_comb(a0, rvs(res.0@), rd, cd, tr) && cols_bounded(tr, rd, res.1 as int));
+        }
     }
     res
 }

@@ -17,7 +17,7 @@ use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::sym_spec::*;
 #[cfg(verus_keep_ghost)]
-use crate::real_spec::abs_r;
+use crate::real_spec::{abs_r, lemma_sqrt_square, lemma_sqrt_monotone};
 
 verus! {
 
@@ -1071,6 +1071,23 @@ pub proof fn lemma_psd_shifted_iff(a: MatF, dim: int, eps: real)
             assert(0.0real * dot_r(x, x) == 0.0real);
         }
     }
+}
+
+/// Every entry is bounded by the Euclidean norm: |x_l| <= ||x||.
+pub proof fn lemma_entry_le_norm(x: Seq<real>, l: int)
+    requires
+        0 <= l < x.len(),
+    ensures
+        abs_r(x[l]) <= norm_r(x),
+{
+    lemma_dot_sum_fn(x, x);
+    let sq = |i: int| x[i] * x[i];
+    assert forall|i: int| 0 <= i < x.len() implies #[trigger] sq(i) >= 0.0real by {
+        assert(x[i] * x[i] >= 0.0real) by (nonlinear_arith);
+    }
+    lemma_sum_fn_ge_term(sq, x.len(), l);
+    lemma_sqrt_square(x[l]);
+    lemma_sqrt_monotone(x[l] * x[l], dot_r(x, x));
 }
 
 /* ---------- block structure of the semidefinite order ---------- */
