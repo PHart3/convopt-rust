@@ -43,7 +43,7 @@ All 22 layers (L00-L21) are done. L21 holds the post-hoc proofs of `ADDITIONAL_P
 
 ## Verified-function count
 
-Last full run: **892 verified, 0 errors** (about 28 s). `--time` reports no
+Last full run: **893 verified, 0 errors** (about 28 s). `--time` reports no
 slow proof, and no `rlimit` is raised.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
@@ -56,7 +56,9 @@ sweep replaced repeated inline `nonlinear_arith` steps by the shared lemmas
 `lemma_rows_of_exact` and `lemma_eigensolver_dim1`, removed four unused
 lemmas and dropped the no-op diagonal loop of `ldlt_decomp`, then to 892 when
 `frob_r` and `sym_mat_vec_r` became aliases of `frob_f` and `mat_vec` on
-`sym_view` (two bridge lemmas and one duplicated proof went away); 273
+`sym_view` (two bridge lemmas and one duplicated proof went away), and to 893
+with `lemma_setup_obj0`, which exposes the objective witness `setup_obj0` of
+the setup contract once instead of at eleven `choose` sites; 273
 `nonlinear_arith` sub-queries remain.
 
 | Module | Verified | Layers |
@@ -79,11 +81,11 @@ lemmas and dropped the no-op diagonal loop of `ldlt_decomp`, then to 892 when
 | `lin_alg::sym_matrix` | 144 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 38 | L08, L10-L12 |
 | `sdp_spec` | 58 | L16 |
-| `sdpad_spec` | 34 | L17-L19, L21 |
+| `sdpad_spec` | 35 | L17-L19, L21 |
 | `feas_spec` | 43 | L21 |
 | `sdp` | 98 | L15, L16 |
 | `sdp_altdir` | 35 | L17-L19 |
-| **total** | **892** | |
+| **total** | **893** | |
 
 ## Main contracts
 
@@ -206,7 +208,8 @@ lemmas and dropped the no-op diagonal loop of `ldlt_decomp`, then to 892 when
   depend only on this interface.
 - **Standard form and solver.** Contracts are stated on the user data and
   quantified over the variable `z`. The solver carries the standard form
-  through `sdpad_setup_ok`; each iteration is specified by what the code
+  through `sdpad_setup_ok` (its objective witness is `setup_obj0`, exposed by
+  `lemma_setup_obj0`); each iteration is specified by what the code
   computes (`wgy_update_ok`, `penalty_update_ok`); the loop by `outcome_ok`
   over the ghost trajectory, extended by `lemma_trajectory_step`. Nothing is
   claimed about convergence.

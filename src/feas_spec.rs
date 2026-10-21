@@ -378,8 +378,8 @@ pub proof fn lemma_standard_feasible_sound(sdp: &SDP, check: bool, s: &SdpadSetu
     let rows = lmi_rows(bd) + m;
     let xs = vars_of(z, bsum, vd);
     let list = s.zeros@;
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
     assert(d == std_dim(bd, vd));
     assert(zeros_ok(list, bs, d));
     assert forall|i: int| 0 <= i < bd.len() implies #[trigger] bd[i] >= 1 by {}
@@ -475,8 +475,8 @@ pub proof fn lemma_action_feasible_sound(sdp: &SDP, s: &SdpadSetup, z: Seq<real>
     let m = sdp.constraint.1@.len() as int;
     let total = lmi_rows(bd) + m;
     let rows = s.c_len as int;
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), false)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, false, s);
+    lemma_setup_obj0(sdp, false, s);
     let aug = choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
         && result_aug(s.mat_dense@, s.point@, rows) == aug;
     lemma_pk_col_start_monotone(0, d);
@@ -505,8 +505,8 @@ pub proof fn lemma_action_feasible_sound_single(sdp: &SDP, s: &SdpadSetup, z: Se
     let cols = pk_len(d);
     let m = sdp.constraint.1@.len() as int;
     let rows = s.c_len as int;
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), false)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, false, s);
+    lemma_setup_obj0(sdp, false, s);
     assert(d == sdp.objective@[0]@.len() as int);
     lemma_pk_col_start_monotone(0, d);
     lemma_setup_action_point(sdp, false, s, z);
@@ -1030,8 +1030,8 @@ pub proof fn lemma_lift_z_action(sdp: &SDP, check: bool, s: &SdpadSetup, xs: Seq
     let rows = s.c_len as int;
     let list = s.zeros@;
     let z = lift_z(sdp.lmi@, xs, bd, vd);
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
     let aug = choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
         && (if check { reduced_from(aug, result_aug(s.mat_dense@, s.point@, rows), d) } else { result_aug(s.mat_dense@, s.point@, rows) == aug });
     assert(d == std_dim(bd, vd));
@@ -1083,8 +1083,8 @@ pub proof fn lemma_user_feasible_lifts(sdp: &SDP, check: bool, s: &SdpadSetup, x
     let bs = block_sizes(bd, vd);
     let lmis = sdp.lmi@;
     let z = lift_z(lmis, xs, bd, vd);
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
     assert(d == std_dim(bd, vd));
     assert forall|i: int| 0 <= i < bd.len() implies #[trigger] bd[i] >= 1 by {}
     assert forall|n: int| 0 <= n < vd.len() implies #[trigger] vd[n] >= 1 by {}
@@ -1127,8 +1127,8 @@ pub proof fn lemma_user_feasible_lifts_single(sdp: &SDP, check: bool, s: &SdpadS
     let cols = pk_len(d);
     let m = sdp.constraint.1@.len() as int;
     let rows = s.c_len as int;
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
     assert(d == sdp.objective@[0]@.len() as int);
     lemma_pk_col_start_monotone(0, d);
     if sdp.constraint.0@.len() == 1 {
@@ -1317,8 +1317,8 @@ pub proof fn lemma_lmi_blocks_checked(sdp: &SDP, check: bool, s: &SdpadSetup, z:
     let bd = bdims_r(sdp.lmi@);
     let vd = vdims_r(sdp.lmi@, nv);
     let bs = block_sizes(bd, vd);
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
     assert(dims_of(s.block_dims@) == bd);
     assert(dims_of(s.symm_dims@) == vd);
     assert forall|i: int| 0 <= i < bd.len() implies #[trigger] bd[i] >= 1 by {}
@@ -1369,8 +1369,8 @@ pub proof fn lemma_approx_sound_unreduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real
     let total = lmi_rows(bd) + m;
     let rows = s.c_len as int;
     let xs = vars_of(z, bsum, vd);
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), false)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, false, s);
+    lemma_setup_obj0(sdp, false, s);
     let aug = choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
         && result_aug(s.mat_dense@, s.point@, rows) == aug;
     assert(d == std_dim(bd, vd));
@@ -1424,8 +1424,8 @@ pub proof fn lemma_approx_sound_reduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
     let m = sdp.constraint.1@.len() as int;
     let total = lmi_rows(bd) + m;
     let rows = s.c_len as int;
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), true)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, true, s);
+    lemma_setup_obj0(sdp, true, s);
     let red = result_aug(s.mat_dense@, s.point@, rows);
     let aug = choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
         && reduced_from(aug, red, d);

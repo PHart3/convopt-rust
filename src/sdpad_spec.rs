@@ -615,6 +615,23 @@ pub open spec fn objective_r(sdp: &SDP, z: Seq<real>) -> real {
     }
 }
 
+/// The standard-form objective before Frobenius reweighting: the witness of the setup
+/// contract (sdpad_setup_ok), whose halved off-diagonal entries give obj_frob.
+pub open spec fn setup_obj0(sdp: &SDP, check: bool, s: &SdpadSetup) -> SymMatrix {
+    choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
+        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), s.var_dim as int)
+}
+
+/// Under the setup contract, setup_obj0 is such a witness.
+pub proof fn lemma_setup_obj0(sdp: &SDP, check: bool, s: &SdpadSetup)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+    ensures
+        std_form_ok(sdp, (setup_obj0(sdp, check, s), (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check),
+        half_off_diag(rvs(s.obj_frob@), rvs(setup_obj0(sdp, check, s)@), s.var_dim as int),
+{
+}
+
 /// The primal objective value is the user's objective (lemma_frob_half_dot and the
 /// standard-form contract).
 pub proof fn lemma_objective_value(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>)
@@ -625,8 +642,8 @@ pub proof fn lemma_objective_value(sdp: &SDP, check: bool, s: &SdpadSetup, z: Se
         prim_val_r(s, z) == objective_r(sdp, z),
 {
     let d = s.var_dim as int;
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
     lemma_frob_half_dot(rvs(s.obj_frob@), rvs(obj0@), z, d);
     if sdp.lmi@.len() == 0 {
         assert(rvs(obj0@) == part_r(sdp.objective@[0]@, sdp.objective@[0]@.len() as int));
@@ -965,8 +982,8 @@ pub proof fn lemma_setup_gram_hypotheses(sdp: &SDP, check: bool, s: &SdpadSetup)
     let nz = s.zeros@.len() as int;
     let rows = s.c_len as int;
     let list = s.zeros@;
-    let obj0 = choose|obj0: SymMatrix| #[trigger] std_form_ok(sdp, (obj0, (s.mat_dense, s.zeros), s.point, s.var_dim, s.symm_dims, s.block_dims), check)
-        && half_off_diag(rvs(s.obj_frob@), rvs(obj0@), d);
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
     if sdp.lmi@.len() == 0 {
         assert(nz == 0);
     } else {
