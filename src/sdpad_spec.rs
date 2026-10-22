@@ -116,8 +116,8 @@ pub open spec fn sdpad_input_ok(sdp: &SDP, check: bool) -> bool {
     &&& dim_fits(total_rows(sdp))
 }
 
-/// The reduced constraint system has at least one and at most as many rows as the stacked
-/// system (exactly as many without reduction).
+/// The reduced constraint system has at most as many rows as the stacked system, and at least
+/// one with reduction. Without reduction it has exactly as many.
 pub proof fn lemma_reduced_rows(aug: Seq<real>, mat: Seq<f64>, point: Seq<f64>, rows: int, total: int, dim: int, check: bool)
     requires
         rows >= 0,

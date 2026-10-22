@@ -655,7 +655,8 @@ pub proof fn lemma_adjoint_zero_basis(m: Seq<real>, row_dim: int, list: Seq<(usi
     assert(adj_wt(r, c) * 0.0real == 0.0real);
 }
 
-/// Under the two hypotheses, A A* is the block matrix (G, I/2): the dense Gram block, and the
+/// When the zero positions are distinct (distinct_zero_list) and every dense row vanishes on
+/// them (rows_vanish_on_zeros), A A* is the block matrix (G, I/2): the dense Gram block, and the
 /// zero constraints, each of squared Frobenius norm 1/2, orthogonal to the dense rows and to each other.
 pub proof fn lemma_full_gram_block(g: Seq<real>, m: Seq<real>, row_dim: int, list: Seq<(usize, usize)>, dim: int)
     requires

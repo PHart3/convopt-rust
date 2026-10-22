@@ -405,7 +405,7 @@ pub proof fn lemma_orthogonal_transpose(q: MatF, dim: int)
     lemma_meq_trans(mmul(mtr(q), mtr(mtr(q)), dim), mmul(mtr(q), q, dim), mident(), dim, dim);
 }
 
-/// If A B = I on the block then (A B) C = C and C (A B) = C on the block (a cancellation step).
+/// If A B = I on the block then A (B C) = C and (C A) B = C on the block (a cancellation step).
 pub proof fn lemma_cancel_inverse(a: MatF, b: MatF, c: MatF, dim: int)
     requires
         dim >= 0,

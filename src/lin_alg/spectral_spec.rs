@@ -15,9 +15,7 @@
 //     Q_sel D_sel Q_sel^T = Q diag(masked vals) Q^T,
 //
 // with the unselected values replaced by 0. For the positive part this
-// matrix is positive semidefinite. An empty negative part means that every
-// returned value is >= -1e-8 * scale, hence Q diag(vals) Q^T >= -1e-8 * scale I.
-// Nothing here claims that B is diagonal or that the selected pairs are
+// matrix is positive semidefinite. Nothing here claims that B is diagonal or that the selected pairs are
 // exact eigenpairs of A.
 
 use vstd::prelude::*;

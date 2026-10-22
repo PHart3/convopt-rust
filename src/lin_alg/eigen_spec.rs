@@ -3,7 +3,7 @@
 // Both Jacobi eigensolvers (jacobi.rs) iterate the verified rotation
 // `jacobi_rot` on a packed symmetric matrix B (initially A) while
 // accumulating the rotations into a column-major matrix Q (initially I),
-// and stop as soon as every off-diagonal entry of B is below the threshold
+// and stop once every off-diagonal entry of B is below the threshold
 //
 //     thr = 1e-12 * max(1, max_i |B_ii|)
 //

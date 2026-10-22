@@ -105,7 +105,7 @@ pub proof fn lemma_pk_diag_idx(i: int)
     assert(i * (i + 1) + 2 * i == i * i + 3 * i) by (nonlinear_arith);
 }
 
-/// The index arithmetic for i < dim fits in usize when dim_fits(dim).
+/// The index arithmetic for i <= dim fits in usize when dim_fits(dim).
 pub proof fn lemma_dim_fits_idx(dim: int, i: int)
     requires
         dim_fits(dim),
@@ -637,7 +637,6 @@ pub proof fn lemma_sum2_fn_scale(f: spec_fn(int, int) -> real, g: spec_fn(int, i
     lemma_sum_fn_scale(rows_f, rows_g, s, n);
 }
 
-/// Double sums are monotone in the summand.
 /// A double sum of nonnegative terms is nonnegative.
 pub proof fn lemma_sum2_fn_nonneg(f: spec_fn(int, int) -> real, n: nat)
     requires
@@ -652,6 +651,7 @@ pub proof fn lemma_sum2_fn_nonneg(f: spec_fn(int, int) -> real, n: nat)
     lemma_sum_fn_nonneg(rows, n);
 }
 
+/// Double sums are monotone in the summand.
 pub proof fn lemma_sum2_fn_le(f: spec_fn(int, int) -> real, g: spec_fn(int, int) -> real, n: nat)
     requires
         forall|r: int, c: int| 0 <= r < n && 0 <= c < n ==> #[trigger] f(r, c) <= g(r, c),

@@ -172,8 +172,8 @@ fn psd_block_list(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, block_size_su
     list
 }
 
-// the equality-system solve of one iteration (dual_solve_ok): with reduced constraints the
-// block system (G, I/2) y = rhs is solved directly; otherwise G is regularized by
+// the equality-system solve of one iteration (dual_solve_ok): with reduced constraints (or no
+// dense rows) the block system (G, I/2) y = rhs is solved directly; otherwise G is regularized by
 // TOL * max(max_i |G_ii|, 1) on its diagonal, and the solution must have a small residual
 // relative to the original system (aborts otherwise)
 fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> (y: Vector)

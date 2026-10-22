@@ -1553,9 +1553,10 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
 // V is a list of pairs (row, column), with column > row, representing entries of Z that must be zero
 // the full constraint matrix is formed by stacking M on top of V
 //
-// The four functions below are verified against the operator specifications in
-// src/lin_alg/constr_spec.rs.  When M is empty both constraint_action and constraint_lin_comb
-// ignore V (as the original code does); the specifications state exactly that.
+// The first three functions below are verified against the operator specifications in
+// src/lin_alg/constr_spec.rs, and diag_scale_gram against the matrix views of
+// src/lin_alg/mat_spec.rs.  When M is empty both constraint_action and constraint_lin_comb
+// ignore V, and the specifications state exactly that.
 
 verus! {
 
