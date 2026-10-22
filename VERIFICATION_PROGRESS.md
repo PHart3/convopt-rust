@@ -44,7 +44,8 @@ All 22 layers (L00-L21) are done; L21 holds the post-hoc proofs of `ADDITIONAL_P
 ## Verified-function count
 
 Last full run: **853 verified, 0 errors** (about 28 s). `--time` reports no
-slow proof, and no `rlimit` is raised.
+slow proof, and no `rlimit` is raised. The `verus!` blocks contain 15,115
+lines of code, not counting blank and comment lines.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
