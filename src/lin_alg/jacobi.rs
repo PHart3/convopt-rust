@@ -91,15 +91,15 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
     // pivot position (j, k)
     let mut k = max.0;
     let mut j = maxima[k - 1];
-    let (mut count, mut first1, mut first2) = (0, true, true);
+    let (mut count, mut first) = (0, true);
     let max_rotations = MAX_SWEEPS * dim * (dim - 1) / 2;
     loop {
 	if count == max_rotations {
 	    panic!("jacobi_eigen_cach failed to converge after {} sweeps", MAX_SWEEPS);
 	}
 	count += 1;
-	if first1 {
-	    first1 = false;
+	if first {
+	    first = false;
 	} else {
 	    m1 = 1;
 	    max_diag = eigenvals_new[0].abs();
@@ -136,10 +136,6 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 		}
 		m1 += 1;
 	    }
-	}
-	if first2 {
-	    first2 = false
-	} else {
 	    m2 = 1;
 	    for i in &maxima {
 		ind = (m2 * (m2 + 1)) / 2 + *i;
