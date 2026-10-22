@@ -1,7 +1,8 @@
-# Additional proofs: four statements to prove in Verus
+# Additional proofs: four post-hoc statements
 
-This file gives four new statements for the agent to prove in Verus. Prove each as a lemma.
-Follow `CLAUDE.md`: add no trusted items, and reuse existing lemmas.
+Four statements proved in Verus on top of the verified solver (layer L21 of
+`VERIFICATION_PROGRESS.md`). They add no trusted items and reuse existing lemmas.
+Statements 2–4 live in `src/feas_spec.rs`; its header comment gives the overview.
 
 ## 1. Gap identity
 
@@ -13,74 +14,71 @@ list `s.zeros`), objective `C_F = s.obj_frob`, and right-hand side `b = s.point`
 
 Corollary: if `A(Z) = b` and `C_F - A*(y) = S`, then `pobj - dobj = <Z, S>_F`.
 
-**Ingredients.**
-- `lemma_constraint_adjoint` (`lin_alg/constr_spec.rs`) proves `<A(X), y> = <X, A*(y)>_F`.
-  Write `A*(y)` as `adjoint_r` (see `lemma_adjoint_r_ok`) and `A(Z)` as `setup_action_r`.
-- Distributivity of `frob_r` and `dot_r` over `vsub_r`. Check the existing sum lemmas first,
-  e.g. `lemma_dot_sub_right`, `lemma_frob_sub_right` (`mat_spec.rs`, where the packed
-  `frob_r` is `frob_f` on `sym_view`).
-- Place the lemma in `sdpad_spec.rs` and state it with `prim_val_r` and `dual_val_r`.
+**Proved by** `lemma_gap_identity` and `lemma_gap_complementarity` (`sdpad_spec.rs`), stated
+with `prim_val_r`, `dual_val_r`, `setup_action_r` and `setup_slack_r` (`C_F - A*(y)`).
+
+**Ingredients.** The adjoint identity `lemma_constraint_adjoint` with `lemma_adjoint_r_ok`
+(`lin_alg/constr_spec.rs`); `lemma_frob_sub_right` (`lin_alg/mat_spec.rs`) and
+`lemma_dot_sub_right` (`sdp_spec.rs`).
 
 ## 2. Soundness: a feasible standard-form point gives a feasible user point
 
-**Statement.** Assume the case with LMIs and without `check` (`sdpad_setup_ok`). Let `Z` be
-packed of order `d` with `A(Z) = b` and `is_psd(sym_view(Z), d)`. Let
-`X_j = zvar_r(Z, var_off(..), r_j)`, the variables `read_solution` returns. Then:
+**Statement.** Assume the case with LMIs. Let `Z` be packed of order `d`, solve every row of the
+unreduced system `aug` of `std_rows_ok`, vanish on the zero pattern, and satisfy
+`is_psd(sym_view(Z), d)`. Let `X_j = zvar_r(Z, var_off(..), r_j)` (`vars_of`), the variables
+`read_solution` returns. Then (`standard_point_feasible`):
 
-1. `Z_rc = 0` at every listed position, so `Z` is block diagonal (`zeros_ok`).
-2. `sum_j A_j(X_j) = b`: `maps_row_r(constraint, .., e, Z) == b_e` for every `e`.
-3. Each LMI block `B_i = blk_r(Z, block_off(bd, i), k_i)` satisfies
-   `B_i[r, c] = H_i(X)[r, c] - M_i[r, c]` (from `std_rows_ok`) and is PSD. Hence
-   `H_i(X) - M_i` is symmetric PSD.
-4. `<C_F, Z>_F = sum_j C_j(X_j)`. This is `lemma_objective_value`.
+1. `Z` is block diagonal (`zeros_ok`).
+2. `sum_j A_j(X_j) = b`.
+3. Each LMI block `B_i = block_view(Z, block_off(bd, i))` equals `H_i(X) - M_i` and is PSD.
+4. `<C_F, Z>_F = sum_j C_j(X_j)` (`lemma_objective_value`).
 
-Also cover the case without LMIs: there `X = Z`, so `A(Z) = b` and `Z ⪰ 0` make `X` feasible.
+Without `check`, `A(Z) = b` for the setup's operator already means `Z` solves `aug`. Without
+LMIs, `X = Z`.
 
-**Missing lemma.** A diagonal block of a PSD matrix is PSD. Prove it in `lin_alg/mat_spec.rs`
-for `block_view`: pad the test vector with zeros outside the block and use `psd_shifted` and
-`quad_r`. Stating it for `psd_shifted` with a general `eps` covers `is_psd` as the case
-`eps = 0`.
+With `check`, a solution of the reduced system satisfies the dropped rows of the echelon form
+only up to the bound of `lemma_reduced_solution_echelon`, so the theorem is stated for the
+unreduced system; statement 4 gives the quantitative version.
 
-**With `check`.** The rows are reduced, and a solution of the reduced system satisfies the
-dropped rows of the echelon form only up to the bound of `lemma_reduced_solution_echelon`.
-State the theorem for `Z` solving the unreduced system `aug` of `std_rows_ok`. Do not claim
-exact feasibility from the reduced system; the quantitative statement is 4.
+**Proved by** `lemma_standard_feasible_sound` (unreduced system), `lemma_action_feasible_sound`
+(`A(Z) = b`, no `check`), and `lemma_action_feasible_sound_single` (no LMIs).
+
+**Ingredients.** `lemma_psd_shifted_block` (`lin_alg/mat_spec.rs`): a diagonal block of a matrix
+with `A >= -eps I` satisfies the same bound (pad the test vector with zeros); `is_psd` is the
+case `eps = 0`.
 
 ## 3. Converse: a feasible user point lifts to a feasible standard-form point
 
-**Statement.** Assume the case with LMIs. Let `X_j` be packed of order `r_j = vd[j]`, and
-suppose `X` is feasible for the user's problem:
-- for every `e`: `sum_j dot_r(symrow_r(constraint[j]@, e, r_j), X_j) == b_e`;
-- for every `i`, the `k_i x k_i` matrix
-  `W_i[r, c] = sum_j dot_r(symrow_r(lmi[i].0[j]@, c * k_i + r, r_j), X_j) - M_i[c * k_i + r]`
-  is symmetric and PSD.
+**Statement.** Assume the case with LMIs and let `X_j` be packed of order `r_j = vd[j]` and
+feasible for the user's problem (`user_feasible`): the equality constraints hold and each
+`W_i = H_i(X) - M_i` is symmetric PSD. Then `Z = lift_z(..)`, a packed matrix of order `d`,
+satisfies:
 
-Then some packed `Z` of order `d` satisfies:
 1. `zvar_r(Z, var_off(bsum, vd, j), r_j) == X_j` for every `j`;
 2. `is_psd(sym_view(Z), d)`;
-3. `Z` solves the unreduced system: every row of `aug` (`std_rows_ok`), and `Z_rc = 0` at
-   every listed position. With `check`, `lemma_reduced_of_input_solution` shows that `Z` also
-   solves the reduced system, so this statement holds in both cases;
+3. `Z` solves every row of `aug` and vanishes on the zero pattern; by
+   `lemma_reduced_of_input_solution` it also solves the reduced system, so `A(Z) = b` with
+   and without `check`;
 4. `<C_F, Z>_F = sum_j C_j(X_j)`, by `lemma_objective_value`.
 
-Without LMIs, take `Z = X`.
+Without LMIs, `Z = X`.
 
-**Construction.** `Z` is block diagonal, with blocks `B_i = W_i`, `P_j = X_j + t_j I` and
-`N_j = t_j I`, where `t_j = sum_{r, c} |X_j[r, c]|`. Define it as a spec function on packed
-indices (via `pk_unpack`), zero off the blocks.
+**Construction.** `Z` is block diagonal with blocks `B_i = W_i`, `P_j = X_j + t_j I` and
+`N_j = t_j I`, where `t_j = sum_{r, c} |X_j[r, c]|`; it is defined on packed indices via
+`pk_unpack` and is zero off the blocks (`lift_entry`, `lift_z`).
+
+**Proved by** `lemma_user_feasible_lifts` and `lemma_user_feasible_lifts_single` (no LMIs).
 
 **Ingredients.**
-- **Shift bound**, in `mat_spec.rs`: `psd_shifted(sym_view(X), r, t)` with
-  `t = sum |X_rc|`, so `X + tI ⪰ 0`. Proof: `x^T X x >= -sum |X_rc| |x_r| |x_c|`, and
-  `2 |x_r x_c| <= x_r^2 + x_c^2`. For the step from the shift to PSD, see
-  `lemma_psd_shifted_meq` and `lemma_shifted_factorization_psd`.
-- **Block-diagonal PSD**, in `mat_spec.rs`: a block-diagonal matrix with PSD blocks is PSD,
-  because the quadratic form splits by block. State it against the same block view as the
-  lemma of statement 2.
-- The row identities of `std_rows_ok` hold for every `z`; instantiate them at `Z`.
+- Shift bound `lemma_psd_shifted_abs_sum` (`lin_alg/mat_spec.rs`):
+  `psd_shifted(sym_view(X), r, sum |X_rc|)`, i.e. `X + tI ⪰ 0`.
+- Block-diagonal PSD `lemma_block_diag_psd_shifted` (`feas_spec.rs`): a matrix that vanishes
+  off the blocks and has blocks `B_i >= -eps I` satisfies `Z >= -eps I`, via
+  `lemma_psd_shifted_two_blocks` (`lin_alg/mat_spec.rs`).
+- The row identities of `std_rows_ok`, instantiated at `Z`.
 
 **Not in Verus.** Statements 2 and 3 together imply that the two problems have the same
-optimal value. Do not prove this in Verus.
+optimal value. This is not proved in Verus.
 
 ## 4. Approximate soundness
 
@@ -110,19 +108,12 @@ where `B_i = block_view(Z, block_off(bd, i))`. Hence:
 
 **Ingredients.** The `check` case needs the original rows as a bounded combination of the
 echelon rows, which solution-set equivalence (`same_solutions`) does not provide.
-- **Transformation**, in `gauss_spec.rs` and `gauss_elim`: a ghost `T` with `A_0 = T E`
-  (`row_comb`); a row swap exchanges two columns of `T`, a row subtraction adds `piv` times a
-  column (`|piv| <= 1` by partial pivoting), so the absolute column sums of `T` stay at most
-  `rows` on the pivot columns and `1` elsewhere (`cols_bounded`). Residuals transfer along
-  `T` (`lemma_row_comb_residual_bound`).
-- **Reduction bound**, in `reduce_spec.rs`: `reduced_with` records the transformation as the
-  opaque `reduction_transform`; `lemma_reduced_residual_bound` combines it with the scaling
-  of the kept echelon rows and `lemma_dropped_row_residual`, which holds for every `x`.
+- **Transformation**, in `lin_alg/gauss_spec.rs` and `gauss_elim`: a ghost `T` with
+  `A_0 = T E` (`row_comb`); a row swap exchanges two columns of `T`, a row subtraction adds
+  `piv` times a column (`|piv| <= 1` by partial pivoting), so the absolute column sums of `T`
+  stay at most `rows` on the pivot columns and `1` elsewhere (`cols_bounded`). Residuals
+  transfer along `T` (`lemma_row_comb_residual_bound`).
+- **Reduction bound**, in `lin_alg/reduce_spec.rs`: `reduced_with` records the transformation
+  as the opaque `reduction_transform`; `lemma_reduced_residual_bound` combines it with the
+  scaling of the kept echelon rows and `lemma_dropped_row_residual`, which holds for every `x`.
 - The row identities of `std_rows_ok` give the residual identities above for every `Z`.
-
-## Done when
-
-- All lemmas verify, and
-  `verus src/lib.rs --crate-type=lib --edition=2024 -V no-solver-version-check` passes.
-- `VERIFICATION_PROGRESS.md` is updated and records the new verified count.
-
