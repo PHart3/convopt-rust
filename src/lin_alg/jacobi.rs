@@ -504,7 +504,7 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
     // pivot position (j, k)
     let mut k = cached_pivot_col(vals, &maxima, dim);
     let mut j = maxima[k - 1];
-    let (mut count, mut first1, mut first2) = (0, true, true);
+    let (mut count, mut first) = (0, true);
     proof {
         assert(dim * (dim - 1) <= dim * (dim + 1)) by (nonlinear_arith);
     }
@@ -516,13 +516,12 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
     }
     loop
         invariant_except_break
-            first1 == first2,
             // before the first rotation: cache, pivot and diagonal scale describe the current matrix
-            first1 ==> cache_ok(rvs(vals@), maxima@, n)
+            first ==> cache_ok(rvs(vals@), maxima@, n)
                 && offdiag_max_at(rvs(vals@), n, j as int, k as int)
                 && rv(max_diag) == max_abs_diag_r(rvs(vals@), n),
             // afterwards: they describe the matrix before the last rotation at (j, k)
-            !first1 ==> cache_ok(prev, maxima@, n)
+            !first ==> cache_ok(prev, maxima@, n)
                 && offdiag_max_at(prev, n, j as int, k as int)
                 && rv(biggest) == abs_r(sym_entry(prev, j as int, k as int))
                 && same_outside(prev, rvs(vals@), n, j as int, k as int),
@@ -555,8 +554,8 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
         count += 1;
         let ghost cur = rvs(vals@);
         let ghost fc = |i: int| abs_r(sym_diag(cur, i));
-        if first1 {
-            first1 = false;
+        if first {
+            first = false;
         } else {
             // update the cache and the diagonal scale after the rotation at (j, k)
             let ghost mx0 = maxima@;
@@ -687,10 +686,6 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
                     }
                 }
             }
-        }
-        if first2 {
-            first2 = false;
-        } else {
             k = cached_pivot_col(vals, &maxima, dim);
             j = maxima[k - 1];
         }
