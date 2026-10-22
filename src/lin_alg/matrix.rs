@@ -116,11 +116,15 @@ pub fn matrix_add_diff(mat1: &Matrix, mat2: &Matrix, mat3: &Matrix) -> Matrix {
 }
 
 // Gaussian elimination via partial pivoting
-// also computes rank and consistency of given augmented matrix
+// also computes numerical rank and consistency of given augmented matrix
 pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (&mut Matrix, usize, bool) {
     let (mut row_search, mut coeff_rank, mut pivot_row);
     (row_search, coeff_rank) = (0, 0);
-    let scale = mat.iter().map(|x| x.abs()).fold(0.0, f64::max);
+    let rhs_start = col_dim.saturating_sub(1) * row_dim;
+    // Keep a large RHS from suppressing coefficient pivots. Both scales
+    // refer to the input, before elimination modifies the augmented matrix.
+    let coeff_scale = mat[..rhs_start].iter().map(|x| x.abs()).fold(0.0, f64::max);
+    let rhs_scale = mat[rhs_start..].iter().map(|x| x.abs()).fold(0.0, f64::max);
     for n in 0..col_dim {
         if row_search >= row_dim {
             break;
@@ -131,7 +135,9 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (&mut Mat
                 pivot_row = j;
             }
         }
-        if mat[n * row_dim + pivot_row].abs() < TOL * scale {
+        let scale = if n < col_dim - 1 { coeff_scale } else { rhs_scale };
+        let pivot_abs = mat[n * row_dim + pivot_row].abs();
+        if pivot_abs == 0.0 || pivot_abs < TOL * scale {
             continue;
         }
         if pivot_row != row_search {
