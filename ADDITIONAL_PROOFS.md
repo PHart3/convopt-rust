@@ -36,9 +36,9 @@ unreduced system `aug` of `std_rows_ok`, vanish on the zero pattern, and satisfy
 Without `check`, `A(Z) = b` for the setup's operator already means `Z` solves `aug`. Without
 LMIs, `X = Z`.
 
-With `check`, a solution of the reduced system satisfies the dropped rows of the echelon form
-only up to the bound of `lemma_reduced_solution_echelon`, so the theorem is stated for the
-unreduced system; statement 4 gives the quantitative version.
+With `check`, `A(Z) = b` only says that `Z` solves the kept rows of the reduced system; nothing
+is proved about the rows the reduction dropped, so the theorem is stated for the unreduced
+system.
 
 **Proved by** `lemma_standard_feasible_sound` (unreduced system), `lemma_action_feasible_sound`
 (`A(Z) = b`, no `check`), and `lemma_action_feasible_sound_single` (no LMIs).
@@ -49,16 +49,15 @@ case `eps = 0`.
 
 ## 3. Converse: a feasible user point lifts to a feasible standard-form point
 
-**Statement.** Assume the case with LMIs and let `X_j` be packed of order `r_j = vd[j]` and
-feasible for the user's problem (`user_feasible`): the equality constraints hold and each
-`W_i = H_i(X) - M_i` is symmetric PSD. Then `Z = lift_z(..)`, a packed matrix of order `d`,
-satisfies:
+**Statement.** Assume the case with LMIs and without `check`, and let `X_j` be packed of order
+`r_j = vd[j]` and feasible for the user's problem (`user_feasible`): the equality constraints
+hold and each `W_i = H_i(X) - M_i` is symmetric PSD. Then `Z = lift_z(..)`, a packed matrix of
+order `d`, satisfies:
 
 1. `zvar_r(Z, var_off(bsum, vd, j), r_j) == X_j` for every `j`;
 2. `is_psd(sym_view(Z), d)`;
-3. `Z` solves every row of `aug` and vanishes on the zero pattern; by
-   `lemma_reduced_of_input_solution` it also solves the reduced system, so `A(Z) = b` with
-   and without `check`;
+3. `Z` solves every row of `aug` and vanishes on the zero pattern; without `check` the
+   returned rows are those of `aug`, so `A(Z) = b`;
 4. `<C_F, Z>_F = sum_j C_j(X_j)`, by `lemma_objective_value`.
 
 Without LMIs, `Z = X`.
@@ -77,8 +76,11 @@ Without LMIs, `Z = X`.
   `lemma_psd_shifted_two_blocks` (`lin_alg/mat_spec.rs`).
 - The row identities of `std_rows_ok`, instantiated at `Z`.
 
-**Not in Verus.** Statements 2 and 3 together imply that the two problems have the same
-optimal value. This is not proved in Verus.
+**Not in Verus.** Without `check`, statements 2 and 3 together imply that the two problems
+have the same optimal value; this is not proved in Verus. With `check`, neither the
+feasibility of the user's problem nor the equality of optimal values is certified after the
+tolerance-based row removal: the lifted `Z` solves the unreduced rows, but no statement
+relates them to the reduced system the solver works with.
 
 ## 4. Approximate soundness
 
@@ -94,26 +96,14 @@ where `B_i = block_view(Z, block_off(bd, i))`. Hence:
 1. Without `check` (`lemma_approx_sound_unreduced`): both residuals are the entries of `res`
    at the corresponding row, `Z_rc = res[c_len + q]` at listed position `q`, and
    `<C_F, Z>_F = sum_j C_j(X_j)`.
-2. With `check` (`lemma_approx_sound_reduced`): for the echelon form `E` of the unreduced
-   system (`reduced_with`), both residuals are bounded by `reduction_bound_r`,
-
-       rows * sum_{l < rank} ||E_l||_F |res_l| + (rows - rank) * 2^rank * eps_G * (1 + ||vec Z||_1),
-
-   with `rows` the number of unreduced rows, `rank = c_len`, `||E_l||_F` the scale of kept
-   echelon row `l` (`row_scale_r`), and `eps_G = TOL * max |entry|` the elimination tolerance;
-   the zero-pattern entries and the objective are as in case 1.
+2. With `check`, `res` measures the reduced system only: its dense entries are the residuals
+   of the kept, normalized echelon rows, and no bound on the residuals of the unreduced rows
+   is proved. The zero-pattern entries of `Z` are still entries of `res`
+   (`lemma_action_residual_entries`) and `<C_F, Z>_F = sum_j C_j(X_j)` (`lemma_objective_value`).
 3. A successful PSD check (`psd_blocks_ok`) gives `B_i >= -eps_i I` with the implementation's
    tolerance (`lemma_lmi_blocks_checked`), and `|res_l| <= pinf * (1 + ||b||)`
    (`lemma_residual_entry_pinf`).
 
-**Ingredients.** The `check` case needs the original rows as a bounded combination of the
-echelon rows, which solution-set equivalence (`same_solutions`) does not provide.
-- **Transformation**, in `lin_alg/gauss_spec.rs` and `gauss_elim`: a ghost `T` with
-  `A_0 = T E` (`row_comb`); a row swap exchanges two columns of `T`, a row subtraction adds
-  `piv` times a column (`|piv| <= 1` by partial pivoting), so the absolute column sums of `T`
-  stay at most `rows` on the pivot columns and `1` elsewhere (`cols_bounded`). Residuals
-  transfer along `T` (`lemma_row_comb_residual_bound`).
-- **Reduction bound**, in `lin_alg/reduce_spec.rs`: `reduced_with` records the transformation
-  as the opaque `reduction_transform`; `lemma_reduced_residual_bound` combines it with the
-  scaling of the kept echelon rows and `lemma_dropped_row_residual`, which holds for every `x`.
-- The row identities of `std_rows_ok` give the residual identities above for every `Z`.
+**Ingredients.** The row identities of `std_rows_ok` give the residual identities above for
+every `Z`; `lemma_result_aug_residual` identifies the residuals of the returned rows with the
+entries of `res`.

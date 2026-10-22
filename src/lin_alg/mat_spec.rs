@@ -977,52 +977,6 @@ pub proof fn lemma_diag_congruence_psd(q: MatF, d: Seq<real>, dim: int)
     lemma_psd_shifted_meq(mmul(mmul(mtr(mtr(q)), dv, dim), mtr(q), dim), mmul(mmul(q, dv, dim), mtr(q), dim), dim, 0.0real);
 }
 
-/// |Q^T x|^2 = |x|^2 for orthogonal Q.
-pub proof fn lemma_orthogonal_norm(q: MatF, dim: int, x: Seq<real>)
-    requires
-        dim >= 0,
-        x.len() == dim,
-        is_orthogonal(q, dim),
-    ensures
-        dot_r(mat_vec(mtr(q), dim, x), mat_vec(mtr(q), dim, x)) == dot_r(x, x),
-{
-    let qtx = mat_vec(mtr(q), dim, x);
-    // <x, Q (Q^T x)> = <Q^T x, Q^T x>
-    lemma_dot_mat_vec_transpose(q, dim, x, qtx);
-    // Q (Q^T x) = (Q Q^T) x = I x = x
-    lemma_mat_vec_mul(q, mtr(q), dim, x);
-    lemma_mat_vec_meq(mmul(q, mtr(q), dim), mident(), dim, x);
-    lemma_mat_vec_ident(dim, x);
-}
-
-/// Q D Q^T >= -eps I for orthogonal Q and all d_k >= -eps:
-/// x^T Q D Q^T x = y^T D y >= -eps |y|^2 = -eps |x|^2 with y = Q^T x.
-pub proof fn lemma_diag_congruence_psd_shifted(q: MatF, d: Seq<real>, dim: int, eps: real)
-    requires
-        dim >= 0,
-        is_orthogonal(q, dim),
-        forall|k: int| 0 <= k < dim ==> #[trigger] d[k] >= -eps,
-    ensures
-        psd_shifted(mmul(mmul(q, diag_view(d), dim), mtr(q), dim), dim, eps),
-{
-    let dv = diag_view(d);
-    let a = mmul(mmul(q, dv, dim), mtr(q), dim);
-    // (Q^T)^T D Q^T = Q D Q^T on the block
-    let a2 = mmul(mmul(mtr(mtr(q)), dv, dim), mtr(q), dim);
-    lemma_transpose_twice_meq(q, dim, dim);
-    lemma_mul_meq(mtr(mtr(q)), q, dv, dv, dim, dim, dim);
-    lemma_mul_meq(mmul(mtr(mtr(q)), dv, dim), mmul(q, dv, dim), mtr(q), mtr(q), dim, dim, dim);
-    assert forall|x: Seq<real>| x.len() == dim
-        implies #[trigger] quad_r(a, dim, x) + eps * dot_r(x, x) >= 0.0real by {
-        lemma_quad_meq(a2, a, dim, x);
-        lemma_quad_congruence(dv, mtr(q), dim, x);
-        let y = mat_vec(mtr(q), dim, x);
-        lemma_quad_diag_lower_bound(d, dim, y, -eps);
-        lemma_orthogonal_norm(q, dim, x);
-        assert(-eps * dot_r(x, x) == -(eps * dot_r(x, x))) by (nonlinear_arith);
-    }
-}
-
 /// A factorization Q D Q^T = A + eps I with all d_k >= 0 establishes A >= -eps I.
 pub proof fn lemma_shifted_factorization_psd(a: MatF, q: MatF, d: Seq<real>, dim: int, eps: real)
     requires

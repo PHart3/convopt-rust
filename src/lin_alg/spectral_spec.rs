@@ -283,25 +283,6 @@ pub proof fn lemma_pos_part_psd(q: Seq<real>, vals: Seq<real>, dim: int)
     lemma_diag_congruence_psd(cm_view(q, dim), md, dim);
 }
 
-/// An empty negative part certifies that every value is >= -1e-8 * scale, so that
-/// Q diag(vals) Q^T >= -1e-8 * scale I for orthogonal Q.
-pub proof fn lemma_no_negative_part(q: Seq<real>, vals: Seq<real>, scale: real, dim: int)
-    requires
-        dim >= 0,
-        vals.len() == dim,
-        is_orthogonal(cm_view(q, dim), dim),
-        sel_indices(neg_sel(vals, scale), dim as nat).len() == 0,
-    ensures
-        forall|k: int| 0 <= k < dim ==> #[trigger] vals[k] >= -neg_tol_r(scale),
-        psd_shifted(mmul(mmul(cm_view(q, dim), diag_view(vals), dim), mtr(cm_view(q, dim)), dim), dim, neg_tol_r(scale)),
-{
-    lemma_sel_indices_empty(neg_sel(vals, scale), dim as nat);
-    assert forall|k: int| 0 <= k < dim implies #[trigger] vals[k] >= -neg_tol_r(scale) by {
-        assert(!neg_sel(vals, scale)(k));
-    }
-    lemma_diag_congruence_psd_shifted(cm_view(q, dim), vals, dim, neg_tol_r(scale));
-}
-
 /// A column-major matrix of m > 0 columns with dim rows has the length diag_scale_gram
 /// expects, and that function reads dim rows from it.
 pub proof fn lemma_rows_of_product(m: int, dim: int)

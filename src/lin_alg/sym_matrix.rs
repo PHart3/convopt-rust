@@ -1310,11 +1310,6 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
         abort("linear_remove_redundant_sym: your system of constraints is inconsistent");
     }
     let ghost rk = rank as int;
-    // the transformation recovering the input from the echelon form (gauss_elim)
-    proof {
-        reveal(reduction_transform);
-        assert(reduction_transform(a0, e, rd, cd, rk));
-    }
     proof {
         assert(echelon_form(e, rd, cd, pivots, eps));
         // every pivot column lies in the packed part (the right-hand side holds no pivot)
@@ -1363,7 +1358,6 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
             cd * rk == rk * cd,
             forall|i2: int, j: int| 0 <= i2 < i && 0 <= j < cd
                 ==> #[trigger] cm_entry(rvs(result@), rk, i2, j) == cm_entry(e, rd, i2, j) / row_scale_r(e, rd, d, i2),
-            reduction_transform(a0, e, rd, cd, rk),
     {
         let ghost ii = i as int;
         proof {
