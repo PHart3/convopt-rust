@@ -156,21 +156,6 @@ pub open spec fn offdiag_count_r(dim: int) -> real {
     (dim as real) * ((dim as real) - 1.0real)
 }
 
-/// diag(B) on the block is the diagonal matrix of the diagonal vector of B.
-pub proof fn lemma_mdiag_view(b: Seq<real>, dim: int)
-    requires
-        dim >= 0,
-    ensures
-        meq(mdiag(sym_view(b)), diag_view(sym_diag_r(b, dim)), dim, dim),
-{
-    assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < dim
-        implies #[trigger] mdiag(sym_view(b))(r, c) == diag_view(sym_diag_r(b, dim))(r, c) by {
-        if r == c {
-            assert(sym_diag_r(b, dim)[r] == sym_diag(b, r));
-        }
-    }
-}
-
 /// If every off-diagonal entry is below thr then
 /// ||B - diag(B)||_F^2 <= dim (dim - 1) thr^2.
 pub proof fn lemma_offdiag_frob_bound(b: Seq<real>, dim: int, thr: real)

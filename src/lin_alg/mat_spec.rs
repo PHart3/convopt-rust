@@ -457,16 +457,6 @@ pub proof fn lemma_orthogonal_mul(p: MatF, q: MatF, dim: int)
     lemma_meq_trans(mmul(pq, mtr(pq), dim), mmul(p, mtr(p), dim), mident(), dim, dim);
 }
 
-/// An orthogonal matrix and its transpose are mutually inverse.
-pub proof fn lemma_orthogonal_inverse(q: MatF, dim: int)
-    requires
-        is_orthogonal(q, dim),
-    ensures
-        are_inverse(q, mtr(q), dim),
-        are_inverse(mtr(q), q, dim),
-{
-}
-
 /* ---------- symmetry ---------- */
 
 /// A symmetric matrix equals its transpose on the block.

@@ -43,7 +43,7 @@ All 22 layers (L00-L21) are done; L21 holds the post-hoc proofs of `ADDITIONAL_P
 
 ## Verified-function count
 
-Last full run: **893 verified, 0 errors** (about 28 s). `--time` reports no
+Last full run: **891 verified, 0 errors** (about 28 s). `--time` reports no
 slow proof, and no `rlimit` is raised.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
@@ -59,12 +59,12 @@ and is not a lost proof.
 | `real_spec` | 22 | L00 |
 | `lin_alg::vec_spec` | 20 | L01, L21 |
 | `lin_alg::sym_spec` | 64 | L02, L03, L21 |
-| `lin_alg::mat_spec` | 91 | L03, L07, L12, L21 |
+| `lin_alg::mat_spec` | 90 | L03, L07, L12, L21 |
 | `lin_alg::constr_spec` | 23 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
 | `lin_alg::ldlt_spec` | 9 | L06, L07 |
 | `lin_alg::jacobi_spec` | 57 | L08 |
-| `lin_alg::eigen_spec` | 20 | L09-L11 |
+| `lin_alg::eigen_spec` | 19 | L09-L11 |
 | `lin_alg::spectral_spec` | 9 | L12 |
 | `lin_alg::gauss_spec` | 40 | L13, L21 |
 | `lin_alg::reduce_spec` | 24 | L14, L21 |
@@ -77,7 +77,7 @@ and is not a lost proof.
 | `feas_spec` | 43 | L21 |
 | `sdp` | 98 | L15, L16 |
 | `sdp_altdir` | 35 | L17-L19 |
-| **total** | **893** | |
+| **total** | **891** | |
 
 ## Main contracts
 
@@ -108,11 +108,16 @@ and is not a lost proof.
   `A' = J^T A J`, `Q' = Q J`, `A'_jk = 0`. Both eigensolvers establish
   `eigensolver_ok`: `Q^T Q = Q Q^T = I`, `A = Q B Q^T`, `vals = diag(B)`,
   `||B - diag(B)||_F <= sqrt(dim (dim - 1)) * 1e-12 * max(1, max_i |B_ii|)`.
-  The cached pivot has maximal off-diagonal magnitude; each cyclic sweep
-  visits every pair `j < k` once in column-cyclic order.
+  Each rotation preserves symmetry and eigenvalues
+  (`lemma_jacobi_step_similar`), and so does the whole run: `A` and `B` have
+  the same eigenvalues (`lemma_eigen_inv_eigenvalues`). The cached pivot has
+  maximal off-diagonal magnitude; each cyclic sweep visits every pair `j < k`
+  once in column-cyclic order.
 - **Spectral parts**: `poseigendecomp` and `negeigendecomp` return the pairs
   `(B_kk, q_k)` with `B_kk > 0`, resp. `B_kk < -1e-8 * max(max_t |A_t|, 1)`
-  (`spectral_part_ok`). Nothing relates them to the exact PSD projection.
+  (`spectral_part_ok`). An empty negative part certifies
+  `Q diag(B) Q^T >= -1e-8 * scale I` (`lemma_no_negative_part`). Nothing
+  relates them to the exact PSD projection.
 - **Standard form** (`sdp.rs`): `sdp_to_standard` preserves the objective,
   the equality and LMI rows (`std_rows_ok`), the zero pattern (`zeros_ok`)
   and variable reconstruction (`Z_n = B_{s+2n} - B_{s+2n+1}`); the reduction
