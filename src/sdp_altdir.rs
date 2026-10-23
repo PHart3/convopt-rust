@@ -280,7 +280,7 @@ fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> 
     }
     let resid_top = euclid_distance(&sym_mat_act(gram, y_top), &rhs_top);
     let resid_bottom = frob_norm_sym(gram, c_len) * euclid_norm(y_top) + euclid_norm(&rhs_top);
-    if !relative_residual_is_small(resid_top, resid_bottom, 1e-9) {
+    if !(resid_bottom == 0.0 && resid_top == 0.0) && !relative_residual_is_small(resid_top, resid_bottom, 1e-9) {
         abort("regularized Gram solve is not an accurate solution to original system");
     }
     y

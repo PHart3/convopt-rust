@@ -69,12 +69,12 @@ deps: L10, L11, L04 |
 targets: poseigendecomp, negeigendecomp |
 status: done
 
-L13 | Gaussian elimination: echelon invariants, partial pivoting, the tolerance-based skip rule, solution set preserved, zero columns kept, rank and consistency outputs |
+L13 | Gaussian elimination: echelon invariants with pivots in the coefficient columns, partial pivoting, the tolerance-based skip rule (coefficient-only scale), solution set preserved (row swaps, subtractions, nonzero scalings), zero columns kept, rank, and the consistency test (`TOL * 2^rank * max |b_k|` bound on the rows without a pivot) |
 deps: L02 |
 targets: gauss_elim |
 status: done
 
-L14 | Constraint reduction: the first `rank` echelon rows of `gauss_elim`, each divided by its Frobenius norm, which is positive because the row holds a pivot; the echelon form carries the solution set, zero columns and pivot/skip record of the input (`reduced_with`); nothing is claimed about the dropped rows; inconsistency aborts |
+L14 | Constraint reduction: input rows divided by their Frobenius norms (`normalized_r`), then the first `rank` echelon rows of `gauss_elim`, each divided by its Frobenius norm, which is positive because the row holds a nonzero pivot; the echelon form carries the solution set, zero columns and pivot/skip record and consistency test (`reduced_with`); inconsistency aborts |
 deps: L13 |
 targets: linear_remove_redundant_sym |
 status: done

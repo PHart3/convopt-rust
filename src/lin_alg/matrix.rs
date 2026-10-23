@@ -6,7 +6,6 @@
 
 use vstd::prelude::*;
 pub use crate::lin_alg::comparison::float_equality;
-use crate::lin_alg::comparison::scaled_near_zero;
 #[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
@@ -16,7 +15,9 @@ use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::real_spec::{abs_r, lemma_abs_quotient_le_one};
 #[cfg(verus_keep_ghost)]
-use crate::lin_alg::solve_spec::{abs_max_prefix_r, abs_max_r, lemma_abs_max_prefix_step, lemma_abs_max_attained};
+use crate::lin_alg::solve_spec::{abs_max_prefix_r, lemma_abs_max_prefix_step, lemma_abs_max_prefix_attained};
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::sym_spec::{max0_fn_r, lemma_max0_fn_bound};
 #[cfg(verus_keep_ghost)]
 use vstd::arithmetic::div_mod::{lemma_fundamental_div_mod, lemma_mod_bound};
 #[cfg(verus_keep_ghost)]
@@ -407,11 +408,12 @@ pub fn vector_equality(vect1: &Vector, vect2: &Vector, tol: f64) -> (equal: bool
 verus! {
 
 // Gaussian elimination via partial pivoting
-// also computes rank and consistency of given augmented matrix
+// also computes numerical coefficient rank and consistency of given augmented matrix
 // (the row operations preserve the solution set of [A | b] and keep zero columns zero; the result is in echelon form
-// with pivot columns strictly increasing, pivots of magnitude at least TOL * max |entry|
-// of the input and exact zeros below every pivot; the rank is the number of pivots and the
-// consistency flag says that no pivot lies in the last column)
+// with pivots in the columns of A, strictly increasing, nonzero and of magnitude at least TOL * max |entry of A|
+// of the input, and exact zeros below every pivot; the rank is the number of pivots; a consistent system
+// has right-hand sides below TOL * 2^rank * max |b_k| of the input in the rows without a pivot, and is
+// zero if its rank is 0)
 pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&mut Matrix, usize, bool))
     requires
         col_dim >= 1,
@@ -422,56 +424,108 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         same_solutions(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int),
         zero_cols_kept(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int),
         exists|pivots: Seq<int>| {
-            &&& #[trigger] echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, rv(TOL) * abs_max_r(rvs(old(mat)@)))
-            &&& skipped_bounded(rvs(res.0@), row_dim as int, col_dim as int, pivots, rv(TOL) * abs_max_r(rvs(old(mat)@)), col_dim as int)
+            &&& #[trigger] echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rvs(old(mat)@), row_dim as int, col_dim as int))
+            &&& skipped_bounded(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rvs(old(mat)@), row_dim as int, col_dim as int), col_dim - 1)
+            &&& forall|l: int| 0 <= l < pivots.len() ==> #[trigger] pivots[l] < col_dim - 1
             &&& pivots.len() == res.1
-            &&& res.2 == (pivots.len() == 0 || pivots.last() < col_dim - 1)
         },
-        abs_max_r(rvs(old(mat)@)) > 0.0real ==> res.1 >= 1,
+        res.2 ==> rhs_consistent(rvs(res.0@), row_dim as int, col_dim as int, res.1 as nat, rhs_abs_max_r(rvs(old(mat)@), row_dim as int, col_dim as int)),
+        abs_max_prefix_r(rvs(old(mat)@), ((col_dim - 1) * row_dim) as nat) > 0.0real ==> res.1 >= 1,
+        res.1 == 0 && res.2 ==> forall|t: int| 0 <= t < old(mat)@.len() ==> rv(#[trigger] old(mat)@[t]) == 0.0real,
 {
     let ghost a0 = rvs(old(mat)@);
     let ghost (rd, cd) = (row_dim as int, col_dim as int);
+    let ghost nc = (col_dim - 1) as int;
     let mut row_search = 0;
-    let mut coeff_rank = 0;
-    // scale = max |entry| of the input
-    let mut scale: f64 = 0.0;
-    for t in 0..mat.len()
+    proof {
+        assert(mat.len() == row_dim * col_dim);
+        assert(nc * rd + rd == rd * cd) by (nonlinear_arith)
+            requires nc == cd - 1;
+        assert(nc * rd >= 0);
+    }
+    let rhs_start = col_dim.saturating_sub(1) * row_dim;
+    // Keep a large RHS from suppressing coefficient pivots. RHS scales
+    // follow row operations rather than using one global input scale.
+    // coeff_scale = max |entry of A| of the input
+    let mut coeff_scale: f64 = 0.0;
+    for t in 0..rhs_start
         invariant
             mat@ == old(mat)@,
-            rv(scale) == abs_max_prefix_r(rvs(mat@), t as nat),
+            rhs_start <= mat@.len(),
+            rv(coeff_scale) == abs_max_prefix_r(rvs(mat@), t as nat),
     {
         proof {
             lemma_abs_max_prefix_step(rvs(mat@), t as nat);
         }
-        scale = scale.max(mat[t].abs());
+        coeff_scale = coeff_scale.max(mat[t].abs());
     }
-    let ghost eps = rv(TOL) * abs_max_r(a0);
+    // rhs_scales = |b| of the input
+    let mut rhs_scales: Vector = Vec::with_capacity(row_dim);
+    for i in 0..row_dim
+        invariant
+            mat@ == old(mat)@,
+            a0 == rvs(old(mat)@),
+            rd == row_dim as int,
+            cd == col_dim as int,
+            rhs_start == nc * rd,
+            nc == cd - 1,
+            nc * rd + rd == mat@.len(),
+            mat@.len() <= usize::MAX,
+            rhs_scales@.len() == i,
+            forall|k: int| 0 <= k < i ==> rv(#[trigger] rhs_scales@[k]) == abs_r(rhs_r(a0, rd, cd, k)),
+    {
+        proof {
+            assert(cm_idx(rd, i as int, cd - 1) == rhs_start + i);
+        }
+        rhs_scales.push(mat[rhs_start + i].abs());
+    }
+    let ghost eps = gauss_eps_r(a0, rd, cd);
+    // the RHS scales start below max |b_k| and at most double with each pivot step
+    let ghost bmax = rhs_abs_max_r(a0, rd, cd);
+    proof {
+        let g = |k: int| abs_r(rhs_r(a0, rd, cd, k));
+        lemma_max0_fn_bound(g, rd as nat);
+        assert(bmax == max0_fn_r(g, rd as nat));
+        assert(pow2_r(0) == 1.0real);
+        assert forall|k: int| 0 <= k < rd implies rv(#[trigger] rhs_scales@[k]) <= pow2_r(0) * bmax by {
+            assert(g(k) <= bmax);
+        }
+    }
     let ghost mut pivots: Seq<int> = Seq::empty();
     proof {
         lemma_same_solutions_refl(a0, rd, cd);
         lemma_zero_cols_refl(a0, rd, cd);
+        lemma_max0_fn_bound(|u: int| abs_r(a0[u]), rhs_start as nat);
+        assert(rv(TOL) == 0.0000000001real);
     }
     let mut n = 0;
-    while n < col_dim && row_search < row_dim
+    while n < col_dim - 1 && row_search < row_dim
         invariant
             col_dim >= 1,
-            n <= col_dim,
+            n <= col_dim - 1,
             row_search <= row_dim,
             rd == row_dim as int,
             cd == col_dim as int,
             a0 == rvs(old(mat)@),
             mat@.len() == old(mat)@.len(),
             old(mat)@.len() == row_dim * col_dim,
-            rv(scale) == abs_max_r(a0),
-            eps == rv(TOL) * abs_max_r(a0),
+            rv(coeff_scale) == abs_max_prefix_r(a0, rhs_start as nat),
+            rv(coeff_scale) >= 0.0real,
+            rhs_start == nc * rd,
+            eps == rv(TOL) * rv(coeff_scale),
+            rv(TOL) == 0.0000000001real,
             pivots.len() == row_search,
             row_search == 0 ==> mat@ == old(mat)@,
+            row_search == 0 ==> forall|k: int| 0 <= k < rd ==> rv(#[trigger] rhs_scales@[k]) == abs_r(rhs_r(a0, rd, cd, k)),
+            rhs_scales@.len() == row_dim,
+            bmax == rhs_abs_max_r(a0, rd, cd),
+            bmax >= 0.0real,
+            forall|k: int| 0 <= k < rd ==> 0.0real <= rv(#[trigger] rhs_scales@[k]) <= pow2_r(row_search as nat) * bmax,
             forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
             echelon_form(rvs(mat@), rd, cd, pivots, eps),
             skipped_bounded(rvs(mat@), rd, cd, pivots, eps, n as int),
             same_solutions(a0, rvs(mat@), rd, cd),
             zero_cols_kept(a0, rvs(mat@), rd, cd),
-            coeff_rank as int == row_search - (if row_search > 0 && pivots.last() == cd - 1 { 1int } else { 0int }),
         decreases col_dim - n,
     {
         proof {
@@ -503,8 +557,13 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             assert(forall|i: int| row_search <= i < rd
                 ==> abs_r(#[trigger] cm_entry(cur0, rd, i, n as int)) <= abs_r(cm_entry(cur0, rd, pivot_row as int, n as int)));
         }
-        if !scaled_near_zero(mat[n * row_dim + pivot_row], scale, TOL) {
+        let pivot_abs = mat[n * row_dim + pivot_row].abs();
+        if !(pivot_abs == 0.0 || pivot_abs < TOL * coeff_scale) {
+            let ghost s_before = rhs_scales@;
             if pivot_row != row_search {
+                let tmp_scale = rhs_scales[pivot_row];
+                rhs_scales[pivot_row] = rhs_scales[row_search];
+                rhs_scales[row_search] = tmp_scale;
                 let ghost before = rvs(mat@);
                 for m3 in 0..col_dim
                     invariant
@@ -554,16 +613,25 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                 }
                 proof {
                     let cur = rvs(mat@);
-                    assert(rows_swapped(before, cur, rd, cd, row_search as int, pivot_row as int));
-                    lemma_swap_same_solutions(before, cur, rd, cd, row_search as int, pivot_row as int);
+                    let (rs, pr) = (row_search as int, pivot_row as int);
+                    assert(rows_swapped(before, cur, rd, cd, rs, pr));
+                    lemma_swap_same_solutions(before, cur, rd, cd, rs, pr);
                     lemma_same_solutions_trans(a0, before, cur, rd, cd);
-                    lemma_swap_zero_cols(before, cur, rd, cd, row_search as int, pivot_row as int);
+                    lemma_swap_zero_cols(before, cur, rd, cd, rs, pr);
                     lemma_zero_cols_trans(a0, before, cur, rd, cd);
-                    lemma_echelon_swap(before, cur, rd, cd, pivots, eps, row_search as int, pivot_row as int);
-                    lemma_skipped_swap(before, cur, rd, cd, pivots, eps, n as int, row_search as int, pivot_row as int);
+                    lemma_echelon_swap(before, cur, rd, cd, pivots, eps, rs, pr);
+                    lemma_skipped_swap(before, cur, rd, cd, pivots, eps, n as int, rs, pr);
+                    assert forall|k: int| 0 <= k < rd implies #[trigger] rhs_scales@[k]
+                        == s_before[if k == rs { pr } else if k == pr { rs } else { k }] by {}
                 }
             }
-            // row row_search now holds the pivot: of maximal magnitude among the remaining rows and >= TOL * scale
+            let ghost pb = pow2_r(row_search as nat) * bmax;
+            let ghost pb2 = pow2_r((row_search + 1) as nat) * bmax;
+            proof {
+                lemma_pow2_step(row_search as nat, bmax);
+                assert(0.0real <= rv(rhs_scales@[row_search as int]) <= pb);
+            }
+            // row row_search now holds the pivot: nonzero, of maximal magnitude among the remaining rows and >= TOL * coeff_scale
             let ghost swapped = rvs(mat@);
             proof {
                 let (rs, pr, ni) = (row_search as int, pivot_row as int, n as int);
@@ -576,6 +644,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     }
                 }
                 assert(abs_r(cm_entry(swapped, rd, rs, ni)) >= eps);
+                assert(cm_entry(swapped, rd, rs, ni) != 0.0real);
             }
             let denom = mat[n * row_dim + row_search];
             for j in row_search + 1..row_dim
@@ -590,9 +659,14 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     swapped.len() == mat@.len(),
                     n * row_dim + row_dim <= row_dim * col_dim,
                     rv(denom) == cm_entry(swapped, rd, row_search as int, n as int),
+                    rv(denom) != 0.0real,
                     abs_r(cm_entry(swapped, rd, row_search as int, n as int)) >= eps,
-                    eps == rv(TOL) * abs_max_r(a0),
                     pivots.len() == row_search,
+                    rhs_scales@.len() == row_dim,
+                    pb2 == pb + pb,
+                    pb >= 0.0real,
+                    forall|k: int| 0 <= k < rd ==> 0.0real <= rv(#[trigger] rhs_scales@[k]) <= pb2,
+                    forall|k: int| (k == row_search || j <= k < rd) ==> rv(#[trigger] rhs_scales@[k]) <= pb,
                     forall|i: int, c: int| 0 <= i < rd && 0 <= c < cd && (i == row_search || i >= j)
                         ==> #[trigger] cm_entry(rvs(mat@), rd, i, c) == cm_entry(swapped, rd, i, c),
                     forall|i: int| row_search < i < j ==> #[trigger] cm_entry(rvs(mat@), rd, i, n as int) == 0.0real,
@@ -604,9 +678,11 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
                     forall|c: int, i: int| 0 <= c < n && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= i < rd
                         ==> abs_r(#[trigger] cm_entry(rvs(mat@), rd, i, c))
-                            < skip_bound(pivots, c, eps) + (if row_search < i < j { skip_bound(pivots, c, eps) } else { 0.0real }),
+                            <= skip_bound(pivots, c, eps) + (if row_search < i < j { skip_bound(pivots, c, eps) } else { 0.0real }),
             {
                 let piv = mat[n * row_dim + j] / denom;
+                let ghost s_prev = rhs_scales@;
+                rhs_scales[j] = rhs_scales[j] + piv.abs() * rhs_scales[row_search];
                 let ghost before = rvs(mat@);
                 let ghost (rs, ji, ni) = (row_search as int, j as int, n as int);
                 for m in 0..col_dim
@@ -660,34 +736,30 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     let (num, dn) = (cm_entry(before, rd, ji, ni), rv(denom));
                     assert(num == cm_entry(swapped, rd, ji, ni));
                     assert(cm_entry(cur, rd, ji, ni) == num - rv(piv) * dn);
-                    if dn != 0.0real {
-                        assert((num / dn) * dn == num) by (nonlinear_arith)
-                            requires dn != 0.0real;
-                    } else {
-                        // a zero pivot is the maximum only if the whole remaining column is zero
-                        assert(abs_r(num) <= abs_r(dn));
-                        assert(rv(piv) * 0.0real == 0.0real);
-                    }
-                    // skipped columns: row j at most doubles its bound (|piv| <= 1 by partial pivoting)
+                    assert((num / dn) * dn == num) by (nonlinear_arith)
+                        requires dn != 0.0real;
+                    // |piv| <= 1 by partial pivoting
+                    assert(abs_r(num) <= abs_r(dn));
+                    lemma_abs_quotient_le_one(num, dn);
+                    // the RHS scale of row j: s_j + |piv| s_r <= pb + pb
+                    let (a, sp) = (abs_r(rv(piv)), rv(s_prev[rs]));
+                    assert(0.0real <= a * sp <= sp) by (nonlinear_arith)
+                        requires 0.0real <= a <= 1.0real, sp >= 0.0real;
+                    assert forall|k: int| 0 <= k < rd && k != ji implies #[trigger] rhs_scales@[k] == s_prev[k] by {}
+                    // skipped columns: row j at most doubles its bound
                     assert forall|c: int, i: int| 0 <= c < n && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= i < rd
                         implies abs_r(#[trigger] cm_entry(cur, rd, i, c))
-                            < skip_bound(pivots, c, eps) + (if rs < i < ji + 1 { skip_bound(pivots, c, eps) } else { 0.0real }) by {
+                            <= skip_bound(pivots, c, eps) + (if rs < i < ji + 1 { skip_bound(pivots, c, eps) } else { 0.0real }) by {
                         let bound = skip_bound(pivots, c, eps);
                         lemma_pivots_below_bounds(pivots, c);
                         if i == ji {
-                            assert(abs_r(cm_entry(before, rd, ji, c)) < bound);
-                            assert(abs_r(cm_entry(before, rd, rs, c)) < bound);
-                            let k = (pivots.len() - pivots_below(pivots, c)) as nat;
-                            lemma_pow2_pos(k);
-                            assert(eps > 0.0real) by (nonlinear_arith)
-                                requires pow2_r(k) > 0.0real, pow2_r(k) * eps > 0.0real;
-                            assert(abs_r(dn) >= eps);
-                            lemma_abs_quotient_le_one(num, dn);
+                            assert(abs_r(cm_entry(before, rd, ji, c)) <= bound);
+                            assert(abs_r(cm_entry(before, rd, rs, c)) <= bound);
                             lemma_abs_sub_double(cm_entry(before, rd, ji, c), cm_entry(before, rd, rs, c), rv(piv), bound);
                         } else {
                             assert(cm_entry(cur, rd, i, c) == cm_entry(before, rd, i, c));
                             assert(abs_r(cm_entry(before, rd, i, c))
-                                < bound + (if rs < i < ji { bound } else { 0.0real }));
+                                <= bound + (if rs < i < ji { bound } else { 0.0real }));
                         }
                     }
                 }
@@ -695,60 +767,109 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             proof {
                 let cur = rvs(mat@);
                 assert forall|c: int, i: int| 0 <= c < n && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= i < rd
-                    implies abs_r(#[trigger] cm_entry(cur, rd, i, c)) < skip_bound(pivots, c, eps) + skip_bound(pivots, c, eps) by {
+                    implies abs_r(#[trigger] cm_entry(cur, rd, i, c)) <= skip_bound(pivots, c, eps) + skip_bound(pivots, c, eps) by {
                     assert(abs_r(cm_entry(cur, rd, i, c))
-                        < skip_bound(pivots, c, eps) + (if row_search < i < rd { skip_bound(pivots, c, eps) } else { 0.0real }));
+                        <= skip_bound(pivots, c, eps) + (if row_search < i < rd { skip_bound(pivots, c, eps) } else { 0.0real }));
                 }
                 lemma_skipped_after_pivot(cur, rd, cd, pivots, eps, n as int);
                 lemma_echelon_push(cur, rd, cd, pivots, eps, n as int);
                 pivots = pivots.push(n as int);
             }
             row_search += 1;
-            if n < col_dim - 1 {
-                coeff_rank += 1;
-            }
         } else {
             proof {
-                // the tolerance-based skip rule: every remaining entry of column n is below TOL * scale
-                assert(forall|i: int| row_search <= i < rd ==> abs_r(#[trigger] cm_entry(cur0, rd, i, n as int)) < eps);
+                // the tolerance-based skip rule: every remaining entry of column n is at most TOL * coeff_scale
+                assert(forall|i: int| row_search <= i < rd ==> abs_r(#[trigger] cm_entry(cur0, rd, i, n as int)) <= eps);
                 lemma_skipped_skip(cur0, rd, cd, pivots, eps, n as int);
             }
         }
         n += 1;
     }
     proof {
-        if n < col_dim {
-            lemma_skipped_extend(rvs(mat@), rd, cd, pivots, eps, n as int);
+        if n < col_dim - 1 {
+            lemma_skipped_extend(rvs(mat@), rd, cd, pivots, eps, n as int, nc);
         }
-        // a nonzero input has a pivot: without one the matrix is unchanged and every column was
-        // skipped, so every entry would be below TOL * max |entry|
-        if abs_max_r(a0) > 0.0real && row_search == 0 {
-            lemma_abs_max_attained(a0);
-            let t = choose|t: int| 0 <= t < a0.len() && abs_r(#[trigger] a0[t]) == abs_max_r(a0);
-            assert(rd > 0) by (nonlinear_arith)
-                requires a0.len() == rd * cd, a0.len() > 0, rd >= 0;
-            assert(n == col_dim);
+        // a nonzero coefficient part has a pivot: without one the matrix is unchanged and every
+        // column of A was skipped, so every entry of A would be at most TOL * max |entry of A|
+        if rv(coeff_scale) > 0.0real && row_search == 0 {
+            lemma_abs_max_prefix_attained(a0, rhs_start as nat);
+            let t = choose|t: int| 0 <= t < rhs_start && abs_r(#[trigger] a0[t]) == abs_max_prefix_r(a0, rhs_start as nat);
+            assert(n == col_dim - 1);
             lemma_fundamental_div_mod(t, rd);
             lemma_mod_bound(t, rd);
             let (j, c) = (t % rd, t / rd);
-            assert(c < cd) by (nonlinear_arith)
-                requires t < rd * cd, t == rd * c + j, j >= 0, rd > 0;
+            assert(c < nc) by (nonlinear_arith)
+                requires t < nc * rd, t == rd * c + j, j >= 0, rd > 0;
+            assert(cm_idx(rd, j, c) == t) by (nonlinear_arith)
+                requires t == rd * c + j;
             assert(cm_entry(a0, rd, j, c) == a0[t]);
             assert(!is_pivot_col(pivots, c));
             assert(pivots_below(pivots, c) == 0);
             assert(skip_bound(pivots, c, eps) == pow2_r(0) * eps);
-            assert(abs_r(a0[t]) < eps);
-            assert(rv(TOL) == 0.0000000001real);
+            assert(abs_r(a0[t]) <= eps);
             assert(false);
         }
     }
-    let res = (mat, row_search, row_search == coeff_rank);
+    // the system is consistent if every row without a pivot has a zero or relatively small right-hand side
+    let mut solvable = true;
+    let mut i = row_search;
+    while solvable && i < row_dim
+        invariant
+            row_search <= i <= row_dim,
+            rd == row_dim as int,
+            cd == col_dim as int,
+            rhs_start == nc * rd,
+            nc == cd - 1,
+            nc * rd + rd == mat@.len(),
+            mat@.len() <= usize::MAX,
+            rhs_scales@.len() == row_dim,
+            rv(TOL) == 0.0000000001real,
+            solvable ==> forall|k: int| row_search <= k < i
+                ==> rhs_r(rvs(mat@), rd, cd, k) == 0.0real || abs_r(rhs_r(rvs(mat@), rd, cd, k)) < rv(TOL) * #[trigger] rvs(rhs_scales@)[k],
+        decreases row_dim - i,
+    {
+        proof {
+            assert(cm_idx(rd, i as int, cd - 1) == rhs_start + i);
+        }
+        let rhs = mat[rhs_start + i].abs();
+        solvable = rhs == 0.0 || (rhs_scales[i].is_finite() && rhs < TOL * rhs_scales[i]);
+        i += 1;
+    }
+    let ghost s = rvs(rhs_scales@);
     proof {
-        // the pivot sequence witnesses the echelon form (the last pivot column is at most cd - 1,
-        // so the consistency flag says that it is not the last column)
-        assert(echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, rv(TOL) * abs_max_r(rvs(old(mat)@))));
-        assert(skipped_bounded(rvs(res.0@), row_dim as int, col_dim as int, pivots, rv(TOL) * abs_max_r(rvs(old(mat)@)), col_dim as int));
-        assert(res.2 == (pivots.len() == 0 || pivots.last() < col_dim - 1));
+        // a consistent system of rank 0 is zero: A is zero by the above, and b = 0 since
+        // each |b_i| is its own RHS scale
+        if row_search == 0 && solvable {
+            assert(rv(coeff_scale) == 0.0real);
+            assert forall|t: int| 0 <= t < a0.len() implies #[trigger] a0[t] == 0.0real by {
+                if t < rhs_start {
+                    let g = |u: int| abs_r(a0[u]);
+                    lemma_max0_fn_bound(g, rhs_start as nat);
+                    assert(abs_max_prefix_r(a0, rhs_start as nat) == max0_fn_r(g, rhs_start as nat));
+                    assert(g(t) <= 0.0real);
+                } else {
+                    let k = t - rhs_start;
+                    assert(cm_idx(rd, k, cd - 1) == t);
+                    assert(s[k] == abs_r(rhs_r(a0, rd, cd, k)));
+                }
+            }
+            assert forall|t: int| 0 <= t < a0.len() implies rv(#[trigger] old(mat)@[t]) == 0.0real by {
+                assert(a0[t] == 0.0real);
+            }
+        }
+    }
+    let res = (mat, row_search, solvable);
+    proof {
+        // the pivot sequence witnesses the echelon form
+        assert(echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rvs(old(mat)@), row_dim as int, col_dim as int)));
+        // a passed test: |b_i| < TOL * s_i <= TOL * 2^rank * bmax
+        if solvable {
+            assert forall|k: int| row_search <= k < rd implies
+                #[trigger] rhs_r(rvs(res.0@), rd, cd, k) == 0.0real
+                    || abs_r(rhs_r(rvs(res.0@), rd, cd, k)) < rv(TOL) * (pow2_r(row_search as nat) * bmax) by {
+                assert(s[k] == rv(rhs_scales@[k]));
+            }
+        }
     }
     res
 }

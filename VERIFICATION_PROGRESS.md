@@ -43,18 +43,20 @@ All 22 layers (L00-L21) are done; L21 holds the post-hoc proofs of `ADDITIONAL_P
 
 ## Verified-function count
 
-Last full run: **853 verified, 0 errors** (about 28 s). `--time` reports no
-slow proof, and no `rlimit` is raised. The `verus!` blocks contain 15,115
+Last full run: **867 verified, 0 errors** (about 27 s). `--time` reports no
+slow proof, and no `rlimit` is raised. The `verus!` blocks contain 15,431
 lines of code, not counting blank and comment lines.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
 items are not counted. Earlier runs reported more (999, 916, then 891):
-inline `nonlinear_arith` steps were removed or folded into shared lemmas (253
+inline `nonlinear_arith` steps were removed or folded into shared lemmas (261
 remain), and the scope reduction of October 2026 removed the reduction
 residual bounds, the reduced-case lifting and the unused negative-part PSD
 bound with their helpers (38 items). Such decreases are expected and are not
-lost proofs.
+lost proofs. The update to the row-normalized, RHS-scaled elimination of
+`main` (October 2026) added 14 items: row-scaling lemmas, the helper
+`packed_row_norm`, and the loops of the new scales and tests.
 
 | Module | Verified | Layers |
 |--------|---------:|--------|
@@ -69,11 +71,11 @@ lost proofs.
 | `lin_alg::jacobi_spec` | 57 | L08 |
 | `lin_alg::eigen_spec` | 19 | L09-L11 |
 | `lin_alg::spectral_spec` | 8 | L12 |
-| `lin_alg::gauss_spec` | 29 | L13, L21 |
-| `lin_alg::reduce_spec` | 10 | L14, L21 |
-| `lin_alg::matrix` | 45 | L01, L13 |
+| `lin_alg::gauss_spec` | 33 | L13, L21 |
+| `lin_alg::reduce_spec` | 9 | L14, L21 |
+| `lin_alg::matrix` | 48 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
-| `lin_alg::sym_matrix` | 144 | L02, L04-L07, L14, L15 |
+| `lin_alg::sym_matrix` | 152 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 38 | L08, L10-L12 |
 | `sdp_spec` | 58 | L16 |
 | `sdpad_spec` | 35 | L17-L19, L21 |
@@ -87,9 +89,12 @@ lost proofs.
 - **Comparisons** (`comparison.rs`): the exact-real reading of each tolerance
   test, e.g. `scaled_near_zero(x, s, tol)` iff `|x| < tol * s`.
 - **Dense matrices** (`matrix.rs`): `gauss_elim` preserves the solution set,
-  keeps zero columns, produces echelon form under the tolerance-based
-  pivot/skip rules (`echelon_form`, `skipped_bounded`) and has `rank >= 1`
-  for nonzero input.
+  keeps zero columns, and produces echelon form with nonzero pivots in the
+  coefficient columns under the tolerance-based pivot/skip rules
+  (`echelon_form`, `skipped_bounded`, tolerance `TOL * max |A_ij|`). A
+  consistent result has right-hand sides zero or below
+  `TOL * 2^rank * max |b_k|` in the rows without a pivot (`rhs_consistent`),
+  and comes from a zero input if its rank is 0.
 - **Constraint operator** (`sym_matrix.rs`): `constraint_action` is `A(X)`;
   `constraint_lin_comb` is `A*(y)` with the off-diagonal factors 1/2 and
   satisfies `<A(X), y> = <X, A*(y)>_F`; `diag_scale_gram` is `Q D Q^T`.
@@ -99,10 +104,12 @@ lost proofs.
   solves the block system `(A, I/2) x = b`.
 - **PSD check**: success of `psd_block_check` gives `B >= -eps I` for each
   block, `eps = 1e-9 * max(max_i |B_ii|, 1)`.
-- **Reduction**: `linear_remove_redundant_sym` returns the first `rank`
+- **Reduction**: `linear_remove_redundant_sym` divides the input rows by
+  their Frobenius norms (`normalized_r`), then returns the first `rank`
   echelon rows of `gauss_elim` divided by their Frobenius norms, which are
-  positive because each kept row holds a pivot (`reduced_with`). Nothing is
-  claimed about the dropped rows.
+  positive because each kept row holds a nonzero pivot (`reduced_with`).
+  The dropped rows are only known to pass the consistency test. Both norm
+  passes share the verified helper `packed_row_norm`.
 - **Jacobi** (`jacobi.rs`): `jacobi_rot` gives `c^2 + s^2 = 1`,
   `A' = J^T A J`, `Q' = Q J`, `A'_jk = 0`. Both eigensolvers establish
   `eigensolver_ok`: `Q^T Q = Q Q^T = I`, `A = Q B Q^T`, `vals = diag(B)`,
@@ -214,9 +221,8 @@ lost proofs.
 
 The four bugs in `EXPOSED_BUGS.md` were fixed. Other changes:
 
-- The off-diagonal row-norm factor of `linear_remove_redundant_sym` is
-  `sqrt(2)` instead of `1/sqrt(2)` (author's decision), so the scale is the
-  Frobenius norm of the row's symmetric matrix.
+- `linear_remove_redundant_sym` computes both row-norm passes with the helper
+  `packed_row_norm` and `sqrt(2)` once per call.
 - `SDP` fields are `pub`. `sdp_to_standard` requires `sdp_single_input_ok` /
   `sdp_lmi_input_ok` (shapes, one map per objective entry, a nonzero
   constraint system when `check_constraints` is set without LMIs). `sdpad`
@@ -248,8 +254,8 @@ the installed Verus (0.2026.08.23).
 | `f64::INFINITY` | `pos_infinity()` (T7) | `sdpad_loop` sentinels |
 | `x += y`, `v[i] -= y`, `v[i] *= y` on `f64` (compiler crash) | `x = x + y`, etc. | all accumulation loops |
 | `panic!`, `assert!`, `expect`, `unwrap_or_else(panic)` on data-dependent conditions | `crate::trusted::abort(..)` (T8); internal consistency checks became static `assert`s | solvers, eigensolvers, `linear_remove_redundant_sym`, `sdp_to_standard`, `dual_solve` |
-| Iterator chains (`zip`, `map`, `fold`, `enumerate`, `chunks_exact`, `scan`, `chain`, `sum`, `concat`), `for x in &v` | index loops over the same slices | throughout |
-| `continue` in `for` loops | `if` block, or `while` with explicit counter | `jacobi_rot`, `jacobi_eigen_cyc`, `gauss_elim` |
+| Iterator chains (`zip`, `map`, `fold`, `collect`, `all`, `enumerate`, `chunks_exact`, `scan`, `chain`, `sum`, `concat`), `for x in &v` | index loops over the same slices (`all` keeps its short circuit) | throughout |
+| `continue` in `for` loops | `if` block, or `while` with explicit counter | `jacobi_rot`, `jacobi_eigen_cyc`, `gauss_elim`, `linear_remove_redundant_sym` |
 | `return` inside `loop`, `&mut ident_mat(dim)` temporaries, final `to_vec()` | `loop .. break` with `ensures`; owned local `q0` returned after the loop | both eigensolvers |
 | Destructuring assignment `(a, b, c) = f(..)` | `let (x, y, z) = f(..); a = x; ..` | both eigensolvers, `sdpad_loop` |
 | Uninitialized `let (mut a, mut b);` before loops | initialized bindings inside the loop body | several |
@@ -260,7 +266,7 @@ the installed Verus (0.2026.08.23).
 | `&mut vect[..k]` on a `Vec` | `&mut vect.as_mut_slice()[..k]` | `pos_def_solver_upperleft` |
 | `if let .. && ..` let-chains | nested `if` | `sdpad_loop` |
 | Tuple patterns in parameters `(mat, list): &(..)` | `constr: &(..)` plus `let (mat, list) = constr;` | `constraint_action`, `constraint_lin_comb` |
-| `std::f64::consts::FRAC_1_SQRT_2` | `2.0_f64.sqrt()` (with the factor change above) | `linear_remove_redundant_sym` |
+| `std::f64::consts::SQRT_2` | `2.0_f64.sqrt()` | `linear_remove_redundant_sym` |
 | `const`, `struct`, `enum` outside `verus!` | moved inside `verus!` | `matrix.rs`, `jacobi.rs`, `sdp.rs`, `sdp_altdir.rs` |
 | `MAX_SWEEPS * dim * (dim - 1) / 2` | `(dim * (dim - 1) / 2).saturating_mul(MAX_SWEEPS)` | `jacobi_eigen_cach` |
 | `println!` inside the solver loop | `sdpad_loop` returns `SdpadOutcome`; `sdpad` prints outside `verus!` | `sdp_altdir.rs` |

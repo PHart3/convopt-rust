@@ -1,25 +1,35 @@
 // Spec-level support for Gaussian elimination (not trusted).
 //
 // `gauss_elim` reduces the column-major augmented matrix [A | b] (row_dim rows,
-// col_dim columns, the last column being b) by row swaps and row subtractions.
-// This module defines the solution set of the augmented system, proves that
-// both row operations preserve it, and defines the echelon structure of the
-// result: strictly increasing pivot columns, pivots of magnitude at least the
+// col_dim columns, the last column being b) by row swaps and row subtractions,
+// pivoting in the columns of A only.  This module defines the solution set of
+// the augmented system, proves that row swaps, row subtractions and nonzero
+// row scalings preserve it, and defines the echelon structure of the result:
+// strictly increasing pivot columns, nonzero pivots of magnitude at least the
 // tolerance threshold, and exact zeros below every pivot.  The tolerance-based
 // skip rule is recorded by `skipped_bounded`: a column without a pivot was
-// found below the threshold in every remaining row when it was examined, and
+// found at most the threshold in every remaining row when it was examined, and
 // each later elimination step (whose multipliers have magnitude at most 1 by
-// partial pivoting) at most doubles those entries.
+// partial pivoting) at most doubles those entries.  The consistency test
+// compares the right-hand side of each row without a pivot against a scale
+// carried along the row operations; by the same doubling argument, a passed
+// test bounds those right-hand sides by TOL * 2^rank * max |b_k| (`rhs_consistent`).
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::seq::*;
+#[cfg(verus_keep_ghost)]
+use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
 use crate::real_spec::{abs_r, lemma_abs_mul, lemma_abs_sub_triangle};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::sym_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::solve_spec::abs_max_prefix_r;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::matrix::TOL;
 
 verus! {
 
@@ -86,6 +96,13 @@ pub open spec fn row_subtracted(m: Seq<real>, m2: Seq<real>, row_dim: int, col_d
                 == if i == j { cm_entry(m, row_dim, j, c) - piv * cm_entry(m, row_dim, p, c) } else { cm_entry(m, row_dim, i, c) }
 }
 
+/// m2 is m with row r multiplied by k.
+pub open spec fn row_scaled(m: Seq<real>, m2: Seq<real>, row_dim: int, col_dim: int, r: int, k: real) -> bool {
+    &&& m2.len() == m.len()
+    &&& forall|i: int, c: int| 0 <= i < row_dim && 0 <= c < col_dim
+            ==> #[trigger] cm_entry(m2, row_dim, i, c) == if i == r { cm_entry(m, row_dim, r, c) * k } else { cm_entry(m, row_dim, i, c) }
+}
+
 /* ---------- zero columns ---------- */
 
 /// Column c of m is zero.
@@ -149,6 +166,66 @@ pub proof fn lemma_row_sub_zero_cols(m: Seq<real>, m2: Seq<real>, row_dim: int, 
             assert(cm_entry(m, row_dim, p, c) == 0.0real);
             if i == j {
                 assert(cm_entry(m2, row_dim, i, c) == 0.0real - piv * 0.0real);
+            }
+        }
+    }
+}
+
+/// Scaling a row keeps zero columns.
+pub proof fn lemma_row_scale_zero_cols(m: Seq<real>, m2: Seq<real>, row_dim: int, col_dim: int, r: int, k: real)
+    requires
+        row_scaled(m, m2, row_dim, col_dim, r, k),
+    ensures
+        zero_cols_kept(m, m2, row_dim, col_dim),
+{
+    assert forall|c: int| 0 <= c < col_dim && col_zero(m, row_dim, c) implies #[trigger] col_zero(m2, row_dim, c) by {
+        assert forall|i: int| 0 <= i < row_dim implies #[trigger] cm_entry(m2, row_dim, i, c) == 0.0real by {
+            assert(cm_entry(m, row_dim, i, c) == 0.0real);
+        }
+    }
+}
+
+/// Scaling a row by a nonzero factor preserves the solution set: the residual of the row is scaled by k.
+pub proof fn lemma_row_scale_same_solutions(m: Seq<real>, m2: Seq<real>, row_dim: int, col_dim: int, r: int, k: real)
+    requires
+        col_dim >= 1,
+        0 <= r < row_dim,
+        k != 0.0real,
+        row_scaled(m, m2, row_dim, col_dim, r, k),
+    ensures
+        same_solutions(m, m2, row_dim, col_dim),
+{
+    let n = (col_dim - 1) as nat;
+    assert forall|i: int, x: Seq<real>| 0 <= i < row_dim && x.len() == col_dim - 1
+        implies #[trigger] aug_row_ok(m2, row_dim, col_dim, i, x) == aug_row_ok(m, row_dim, col_dim, i, x) by {
+        let f = |c: int| cm_entry(m, row_dim, i, c) * x[c];
+        let g = |c: int| cm_entry(m2, row_dim, i, c) * x[c];
+        let res = row_residual_r(m, row_dim, col_dim, i, x);
+        if i == r {
+            assert forall|c: int| 0 <= c < n implies #[trigger] g(c) == k * f(c) by {
+                let (u, w) = (cm_entry(m, row_dim, r, c), x[c]);
+                assert((u * k) * w == k * (u * w)) by (nonlinear_arith);
+            }
+            lemma_sum_fn_scale(f, g, k, n);
+            let (sf, b) = (sum_fn_r(f, n), cm_entry(m, row_dim, r, col_dim - 1));
+            assert(k * sf - b * k == k * (sf - b)) by (nonlinear_arith);
+            assert(k * res == 0.0real <==> res == 0.0real) by (nonlinear_arith)
+                requires k != 0.0real;
+        } else {
+            assert forall|c: int| 0 <= c < n implies #[trigger] g(c) == f(c) by {}
+            lemma_sum_fn_ext(g, f, n);
+        }
+    }
+    assert forall|x: Seq<real>| #![trigger solves(m, row_dim, col_dim, x)] x.len() == col_dim - 1
+        implies (solves(m, row_dim, col_dim, x) <==> solves(m2, row_dim, col_dim, x)) by {
+        if solves(m, row_dim, col_dim, x) {
+            assert forall|i: int| 0 <= i < row_dim implies #[trigger] aug_row_ok(m2, row_dim, col_dim, i, x) by {
+                assert(aug_row_ok(m, row_dim, col_dim, i, x));
+            }
+        }
+        if solves(m2, row_dim, col_dim, x) {
+            assert forall|i: int| 0 <= i < row_dim implies #[trigger] aug_row_ok(m, row_dim, col_dim, i, x) by {
+                assert(aug_row_ok(m2, row_dim, col_dim, i, x));
             }
         }
     }
@@ -280,12 +357,13 @@ pub open spec fn pivots_ok(pivots: Seq<int>, col_dim: int) -> bool {
     &&& forall|i: int, l: int| 0 <= i < l < pivots.len() ==> #[trigger] pivots[i] < #[trigger] pivots[l]
 }
 
-/// Echelon structure of m: row i has its pivot in column pivots[i], of magnitude at least
-/// eps, and the pivot column is exactly zero in every row below i.
+/// Echelon structure of m: row i has its pivot in column pivots[i], nonzero and of magnitude
+/// at least eps, and the pivot column is exactly zero in every row below i.
 pub open spec fn echelon_form(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real) -> bool {
     &&& pivots.len() <= row_dim
     &&& pivots_ok(pivots, col_dim)
     &&& forall|i: int| 0 <= i < pivots.len() ==> abs_r(cm_entry(m, row_dim, i, #[trigger] pivots[i])) >= eps
+    &&& forall|i: int| 0 <= i < pivots.len() ==> cm_entry(m, row_dim, i, #[trigger] pivots[i]) != 0.0real
     &&& forall|i: int, j: int| 0 <= i < pivots.len() && i < j < row_dim
             ==> #[trigger] cm_entry(m, row_dim, j, pivots[i]) == 0.0real
 }
@@ -301,9 +379,7 @@ pub proof fn lemma_echelon_swap(m: Seq<real>, m2: Seq<real>, row_dim: int, col_d
     ensures
         echelon_form(m2, row_dim, col_dim, pivots, eps),
 {
-    assert forall|i: int| 0 <= i < pivots.len() implies abs_r(cm_entry(m2, row_dim, i, #[trigger] pivots[i])) >= eps by {
-        assert(cm_entry(m2, row_dim, i, pivots[i]) == cm_entry(m, row_dim, i, pivots[i]));
-    }
+    assert forall|i: int| 0 <= i < pivots.len() implies #[trigger] cm_entry(m2, row_dim, i, pivots[i]) == cm_entry(m, row_dim, i, pivots[i]) by {}
     assert forall|i: int, j: int| 0 <= i < pivots.len() && i < j < row_dim
         implies #[trigger] cm_entry(m2, row_dim, j, pivots[i]) == 0.0real by {
         let src = if j == r1 { r2 } else if j == r2 { r1 } else { j };
@@ -321,9 +397,7 @@ pub proof fn lemma_echelon_row_sub(m: Seq<real>, m2: Seq<real>, row_dim: int, co
     ensures
         echelon_form(m2, row_dim, col_dim, pivots, eps),
 {
-    assert forall|i: int| 0 <= i < pivots.len() implies abs_r(cm_entry(m2, row_dim, i, #[trigger] pivots[i])) >= eps by {
-        assert(cm_entry(m2, row_dim, i, pivots[i]) == cm_entry(m, row_dim, i, pivots[i]));
-    }
+    assert forall|i: int| 0 <= i < pivots.len() implies #[trigger] cm_entry(m2, row_dim, i, pivots[i]) == cm_entry(m, row_dim, i, pivots[i]) by {}
     assert forall|i: int, l: int| 0 <= i < pivots.len() && i < l < row_dim
         implies #[trigger] cm_entry(m2, row_dim, l, pivots[i]) == 0.0real by {
         assert(cm_entry(m, row_dim, l, pivots[i]) == 0.0real);
@@ -333,7 +407,7 @@ pub proof fn lemma_echelon_row_sub(m: Seq<real>, m2: Seq<real>, row_dim: int, co
 }
 
 /// Appending a new pivot: column n (greater than every pivot column) has magnitude at
-/// least eps in row pivots.len() and is zero below it.
+/// least eps in row pivots.len(), is nonzero there, and is zero below it.
 pub proof fn lemma_echelon_push(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, n: int)
     requires
         pivots.len() < row_dim,
@@ -341,6 +415,7 @@ pub proof fn lemma_echelon_push(m: Seq<real>, row_dim: int, col_dim: int, pivots
         forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
         echelon_form(m, row_dim, col_dim, pivots, eps),
         abs_r(cm_entry(m, row_dim, pivots.len() as int, n)) >= eps,
+        cm_entry(m, row_dim, pivots.len() as int, n) != 0.0real,
         forall|j: int| pivots.len() < j < row_dim ==> #[trigger] cm_entry(m, row_dim, j, n) == 0.0real,
     ensures
         echelon_form(m, row_dim, col_dim, pivots.push(n), eps),
@@ -353,7 +428,8 @@ pub proof fn lemma_echelon_push(m: Seq<real>, row_dim: int, col_dim: int, pivots
         assert(p2[i] == pivots[i]);
         if l < pivots.len() { assert(p2[l] == pivots[l]); }
     }
-    assert forall|i: int| 0 <= i < p2.len() implies abs_r(cm_entry(m, row_dim, i, #[trigger] p2[i])) >= eps by {
+    assert forall|i: int| 0 <= i < p2.len() implies abs_r(cm_entry(m, row_dim, i, #[trigger] p2[i])) >= eps
+        && cm_entry(m, row_dim, i, p2[i]) != 0.0real by {
         if i < pivots.len() { assert(p2[i] == pivots[i]); }
     }
     assert forall|i: int, j: int| 0 <= i < p2.len() && i < j < row_dim
@@ -369,16 +445,6 @@ pub open spec fn pow2_r(k: nat) -> real
     decreases k,
 {
     if k == 0 { 1.0real } else { 2.0real * pow2_r((k - 1) as nat) }
-}
-
-pub proof fn lemma_pow2_pos(k: nat)
-    ensures
-        pow2_r(k) > 0.0real,
-    decreases k,
-{
-    if k > 0 {
-        lemma_pow2_pos((k - 1) as nat);
-    }
 }
 
 pub proof fn lemma_pow2_step(k: nat, e: real)
@@ -457,12 +523,12 @@ pub open spec fn skip_bound(pivots: Seq<int>, c: int, eps: real) -> real {
 }
 
 /// The tolerance-based skip rule for the columns before ncols: a column without a pivot was
-/// below eps in every remaining row when it was examined (row pivots_below(c) onwards), and
+/// at most eps in every remaining row when it was examined (row pivots_below(c) onwards), and
 /// each later elimination step, whose multipliers have magnitude at most 1 by partial
 /// pivoting, at most doubled those entries.
 pub open spec fn skipped_bounded(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, ncols: int) -> bool {
     forall|c: int, j: int| 0 <= c < ncols && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= j < row_dim
-        ==> abs_r(#[trigger] cm_entry(m, row_dim, j, c)) < skip_bound(pivots, c, eps)
+        ==> abs_r(#[trigger] cm_entry(m, row_dim, j, c)) <= skip_bound(pivots, c, eps)
 }
 
 /// Swapping two rows at or below pivots.len() preserves the skip bounds.
@@ -477,19 +543,19 @@ pub proof fn lemma_skipped_swap(m: Seq<real>, m2: Seq<real>, row_dim: int, col_d
         skipped_bounded(m2, row_dim, col_dim, pivots, eps, ncols),
 {
     assert forall|c: int, j: int| 0 <= c < ncols && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= j < row_dim
-        implies abs_r(#[trigger] cm_entry(m2, row_dim, j, c)) < skip_bound(pivots, c, eps) by {
+        implies abs_r(#[trigger] cm_entry(m2, row_dim, j, c)) <= skip_bound(pivots, c, eps) by {
         lemma_pivots_below_bounds(pivots, c);
         let src = if j == r1 { r2 } else if j == r2 { r1 } else { j };
         assert(cm_entry(m2, row_dim, j, c) == cm_entry(m, row_dim, src, c));
-        assert(abs_r(cm_entry(m, row_dim, src, c)) < skip_bound(pivots, c, eps));
+        assert(abs_r(cm_entry(m, row_dim, src, c)) <= skip_bound(pivots, c, eps));
     }
 }
 
-/// Skipping column n (all pivots are before n, every remaining entry of column n is below eps).
+/// Skipping column n (all pivots are before n, every remaining entry of column n is at most eps).
 pub proof fn lemma_skipped_skip(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, n: int)
     requires
         forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
-        forall|j: int| pivots.len() <= j < row_dim ==> abs_r(#[trigger] cm_entry(m, row_dim, j, n)) < eps,
+        forall|j: int| pivots.len() <= j < row_dim ==> abs_r(#[trigger] cm_entry(m, row_dim, j, n)) <= eps,
         skipped_bounded(m, row_dim, col_dim, pivots, eps, n),
     ensures
         skipped_bounded(m, row_dim, col_dim, pivots, eps, n + 1),
@@ -500,9 +566,9 @@ pub proof fn lemma_skipped_skip(m: Seq<real>, row_dim: int, col_dim: int, pivots
         assert(pow2_r(0) == 1.0real);
     }
     assert forall|c: int, j: int| 0 <= c < n + 1 && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= j < row_dim
-        implies abs_r(#[trigger] cm_entry(m, row_dim, j, c)) < skip_bound(pivots, c, eps) by {
+        implies abs_r(#[trigger] cm_entry(m, row_dim, j, c)) <= skip_bound(pivots, c, eps) by {
         if c < n {
-            assert(abs_r(cm_entry(m, row_dim, j, c)) < skip_bound(pivots, c, eps));
+            assert(abs_r(cm_entry(m, row_dim, j, c)) <= skip_bound(pivots, c, eps));
         }
     }
 }
@@ -511,11 +577,11 @@ pub proof fn lemma_skipped_skip(m: Seq<real>, row_dim: int, col_dim: int, pivots
 /// another bounded row: the bound doubles.
 pub proof fn lemma_abs_sub_double(a: real, b: real, piv: real, bound: real)
     requires
-        abs_r(a) < bound,
-        abs_r(b) < bound,
+        abs_r(a) <= bound,
+        abs_r(b) <= bound,
         abs_r(piv) <= 1.0real,
     ensures
-        abs_r(a - piv * b) < bound + bound,
+        abs_r(a - piv * b) <= bound + bound,
 {
     lemma_abs_sub_triangle(a, piv * b);
     lemma_abs_mul(piv, b);
@@ -524,12 +590,12 @@ pub proof fn lemma_abs_sub_double(a: real, b: real, piv: real, bound: real)
 }
 
 /// After the elimination step of pivot column n (every pivot before n), with every skipped
-/// entry below twice its bound, the bounds with the new pivot hold for the columns up to n.
+/// entry at most twice its bound, the bounds with the new pivot hold for the columns up to n.
 pub proof fn lemma_skipped_after_pivot(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, n: int)
     requires
         forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
         forall|c: int, j: int| 0 <= c < n && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= j < row_dim
-            ==> abs_r(#[trigger] cm_entry(m, row_dim, j, c)) < skip_bound(pivots, c, eps) + skip_bound(pivots, c, eps),
+            ==> abs_r(#[trigger] cm_entry(m, row_dim, j, c)) <= skip_bound(pivots, c, eps) + skip_bound(pivots, c, eps),
     ensures
         skipped_bounded(m, row_dim, col_dim, pivots.push(n), eps, n + 1),
 {
@@ -538,7 +604,7 @@ pub proof fn lemma_skipped_after_pivot(m: Seq<real>, row_dim: int, col_dim: int,
         assert(p2[pivots.len() as int] == n);
     }
     assert forall|c: int, j: int| 0 <= c < n + 1 && !is_pivot_col(p2, c) && pivots_below(p2, c) <= j < row_dim
-        implies abs_r(#[trigger] cm_entry(m, row_dim, j, c)) < skip_bound(p2, c, eps) by {
+        implies abs_r(#[trigger] cm_entry(m, row_dim, j, c)) <= skip_bound(p2, c, eps) by {
         assert(c != n);
         lemma_is_pivot_col_push(pivots, c, n);
         lemma_pivots_below_push(pivots, c, n);
@@ -546,27 +612,52 @@ pub proof fn lemma_skipped_after_pivot(m: Seq<real>, row_dim: int, col_dim: int,
         let k = (pivots.len() - pivots_below(pivots, c)) as nat;
         assert(p2.len() - pivots_below(p2, c) == k + 1);
         lemma_pow2_step(k, eps);
-        assert(abs_r(cm_entry(m, row_dim, j, c)) < skip_bound(pivots, c, eps) + skip_bound(pivots, c, eps));
+        assert(abs_r(cm_entry(m, row_dim, j, c)) <= skip_bound(pivots, c, eps) + skip_bound(pivots, c, eps));
     }
 }
 
 /// Columns never examined (the rows ran out: pivots.len() == row_dim) satisfy the bounds vacuously.
-pub proof fn lemma_skipped_extend(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, n: int)
+pub proof fn lemma_skipped_extend(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, n: int, ncols: int)
     requires
         pivots.len() == row_dim,
         forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
         skipped_bounded(m, row_dim, col_dim, pivots, eps, n),
     ensures
-        skipped_bounded(m, row_dim, col_dim, pivots, eps, col_dim),
+        skipped_bounded(m, row_dim, col_dim, pivots, eps, ncols),
 {
-    assert forall|c: int, j: int| 0 <= c < col_dim && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= j < row_dim
-        implies abs_r(#[trigger] cm_entry(m, row_dim, j, c)) < skip_bound(pivots, c, eps) by {
+    assert forall|c: int, j: int| 0 <= c < ncols && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= j < row_dim
+        implies abs_r(#[trigger] cm_entry(m, row_dim, j, c)) <= skip_bound(pivots, c, eps) by {
         if c >= n {
             lemma_pivots_below_all(pivots, c);
         } else {
-            assert(abs_r(cm_entry(m, row_dim, j, c)) < skip_bound(pivots, c, eps));
+            assert(abs_r(cm_entry(m, row_dim, j, c)) <= skip_bound(pivots, c, eps));
         }
     }
+}
+
+/* ---------- tolerance and right-hand side ---------- */
+
+/// The pivot tolerance of gauss_elim: TOL * max |entry of the coefficient part A|.
+pub open spec fn gauss_eps_r(a0: Seq<real>, row_dim: int, col_dim: int) -> real {
+    rv(TOL) * abs_max_prefix_r(a0, ((col_dim - 1) * row_dim) as nat)
+}
+
+/// Right-hand side b_i of row i.
+pub open spec fn rhs_r(m: Seq<real>, row_dim: int, col_dim: int, i: int) -> real {
+    cm_entry(m, row_dim, i, col_dim - 1)
+}
+
+/// max(0, |b_0|, ..., |b_{row_dim-1}|).
+pub open spec fn rhs_abs_max_r(m: Seq<real>, row_dim: int, col_dim: int) -> real {
+    max0_fn_r(|i: int| abs_r(rhs_r(m, row_dim, col_dim, i)), row_dim as nat)
+}
+
+/// The passed consistency test: every row from row `rank` on (the rows without a pivot) has
+/// a right-hand side that is zero or below TOL * 2^rank * bmax, with bmax = max |b_k| of the input.
+pub open spec fn rhs_consistent(m: Seq<real>, row_dim: int, col_dim: int, rank: nat, bmax: real) -> bool {
+    forall|i: int| rank <= i < row_dim
+        ==> #[trigger] rhs_r(m, row_dim, col_dim, i) == 0.0real
+            || abs_r(rhs_r(m, row_dim, col_dim, i)) < rv(TOL) * (pow2_r(rank) * bmax)
 }
 
 } // verus!
