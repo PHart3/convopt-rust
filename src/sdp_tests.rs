@@ -2,7 +2,7 @@
 
 use std::any::Any;
 
-const TOL_TEST : f64 = 1e-5;
+const TOL_TEST : f64 = 1e-8;
 
 // testing if two sdp solutions are the same
 fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<SymMatrix>>, f64)) -> bool {
