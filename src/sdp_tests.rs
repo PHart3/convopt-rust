@@ -351,7 +351,6 @@ fn run_sdp_tests(variant : &JacobiVariant) {
 	// min trace(X) + X_22
 	// s.t. trace(X) = 6, X_11 = 2, X_33 = 1, X_12 = 0, X_23 = 0
 	//      [X_11  X_13; X_13  X_33] >= I
-	// X is also an unsplit PSD variable
 	vec![sym_matrix_add(&sym_matrix_trace(3), &sym_matrix_proj(3, 1, 1))],
 	(
 	    vec![
@@ -387,7 +386,6 @@ fn run_sdp_tests(variant : &JacobiVariant) {
 	// X is 3x3
 	// min trace(X) - X_12
 	// s.t. trace(X) = 4, X_11 = 1, X_33 = 1
-	// X is an unsplit PSD variable
 	vec![sym_matrix_add(&sym_matrix_trace(3), &sym_matrix_scale(-1.0, &sym_matrix_proj(3, 0, 1)))],
 	(vec![vec![sym_matrix_trace(3), sym_matrix_proj(3, 0, 0), sym_matrix_proj(3, 2, 2)]],
 		     vec![4.0, 1.0, 1.0]),
@@ -959,7 +957,7 @@ fn run_sdp_tests(variant : &JacobiVariant) {
     // some simple matrix completion problems (via nuclear norm minimization)
     
     let sdp_test_26 = SDP::new(
-	// min ||M||_* s.t. M_11 = 1, M_12 = 1, M_21 = 1
+	// min ||M||_* s.t. M_11 = 3, M_12 = 1, M_21 = 1
 	// lifted: min 1/2(tr(W1)+tr(W2)), [W1 M; M^T W2] >= 0
 	vec![sym_matrix_scale(0.5, &sym_matrix_trace(4))],
 	(
@@ -1244,7 +1242,7 @@ fn run_sdp_tests(variant : &JacobiVariant) {
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 37: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
     result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_37, false, variant) });
-    assert!(sdp_equality_err(&sdp_test_37, &result_reg, &reference), "test 35 failed under regularization");
+    assert!(sdp_equality_err(&sdp_test_37, &result_reg, &reference), "test 37 failed under regularization");
 
     // a few simple problems for which the Slater conditions may fail
 
@@ -1281,7 +1279,7 @@ fn run_sdp_tests(variant : &JacobiVariant) {
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 39: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
     result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_39, false, variant) });
-    assert!(sdp_equality_err(&sdp_test_39, &result_reg, &reference), "test 35 failed under regularization");
+    assert!(sdp_equality_err(&sdp_test_39, &result_reg, &reference), "test 39 failed under regularization");
 
     let sdp_test_40 = SDP::new(
 	// X is 2x2
