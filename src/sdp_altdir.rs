@@ -84,7 +84,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 		let solved_pre = &solved[..c_len];
 		let resid_top = euclid_distance(&sym_mat_act(&gram_small, solved_pre), &inverse_y_old);
 		let resid_bottom = frob_norm_sym(&gram_small, c_len) * euclid_norm(solved_pre) + euclid_norm(&inverse_y_old);
-		if !(resid_top / resid_bottom < 1e-9) {
+		if !(resid_bottom == 0.0 && resid_top == 0.0) && !(resid_top / resid_bottom < 1e-9) {
 		    panic!("regularized Gram solve is not an accurate solution to original system");
 		}
 	    };

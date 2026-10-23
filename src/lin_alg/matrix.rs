@@ -116,12 +116,16 @@ pub fn matrix_add_diff(mat1: &Matrix, mat2: &Matrix, mat3: &Matrix) -> Matrix {
 }
 
 // Gaussian elimination via partial pivoting
-// also computes rank and consistency of given augmented matrix
+// also computes numerical coefficient rank and consistency of given augmented matrix
 pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (&mut Matrix, usize, bool) {
-    let (mut row_search, mut coeff_rank, mut pivot_row);
-    (row_search, coeff_rank) = (0, 0);
-    let scale = mat.iter().map(|x| x.abs()).fold(0.0, f64::max);
-    for n in 0..col_dim {
+    let (mut row_search, mut pivot_row);
+    row_search = 0;
+    let rhs_start = col_dim.saturating_sub(1) * row_dim;
+    // Keep a large RHS from suppressing coefficient pivots. RHS scales
+    // follow row operations rather than using one global input scale.
+    let coeff_scale = mat[..rhs_start].iter().map(|x| x.abs()).fold(0.0, f64::max);
+    let mut rhs_scales: Vector = mat[rhs_start..].iter().map(|x| x.abs()).collect();
+    for n in 0..col_dim.saturating_sub(1) {
         if row_search >= row_dim {
             break;
         }
@@ -131,10 +135,12 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (&mut Mat
                 pivot_row = j;
             }
         }
-        if mat[n * row_dim + pivot_row].abs() < TOL * scale {
+        let pivot_abs = mat[n * row_dim + pivot_row].abs();
+        if pivot_abs == 0.0 || pivot_abs < TOL * coeff_scale {
             continue;
         }
         if pivot_row != row_search {
+            rhs_scales.swap(pivot_row, row_search);
             for m3 in 0..col_dim {
                 mat.swap(m3 * row_dim + row_search, m3 * row_dim + pivot_row);
             }
@@ -142,16 +148,18 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (&mut Mat
         let denom = mat[n * row_dim + row_search];
         for j in row_search + 1..row_dim {
             let piv = mat[n * row_dim + j] / denom;
+            rhs_scales[j] += piv.abs() * rhs_scales[row_search];
             for m in 0..col_dim {
                 mat[m * row_dim + j] -= piv * mat[m * row_dim + row_search];
             }
         }
         row_search += 1;
-        if n < col_dim - 1 {
-            coeff_rank += 1;
-        }
     }
-    (mat, row_search, row_search == coeff_rank)
+    let solvable = (row_search..row_dim).all(|i| {
+        let rhs = mat[rhs_start + i].abs();
+        rhs == 0.0 || (rhs_scales[i].is_finite() && rhs < TOL * rhs_scales[i])
+    });
+    (mat, row_search, solvable)
 }
 
 // column-major lower triangular matrix stored as a flat vector

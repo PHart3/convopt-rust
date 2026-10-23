@@ -233,17 +233,38 @@ pub fn mat_sym_diagonal_mult_sym(sym_dim : usize, mat : &SymMatrix, start : usiz
 }
 
 // removes redundant constraints from an augmented matrix [A | b] where rows of A represent symmetric matrices
+// normalizes each augmented row by Frobenius norm of the corresponding symmetric matrix before Gaussian elimination
 // also preconditions resulting constraint matrix by normalizing rows
 use std::f64::consts::SQRT_2;
 pub fn linear_remove_redundant_sym(mat : &mut Matrix, dim : usize) -> Matrix {
     let col_dim = (dim * (dim + 1)) / 2 + 1;
     let row_dim = mat.len() / col_dim;
+    let (mut start, mut scale) : (usize, f64);
+    for i in 0..row_dim {
+	scale = 0.0;
+	scale = scale.hypot(mat[i]);
+	start = 1;
+	for k in 1..dim {
+	    let diag = (k * k + 3 * k) / 2;
+	    for col in start..diag {
+		scale = scale.hypot(mat[col * row_dim + i] * SQRT_2);
+	    }
+	    scale = scale.hypot(mat[diag * row_dim + i]);
+	    start = diag + 1;
+	}
+	assert!(scale.is_finite(), "linear_remove_redundant_sym: row has non-finite packed norm");
+	if scale == 0.0 {
+	    continue;
+	}
+	for j in 0..col_dim {
+	    mat[j * row_dim + i] /= scale;
+	}    
+    }
     let (echelon, rank, solvable) = gauss_elim(mat, col_dim, row_dim);
     if !solvable {
         panic!("linear_remove_redundant_sym: your system of constraints is inconsistent");
     }
     let mut result : Matrix = vec![0.0; col_dim * rank];
-    let (mut start, mut scale) : (usize, f64);
     for i in 0..rank {
 	scale = 0.0;
 	scale = scale.hypot(echelon[i]);
