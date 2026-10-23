@@ -51,7 +51,7 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 		for (sm1, maps) in sol1.0.iter().zip(maps_by_var.iter()) {
                     lhs += dot_prod(&maps[j].concat(), sm1);
 		}
-		if (lhs - rhs[j]).abs() > 1e-6_f64.max(1e-6 * rhs[j].abs()) {
+		if (lhs - rhs[j]).abs() > TOL_TEST.max(TOL_TEST * rhs[j].abs()) {
 		    println!("linear constraint {} is not satisfied", j);
                     return false;
 		}
