@@ -124,7 +124,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (&mut Mat
     // Keep a large RHS from suppressing coefficient pivots. RHS scales
     // follow row operations rather than using one global input scale.
     let coeff_scale = mat[..rhs_start].iter().map(|x| x.abs()).fold(0.0, f64::max);
-    let mut rhs_scales: Vec<f64> = mat[rhs_start..].iter().map(|x| x.abs()).collect();
+    let mut rhs_scales: Vector = mat[rhs_start..].iter().map(|x| x.abs()).collect();
     for n in 0..col_dim.saturating_sub(1) {
         if row_search >= row_dim {
             break;
