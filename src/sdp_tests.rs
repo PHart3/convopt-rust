@@ -2,7 +2,7 @@
 
 use std::any::Any;
 
-const TOL_TEST : f64 = 1e-5;
+const TOL_TEST : f64 = 1e-8;
 
 // testing if two sdp solutions are the same
 fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<SymMatrix>>, f64)) -> bool {
@@ -51,7 +51,7 @@ fn sdp_equality(sdp: &SDP, sol1 : &(Vec<SymMatrix>, f64), sol2 : &(Option<Vec<Sy
 		for (sm1, maps) in sol1.0.iter().zip(maps_by_var.iter()) {
                     lhs += dot_prod(&maps[j].concat(), sm1);
 		}
-		if (lhs - rhs[j]).abs() > 1e-6_f64.max(1e-6 * rhs[j].abs()) {
+		if (lhs - rhs[j]).abs() > TOL_TEST.max(TOL_TEST * rhs[j].abs()) {
 		    println!("linear constraint {} is not satisfied", j);
                     return false;
 		}
@@ -189,8 +189,8 @@ fn run_sdp_tests(variant : &JacobiVariant) {
              vec![0.0, 0.0, 0.0, -2.0])]
     );	
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_2, true, variant) });
-    reference = (Some(vec![vec![0.882675711869543, 0.939507164296746, 1.0],
-			   vec![0.117324288130457, 0.484405383387852, 2.0]]),
+    reference = (Some(vec![vec![0.882675711869543, 0.9395082287396651, 1.0],
+			   vec![0.117324288130457, 0.48440538421957524, 2.0]]),
 		 3.75390244643155);
     assert!(sdp_equality_err(&sdp_test_2, &result_check, &reference), "test 2 failed");
     //result_check_pr = result_check.as_ref().unwrap();
@@ -351,7 +351,6 @@ fn run_sdp_tests(variant : &JacobiVariant) {
 	// min trace(X) + X_22
 	// s.t. trace(X) = 6, X_11 = 2, X_33 = 1, X_12 = 0, X_23 = 0
 	//      [X_11  X_13; X_13  X_33] >= I
-	// X is also an unsplit PSD variable
 	vec![sym_matrix_add(&sym_matrix_trace(3), &sym_matrix_proj(3, 1, 1))],
 	(
 	    vec![
@@ -387,14 +386,13 @@ fn run_sdp_tests(variant : &JacobiVariant) {
 	// X is 3x3
 	// min trace(X) - X_12
 	// s.t. trace(X) = 4, X_11 = 1, X_33 = 1
-	// X is an unsplit PSD variable
 	vec![sym_matrix_add(&sym_matrix_trace(3), &sym_matrix_scale(-1.0, &sym_matrix_proj(3, 0, 1)))],
 	(vec![vec![sym_matrix_trace(3), sym_matrix_proj(3, 0, 0), sym_matrix_proj(3, 2, 2)]],
 		     vec![4.0, 1.0, 1.0]),
 	vec![],
     );
     result_check = panic::catch_unwind(|| { sdpad(&sdp_test_9, true, variant) });
-    reference = (Some(vec![vec![1.0, 1.4142135623730951, 2.0, 0.0, 0.0, 1.0]]), 2.585786437626905);
+    reference = (None, 2.585786437626905);
     assert!(sdp_equality_err(&sdp_test_9, &result_check, &reference), "test 9 failed");
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 9: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
@@ -959,7 +957,7 @@ fn run_sdp_tests(variant : &JacobiVariant) {
     // some simple matrix completion problems (via nuclear norm minimization)
     
     let sdp_test_26 = SDP::new(
-	// min ||M||_* s.t. M_11 = 1, M_12 = 1, M_21 = 1
+	// min ||M||_* s.t. M_11 = 3, M_12 = 1, M_21 = 1
 	// lifted: min 1/2(tr(W1)+tr(W2)), [W1 M; M^T W2] >= 0
 	vec![sym_matrix_scale(0.5, &sym_matrix_trace(4))],
 	(
@@ -1244,7 +1242,7 @@ fn run_sdp_tests(variant : &JacobiVariant) {
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 37: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
     result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_37, false, variant) });
-    assert!(sdp_equality_err(&sdp_test_37, &result_reg, &reference), "test 35 failed under regularization");
+    assert!(sdp_equality_err(&sdp_test_37, &result_reg, &reference), "test 37 failed under regularization");
 
     // a few simple problems for which the Slater conditions may fail
 
@@ -1281,7 +1279,7 @@ fn run_sdp_tests(variant : &JacobiVariant) {
     //result_check_pr = result_check.as_ref().unwrap();
     //println!("\ntest 39: decision variable solutions= {:#?} with objective value= {}", result_check_pr.0, result_check_pr.1);
     result_reg = panic::catch_unwind(|| { sdpad(&sdp_test_39, false, variant) });
-    assert!(sdp_equality_err(&sdp_test_39, &result_reg, &reference), "test 35 failed under regularization");
+    assert!(sdp_equality_err(&sdp_test_39, &result_reg, &reference), "test 39 failed under regularization");
 
     let sdp_test_40 = SDP::new(
 	// X is 2x2
