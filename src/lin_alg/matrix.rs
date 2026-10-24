@@ -444,8 +444,8 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         assert(nc * rd >= 0);
     }
     let rhs_start = col_dim.saturating_sub(1) * row_dim;
-    // Keep a large RHS from suppressing coefficient pivots. RHS scales
-    // follow row operations rather than using one global input scale.
+    // Coefficient pivots are tested against the coefficient scale only, so a large RHS
+    // cannot suppress them; each row's RHS scale follows its row operations.
     // coeff_scale = max |entry of A| of the input
     let mut coeff_scale: f64 = 0.0;
     for t in 0..rhs_start

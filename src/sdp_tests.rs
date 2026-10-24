@@ -1301,8 +1301,7 @@ fn run_sdp_tests(variant : &JacobiVariant) {
 
 // The cached Jacobi solver on a matrix whose first rotation makes the rotated entry of column 2
 // exceed the previous maximal off-diagonal magnitude while the pivot column 4 lies beyond
-// column 2 (the cache update of the original code then read a wrong packed index and later
-// called the rotation with the pivot indices in the wrong order).
+// column 2.
 #[test]
 fn test_jacobi_cach_cache_update() {
     use crate::lin_alg::jacobi::jacobi_eigen_cach;

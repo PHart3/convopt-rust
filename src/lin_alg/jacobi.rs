@@ -303,8 +303,8 @@ pub open spec fn cache_ok(b: Seq<real>, maxima: Seq<usize>, dim: int) -> bool {
 }
 
 /// After a rotation at (j, k) with old pivot magnitude big, a column m outside {j, k} keeps its
-/// entries in the unrotated rows, and those are bounded by the old cached entry (i, m) and by big.
-proof fn lemma_col_unrotated(prev: Seq<real>, cur: Seq<real>, dim: int, j: int, k: int, m: int, i: int, big: real)
+/// entries outside rows j and k, and those are bounded by the old cached entry (i, m) and by big.
+proof fn lemma_col_unchanged(prev: Seq<real>, cur: Seq<real>, dim: int, j: int, k: int, m: int, i: int, big: real)
     requires
         offdiag_max_at(prev, dim, j, k),
         big == abs_r(sym_entry(prev, j, k)),
@@ -610,17 +610,17 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
                         lemma_pk_idx_bound(ki, mi, n);
                     }
                     if m != j && m != k {
-                        lemma_col_unrotated(prev, cur, n, ji, ki, mi, ii, rv(biggest));
+                        lemma_col_unchanged(prev, cur, n, ji, ki, mi, ii, rv(biggest));
                     }
                 }
                 let col = (m * (m + 1)) / 2;
                 let ind = col + i;
                 if m == k || m == j {
-                    // the whole column was rotated
+                    // every entry of the column changed: rescan
                     maxima[m - 1] = index_max_in_col(vals, m);
                 } else if (i != k && k < m) && (i != j && j < m) {
-                    // the cached entry is unrotated and still dominates the other unrotated
-                    // entries; the rotated rows j and k are the only other candidates
+                    // the cached entry is unchanged and still dominates the other unchanged entries:
+                    // only rows j and k can exceed it
                     let (val_j, val_k) = (vals[col + j].abs(), vals[col + k].abs());
                     let val_ind = vals[ind].abs();
                     if val_j > val_ind {
@@ -642,11 +642,11 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
                         }
                     }
                 } else if vals[ind].abs() < biggest {
-                    // the cached entry was rotated and shrank below the old maximum: rescan
+                    // the cached entry is below the old pivot magnitude: rescan
                     maxima[m - 1] = index_max_in_col(vals, m);
                 } else if k < m {
-                    // j < k < m and the cached entry (in row j or k) is at least the old maximum,
-                    // which bounds every unrotated entry: the maximum is in row j or k
+                    // j < k < m and the cached entry (in row j or k) is at least the old pivot magnitude,
+                    // which bounds every unchanged entry: the maximum is in row j or k
                     if vals[col + j].abs() > vals[col + k].abs() {
                         maxima[m - 1] = j;
                     } else {
@@ -662,8 +662,8 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
                         }
                     }
                 } else if j < m && vals[col + j].abs() > vals[ind].abs() {
-                    // j < m < k: only row j of this column was rotated, and it now exceeds the
-                    // cached entry, which is at least the old maximum
+                    // j < m < k: row j, the only changed entry, exceeds the cached entry, which is at
+                    // least the old pivot magnitude
                     maxima[m - 1] = j;
                     proof {
                         assert forall|r: int| 0 <= r < mi
@@ -674,8 +674,8 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
                         }
                     }
                 } else {
-                    // either j < m < k and the cached entry (at least the old maximum) still
-                    // dominates the rotated row j, or m < j < k and the column is unrotated
+                    // either j < m < k and the cached entry (at least the old pivot magnitude) still
+                    // dominates row j, or m < j < k and the column is unchanged
                     proof {
                         assert forall|r: int| 0 <= r < mi
                             implies abs_r(#[trigger] sym_entry(cur, r, mi)) <= abs_r(sym_entry(cur, ii, mi)) by {
