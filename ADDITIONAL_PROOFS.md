@@ -1,8 +1,9 @@
-# Additional proofs: four post-hoc statements
+# Additional proofs: five post-hoc statements
 
-Four statements proved in Verus on top of the verified solver (layer L21 of
+Five statements proved in Verus on top of the verified solver (layers L21 and L22 of
 `VERIFICATION_PROGRESS.md`). They add no trusted items and reuse existing lemmas.
 Statements 2–4 live in `src/feas_spec.rs`; its header comment gives the overview.
+Statement 5 lives in `src/lin_alg/resid_spec.rs` (with `src/lin_alg/norm_spec.rs`).
 
 ## 1. Gap identity
 
@@ -36,9 +37,9 @@ unreduced system `aug` of `std_rows_ok`, vanish on the zero pattern, and satisfy
 Without `check`, `A(Z) = b` for the setup's operator already means `Z` solves `aug`. Without
 LMIs, `X = Z`.
 
-With `check`, `A(Z) = b` only says that `Z` solves the kept rows of the reduced system; nothing
-is proved about the rows the reduction dropped, so the theorem is stated for the unreduced
-system.
+With `check`, `A(Z) = b` only says that `Z` solves the kept rows of the reduced system; the
+dropped rows are controlled only by the residual bound of statement 5, so the theorem is stated
+for the unreduced system.
 
 **Proved by** `lemma_standard_feasible_sound` (unreduced system), `lemma_action_feasible_sound`
 (`A(Z) = b`, no `check`), and `lemma_action_feasible_sound_single` (no LMIs).
@@ -79,8 +80,9 @@ Without LMIs, `Z = X`.
 **Not in Verus.** Without `check`, statements 2 and 3 together imply that the two problems
 have the same optimal value; this is not proved in Verus. With `check`, neither the
 feasibility of the user's problem nor the equality of optimal values is certified after the
-tolerance-based row removal: the lifted `Z` solves the unreduced rows, but no statement
-relates them to the reduced system the solver works with.
+tolerance-based row removal: the lifted `Z` solves the unreduced rows, but no retained
+statement bounds the residual of the reduced system by that of the unreduced one (statement 5
+bounds the opposite direction).
 
 ## 4. Approximate soundness
 
@@ -97,9 +99,10 @@ where `B_i = block_view(Z, block_off(bd, i))`. Hence:
    at the corresponding row, `Z_rc = res[c_len + q]` at listed position `q`, and
    `<C_F, Z>_F = sum_j C_j(X_j)`.
 2. With `check`, `res` measures the reduced system only: its dense entries are the residuals
-   of the kept, normalized echelon rows, and no bound on the residuals of the unreduced rows
-   is proved. The zero-pattern entries of `Z` are still entries of `res`
-   (`lemma_action_residual_entries`) and `<C_F, Z>_F = sum_j C_j(X_j)` (`lemma_objective_value`).
+   of the kept, normalized echelon rows; the residuals of the unreduced dense rows are bounded
+   only through statement 5, with a data-dependent constant. The zero-pattern entries of `Z`
+   are still entries of `res` (`lemma_action_residual_entries`) and
+   `<C_F, Z>_F = sum_j C_j(X_j)` (`lemma_objective_value`).
 3. A successful PSD check (`psd_blocks_ok`) gives `B_i >= -eps_i I` with the implementation's
    tolerance (`lemma_lmi_blocks_checked`), and `|res_l| <= pinf * (1 + ||b||)`
    (`lemma_residual_entry_pinf`).
@@ -107,3 +110,50 @@ where `B_i = block_view(Z, block_off(bd, i))`. Hence:
 **Ingredients.** The row identities of `std_rows_ok` give the residual identities above for
 every `Z`; `lemma_result_aug_residual` identifies the residuals of the returned rows with the
 entries of `res`.
+
+## 5. Relative residual bound of the constraint reduction
+
+**Statement.** Let `[A | b]` be the dense rows the reduction receives (`rd` rows, `n` columns of
+`A`), and `[A_K | b_K]` the returned system (`rank` rows, `q = rd - rank` rows dropped). Let `D`
+be the diagonal matrix of the first-stage divisors (the Frobenius norms of the rows, 1 for rows
+of norm zero), `T = [T_K | T_D]` the row transformation of the elimination (normalized input
+`= T *` echelon form), split at the kept rows, `S` the diagonal matrix of the second-stage
+divisors of the kept rows and `H_D` the dropped echelon rows. With
+
+    U = D T_K S,        [E | f] = D T_D H_D,
+
+the input is recovered as `[A | b] = U [A_K | b_K] + [E | f]`. Let `alpha` and `beta` be the
+largest magnitudes of the normalized coefficients and right-hand sides (0 if empty),
+`L = ||D T_D||_F`, `tau = TOL`, and
+
+    e_A = 2^rank sqrt(q n) alpha L,    e_b = 2^rank sqrt(q) beta L,
+    C   = max(e_A / ||A||_F, e_b / ||b||)   (a zero denominator has a zero numerator; it counts 0),
+    d(z) = ||A||_F ||z|| + ||b||.
+
+Then `||E||_F <= tau e_A`, `||f|| <= tau e_b`, and for every `z` with `d(z) > 0`
+
+    ||A z - b|| / d(z) <= C tau + ||U||_F ||A_K z - b_K|| / d(z).
+
+If `d(z) = 0` then `A z - b = 0`; if `q = 0` then `C = 0`. `U` and `C` depend on the data only,
+not on `z`; nothing is claimed about the size of `C`.
+
+**Proved by** `lemma_relative_residual_bound` (explicit pivots and transformation),
+`lemma_reduction_residual_bound` (for `reduced_system`, witnesses `red_pivots`, `red_transform`)
+and `lemma_reduced_from_residual_bound` in `sdpad_spec.rs` (for the dense rows of a setup with
+`check`, `reduced_from`, witness `red_echelon`); the zero cases are `lemma_residual_zero_scale`
+and `lemma_red_const_no_drop`.
+
+**Ingredients.**
+- The ghost transformation `T` tracked through `gauss_elim` (`row_comb`, `lemma_row_comb_swap`,
+  `lemma_row_comb_sub` in `gauss_spec.rs`), exported by `reduced_with`.
+- The dropped rows are small (`lemma_dropped_row_bounded`): zero in the pivot columns, at most
+  `2^rank * eps` in the other coefficient columns (`skipped_bounded`), and at most
+  `TOL * 2^rank * beta` in the right-hand side (`rhs_consistent`, which records the per-row
+  scales of the consistency test).
+- The recovery identity `lemma_recovery_identity` (both normalization stages), the residual
+  decomposition `A z - b = U (A_K z - b_K) + E z - f` (`lemma_residual_decomp`), and the bounds
+  `lemma_err_bounds` and `lemma_red_const_dominates`.
+- Rectangular norms (`norm_spec.rs`): Cauchy-Schwarz (`lemma_cauchy_schwarz`), the triangle
+  inequality (`lemma_norm_triangle`), `||X z|| <= ||X||_F ||z||` (`lemma_mat_vec_rc_bound`),
+  `||X Y||_F <= ||X||_F ||Y||_F` (`lemma_mmul_frob_rc`) and the entry bounds
+  (`lemma_frob_rc_entry_bound`, `lemma_norm_entry_bound`).

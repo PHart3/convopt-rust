@@ -16,8 +16,9 @@
 // `reduced_system`: the kept rows are the normalized echelon rows of an
 // elimination of the normalized input satisfying the contract of `gauss_elim`
 // (solution set, zero columns, echelon structure, tolerance-based pivot, skip
-// and consistency rules).  The dropped rows are only known to pass the
-// consistency test.
+// and consistency rules, row transformation).  The dropped rows are only
+// known to pass the consistency test; resid_spec.rs bounds the residual
+// A z - b of the input system by that of the reduced system.
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -31,7 +32,7 @@ use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::sym_spec::*;
 #[cfg(verus_keep_ghost)]
-use crate::lin_alg::mat_spec::{frob_r, frob_norm_r};
+use crate::lin_alg::mat_spec::{frob_r, frob_norm_r, MatF};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::constr_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -206,6 +207,7 @@ pub proof fn lemma_row_scale_pos(e: Seq<real>, row_dim: int, dim: int, pivots: S
 /// (of the normalized input) with pivot sequence pivots: res row i is echelon row i divided by
 /// its Frobenius norm, the zero columns of a0 are zero columns of e, and the rows of e without a
 /// pivot pass the consistency test. The rank is positive (the input of the reduction is nonzero).
+/// The normalized input is a row combination T of e (the row operations of the elimination).
 pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>) -> bool {
     let cd = red_col_dim(dim);
     let rd = red_row_dim(a0, dim);
@@ -220,6 +222,7 @@ pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
     &&& skipped_bounded(e, rd, cd, pivots, eps, cd - 1)
     &&& forall|l: int| 0 <= l < rank ==> #[trigger] pivots[l] < cd - 1
     &&& rhs_consistent(e, rd, cd, rank as nat, rhs_abs_max_r(normalized_r(a0, dim), rd, cd))
+    &&& exists|t: MatF| #[trigger] row_comb(normalized_r(a0, dim), e, rd, cd, t)
     &&& forall|i: int| 0 <= i < rank ==> #[trigger] row_scale_r(e, rd, dim, i) > 0.0real
     &&& forall|i: int, j: int| 0 <= i < rank && 0 <= j < cd
             ==> #[trigger] cm_entry(res, rank, i, j) == cm_entry(e, rd, i, j) / row_scale_r(e, rd, dim, i)

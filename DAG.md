@@ -69,12 +69,12 @@ deps: L10, L11, L04 |
 targets: poseigendecomp, negeigendecomp |
 status: done
 
-L13 | Gaussian elimination: echelon invariants with pivots in the coefficient columns, partial pivoting, the tolerance-based skip rule (coefficient-only scale), solution set preserved (row swaps, subtractions, nonzero scalings), zero columns kept, rank, and the consistency test (`TOL * 2^rank * max |b_k|` bound on the rows without a pivot) |
+L13 | Gaussian elimination: echelon invariants with pivots in the coefficient columns, partial pivoting, the tolerance-based skip rule (coefficient-only scale), solution set preserved (row swaps, subtractions, nonzero scalings), zero columns kept, rank, the consistency test (`TOL * 2^rank * max |b_k|` bound on the rows without a pivot), and the ghost row transformation `T` with input = `T` * output (`row_comb`) |
 deps: L02 |
 targets: gauss_elim |
 status: done
 
-L14 | Constraint reduction: input rows divided by their Frobenius norms (`normalized_r`), then the first `rank` echelon rows of `gauss_elim`, each divided by its Frobenius norm, which is positive because the row holds a nonzero pivot; the echelon form carries the solution set, zero columns and pivot/skip record and consistency test (`reduced_with`); inconsistency aborts |
+L14 | Constraint reduction: input rows divided by their Frobenius norms (`normalized_r`), then the first `rank` echelon rows of `gauss_elim`, each divided by its Frobenius norm, which is positive because the row holds a nonzero pivot; the echelon form carries the solution set, zero columns, pivot/skip record, consistency test and row transformation (`reduced_with`); inconsistency aborts |
 deps: L13 |
 targets: linear_remove_redundant_sym |
 status: done
@@ -112,4 +112,9 @@ status: done
 L21 | Post-hoc proofs (`ADDITIONAL_PROOFS.md`): the gap identity `<C_F, Z>_F - b . y = <Z, S>_F + <Z, C_F - A*(y) - S>_F + y . (A(Z) - b)`; soundness (a feasible standard-form point gives feasible user variables) and, without reduction, its converse (feasible user variables lift to a PSD block-diagonal point with `A(Z) = b`); approximate soundness without reduction (the user-level residuals at the variables read from any `Z` are entries of `A(Z) - b`); block-structure lemmas for the semidefinite order |
 deps: L20, L13, L14 |
 targets: (spec/proof only: lemma_gap_identity, lemma_gap_complementarity, lemma_standard_feasible_sound, lemma_action_feasible_sound, lemma_user_feasible_lifts, lemma_user_feasible_lifts_single, lemma_user_residuals, lemma_approx_sound_unreduced, lemma_psd_shifted_block, lemma_psd_shifted_two_blocks, lemma_psd_shifted_abs_sum) |
+status: done
+
+L22 | Relative residual bound of the reduction (`RELATIVE_RESIDUAL_BOUND.md`): the input is recovered as `[A | b] = U [A_K | b_K] + [E | f]` with `U = D T_K S` and `[E | f] = D T_D H_D`; `||E||_F <= TOL e_A` and `||f|| <= TOL e_b` from the skip bounds and the consistency test; for `d(z) = ||A||_F ||z|| + ||b|| > 0`, `||A z - b|| / d(z) <= C TOL + ||U||_F ||A_K z - b_K|| / d(z)` with `C = max(e_A / ||A||_F, e_b / ||b||)`; rectangular norms with Cauchy-Schwarz, the triangle inequality and the matrix-vector and product bounds |
+deps: L13, L14 |
+targets: (spec/proof only: row_comb, lemma_dropped_row_bounded, lemma_cauchy_schwarz, lemma_mat_vec_rc_bound, lemma_mmul_frob_rc, lemma_recovery_identity, lemma_err_bounds, lemma_relative_residual_bound, lemma_reduction_residual_bound, lemma_reduced_from_residual_bound) |
 status: done

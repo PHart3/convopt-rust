@@ -639,7 +639,7 @@ fn maps_sum(maps: &Vec<MatrixSym>, symm_dims: &Vec<usize>, block_size_sum: usize
                 requires rows == 0 || pk_len(dd) == p;
             lemma_mod_multiples_basic(rows as int, p);
             lemma_div_multiples_vanish(rows as int, p);
-            assert(rows * p == p * rows);
+            assert(rows * p == p * rows) by (nonlinear_arith);
             assert(pk_len(sd) * rows == rows * pk_len(sd)) by (nonlinear_arith);
         }
         let map_flatten = matrixsym_flatten(map);
@@ -1100,7 +1100,8 @@ fn zero_positions(block_dims: &Vec<usize>, symm_dims: &Vec<usize>, total_dim: us
         }
         let ghost len0 = zeros@.len() as int;
         proof {
-            assert(((start + k) as int - (s0 + ki)) * ki == 0);
+            assert(((start + k) as int - (s0 + ki)) * ki == 0) by (nonlinear_arith)
+                requires (start + k) as int == s0 + ki;
         }
         for c in start + k..total_dim
             invariant

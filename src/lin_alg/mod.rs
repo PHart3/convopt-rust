@@ -9,6 +9,8 @@ pub mod eigen_spec;
 pub mod spectral_spec;
 pub mod gauss_spec;
 pub mod reduce_spec;
+pub mod norm_spec;
+pub mod resid_spec;
 pub mod matrix;
 pub(crate) mod comparison;
 pub mod sym_matrix;

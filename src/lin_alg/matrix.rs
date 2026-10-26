@@ -22,6 +22,8 @@ use crate::lin_alg::sym_spec::{max0_fn_r, lemma_max0_fn_bound};
 use vstd::arithmetic::div_mod::{lemma_fundamental_div_mod, lemma_mod_bound};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::gauss_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::mat_spec::{MatF, mident};
 
 // column vector
 pub type Vector = Vec<f64>;
@@ -413,7 +415,7 @@ verus! {
 // with pivots in the columns of A, strictly increasing, nonzero and of magnitude at least TOL * max |entry of A|
 // of the input, and exact zeros below every pivot; the rank is the number of pivots; a consistent system
 // has right-hand sides below TOL * 2^rank * max |b_k| of the input in the rows without a pivot, and is
-// zero if its rank is 0)
+// zero if its rank is 0; the input is a row combination T of the result)
 pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&mut Matrix, usize, bool))
     requires
         col_dim >= 1,
@@ -432,6 +434,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         res.2 ==> rhs_consistent(rvs(res.0@), row_dim as int, col_dim as int, res.1 as nat, rhs_abs_max_r(rvs(old(mat)@), row_dim as int, col_dim as int)),
         abs_max_prefix_r(rvs(old(mat)@), ((col_dim - 1) * row_dim) as nat) > 0.0real ==> res.1 >= 1,
         res.1 == 0 && res.2 ==> forall|t: int| 0 <= t < old(mat)@.len() ==> rv(#[trigger] old(mat)@[t]) == 0.0real,
+        exists|t: MatF| #[trigger] row_comb(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int, t),
 {
     let ghost a0 = rvs(old(mat)@);
     let ghost (rd, cd) = (row_dim as int, col_dim as int);
@@ -492,9 +495,12 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         }
     }
     let ghost mut pivots: Seq<int> = Seq::empty();
+    // the row operations performed so far, as the transformation a0 = tr * mat
+    let ghost mut tr: MatF = mident();
     proof {
         lemma_same_solutions_refl(a0, rd, cd);
         lemma_zero_cols_refl(a0, rd, cd);
+        lemma_row_comb_refl(a0, rd, cd);
         lemma_max0_fn_bound(|u: int| abs_r(a0[u]), rhs_start as nat);
         assert(rv(TOL) == 0.0000000001real);
     }
@@ -526,6 +532,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             skipped_bounded(rvs(mat@), rd, cd, pivots, eps, n as int),
             same_solutions(a0, rvs(mat@), rd, cd),
             zero_cols_kept(a0, rvs(mat@), rd, cd),
+            row_comb(a0, rvs(mat@), rd, cd, tr),
         decreases col_dim - n,
     {
         proof {
@@ -621,6 +628,8 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     lemma_zero_cols_trans(a0, before, cur, rd, cd);
                     lemma_echelon_swap(before, cur, rd, cd, pivots, eps, rs, pr);
                     lemma_skipped_swap(before, cur, rd, cd, pivots, eps, n as int, rs, pr);
+                    lemma_row_comb_swap(a0, before, cur, rd, cd, tr, rs, pr);
+                    tr = swap_cols(tr, rs, pr);
                     assert forall|k: int| 0 <= k < rd implies #[trigger] rhs_scales@[k]
                         == s_before[if k == rs { pr } else if k == pr { rs } else { k }] by {}
                 }
@@ -675,6 +684,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     echelon_form(rvs(mat@), rd, cd, pivots, eps),
                     same_solutions(a0, rvs(mat@), rd, cd),
                     zero_cols_kept(a0, rvs(mat@), rd, cd),
+                    row_comb(a0, rvs(mat@), rd, cd, tr),
                     forall|i: int| 0 <= i < pivots.len() ==> #[trigger] pivots[i] < n,
                     forall|c: int, i: int| 0 <= c < n && !is_pivot_col(pivots, c) && pivots_below(pivots, c) <= i < rd
                         ==> abs_r(#[trigger] cm_entry(rvs(mat@), rd, i, c))
@@ -732,6 +742,8 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     lemma_row_sub_zero_cols(before, cur, rd, cd, ji, rs, rv(piv));
                     lemma_zero_cols_trans(a0, before, cur, rd, cd);
                     lemma_echelon_row_sub(before, cur, rd, cd, pivots, eps, ji, rs, rv(piv));
+                    lemma_row_comb_sub(a0, before, cur, rd, cd, tr, ji, rs, rv(piv));
+                    tr = add_col(tr, rs, ji, rv(piv));
                     // the entry (j, n) is annihilated: A_jn - (A_jn / A_rn) A_rn = 0
                     let (num, dn) = (cm_entry(before, rd, ji, ni), rv(denom));
                     assert(num == cm_entry(swapped, rd, ji, ni));
@@ -860,8 +872,9 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
     }
     let res = (mat, row_search, solvable);
     proof {
-        // the pivot sequence witnesses the echelon form
+        // the pivot sequence witnesses the echelon form and the transformation the row combination
         assert(echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rvs(old(mat)@), row_dim as int, col_dim as int)));
+        assert(row_comb(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int, tr));
         // a passed test: |b_i| < TOL * s_i <= TOL * 2^rank * bmax
         if solvable {
             assert forall|k: int| row_search <= k < rd implies

@@ -506,6 +506,27 @@ pub proof fn lemma_sum_fn_window(f: spec_fn(int) -> real, n: nat, start: int, k:
     lemma_sum_fn_zero(start as nat);
 }
 
+/// Exchanging two summation indices does not change the sum.
+pub proof fn lemma_sum_fn_transpose(f: spec_fn(int) -> real, n: nat, r1: int, r2: int)
+    requires
+        0 <= r1 < n,
+        0 <= r2 < n,
+    ensures
+        sum_fn_r(|l: int| f(if l == r1 { r2 } else if l == r2 { r1 } else { l }), n) == sum_fn_r(f, n),
+{
+    let g = |l: int| f(if l == r1 { r2 } else if l == r2 { r1 } else { l });
+    if r1 == r2 {
+        assert forall|l: int| 0 <= l < n implies #[trigger] g(l) == f(l) by {}
+        lemma_sum_fn_ext(g, f, n);
+    } else {
+        let h = |l: int| if l == r1 { f(r2) } else { f(l) };
+        assert forall|l: int| 0 <= l < n && l != r1 implies #[trigger] h(l) == f(l) by {}
+        lemma_sum_fn_update(f, h, n, r1, f(r2) - f(r1));
+        assert forall|l: int| 0 <= l < n && l != r2 implies #[trigger] g(l) == h(l) by {}
+        lemma_sum_fn_update(h, g, n, r2, f(r1) - f(r2));
+    }
+}
+
 /// Exchange of the order of summation in a finite double sum.
 pub proof fn lemma_sum_fn_swap(f: spec_fn(int, int) -> real, m: nat, n: nat)
     ensures
@@ -554,6 +575,20 @@ pub proof fn lemma_max0_fn_bound(f: spec_fn(int) -> real, n: nat)
 {
     if n > 0 {
         lemma_max0_fn_bound(f, (n - 1) as nat);
+    }
+}
+
+/// The fold maximum of terms at most m >= 0 is at most m.
+pub proof fn lemma_max0_fn_le(f: spec_fn(int) -> real, n: nat, m: real)
+    requires
+        m >= 0.0real,
+        forall|i: int| 0 <= i < n ==> #[trigger] f(i) <= m,
+    ensures
+        max0_fn_r(f, n) <= m,
+    decreases n,
+{
+    if n > 0 {
+        lemma_max0_fn_le(f, (n - 1) as nat, m);
     }
 }
 

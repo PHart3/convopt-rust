@@ -14,7 +14,8 @@ build hash, which fails Verus's exact version check. `cargo build` and
 
 ## Layer status
 
-All 22 layers (L00-L21) are done; L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`.
+All 23 layers (L00-L22) are done; L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`,
+L22 the relative residual bound of the reduction (`RELATIVE_RESIDUAL_BOUND.md`).
 
 | Layer | Where |
 |-------|-------|
@@ -31,7 +32,7 @@ All 22 layers (L00-L21) are done; L21 holds the post-hoc proofs of `ADDITIONAL_P
 | L10 cached Jacobi | `jacobi_eigen_cach`, `index_max_in_col`, `cached_pivot_col` |
 | L11 column-cyclic Jacobi | `jacobi_eigen_cyc`; `cyc_order` in `eigen_spec.rs` |
 | L12 spectral operations | `src/lin_alg/spectral_spec.rs`; `poseigendecomp`, `negeigendecomp`, `select_eigenpairs` |
-| L13 Gaussian elimination | `src/lin_alg/gauss_spec.rs`; `gauss_elim` in `matrix.rs` (block 2) |
+| L13 Gaussian elimination | `src/lin_alg/gauss_spec.rs`; `gauss_elim` in `matrix.rs` (block 2), with the ghost row transformation `row_comb` |
 | L14 constraint reduction | `src/lin_alg/reduce_spec.rs`; `linear_remove_redundant_sym` |
 | L15 symmetric maps and block embeddings | `sym_matrix.rs` (blocks 5-6); `src/sdp.rs` (block 2) |
 | L16 standard-form conversion | `src/sdp_spec.rs`; `SDP`, `sdp_to_standard` and helpers in `sdp.rs` (block 1) |
@@ -40,30 +41,30 @@ All 22 layers (L00-L21) are done; L21 holds the post-hoc proofs of `ADDITIONAL_P
 | L19 residuals and KKT quantities | `sdpad_loop`, `kkt_quantities`, `read_solution`, `SdpadOutcome` |
 | L20 final audit | this file, `TRUSTED_BASE.md`, `src/trusted.rs` |
 | L21 post-hoc proofs (gap identity, feasibility correspondence, approximate soundness) | `src/feas_spec.rs`; `lemma_gap_identity` in `sdpad_spec.rs`; block PSD lemmas in `mat_spec.rs` |
+| L22 relative residual bound of the reduction | `src/lin_alg/norm_spec.rs` (rectangular norms), `src/lin_alg/resid_spec.rs` (recovery matrix, error bounds, the theorem); `lemma_reduced_from_residual_bound` in `sdpad_spec.rs` |
 
 ## Verified-function count
 
-Last full run: **867 verified, 0 errors** (about 27 s). `--time` reports no
-slow proof, and no `rlimit` is raised. The `verus!` blocks contain 15,431
-lines of code, not counting blank and comment lines.
+Last full run: **984 verified, 0 errors** (about 28 s). `--time` reports no
+slow proof, and no `rlimit` is raised. The `verus!` blocks contain about
+16,900 lines of code, not counting blank and comment lines.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
-items are not counted. Earlier runs reported more (999, 916, then 891):
-inline `nonlinear_arith` steps were removed or folded into shared lemmas (261
-remain), and the scope reduction of October 2026 removed the reduction
-residual bounds, the reduced-case lifting and the unused negative-part PSD
-bound with their helpers (38 items). Such decreases are expected and are not
-lost proofs. The update to the row-normalized, RHS-scaled elimination of
-`main` (October 2026) added 14 items: row-scaling lemmas, the helper
-`packed_row_norm`, and the loops of the new scales and tests.
+items are not counted. The count therefore drops when inline
+`nonlinear_arith` steps are folded into shared lemmas or when proofs leave
+the scope (the October 2026 scope reduction removed 38 items); such
+decreases are not lost proofs. L22 added 117 items: the row-transformation
+lemmas and the dropped-row bound in `gauss_spec`, the modules `norm_spec`
+and `resid_spec`, the solver-level corollary, and two `nonlinear_arith`
+steps in `sdp.rs` that had become brittle.
 
 | Module | Verified | Layers |
 |--------|---------:|--------|
 | `trusted` | 0 | trusted items only |
 | `real_spec` | 22 | L00 |
 | `lin_alg::vec_spec` | 20 | L01, L21 |
-| `lin_alg::sym_spec` | 62 | L02, L03, L21 |
+| `lin_alg::sym_spec` | 64 | L02, L03, L21, L22 |
 | `lin_alg::mat_spec` | 87 | L03, L07, L12, L21 |
 | `lin_alg::constr_spec` | 23 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
@@ -71,18 +72,20 @@ lost proofs. The update to the row-normalized, RHS-scaled elimination of
 | `lin_alg::jacobi_spec` | 57 | L08 |
 | `lin_alg::eigen_spec` | 19 | L09-L11 |
 | `lin_alg::spectral_spec` | 8 | L12 |
-| `lin_alg::gauss_spec` | 33 | L13, L21 |
-| `lin_alg::reduce_spec` | 9 | L14, L21 |
+| `lin_alg::gauss_spec` | 45 | L13, L22 |
+| `lin_alg::reduce_spec` | 9 | L14 |
+| `lin_alg::norm_spec` | 42 | L22 |
+| `lin_alg::resid_spec` | 58 | L22 |
 | `lin_alg::matrix` | 48 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
 | `lin_alg::sym_matrix` | 152 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 38 | L08, L10-L12 |
 | `sdp_spec` | 58 | L16 |
-| `sdpad_spec` | 35 | L17-L19, L21 |
+| `sdpad_spec` | 36 | L17-L19, L21, L22 |
 | `feas_spec` | 37 | L21 |
-| `sdp` | 98 | L15, L16 |
+| `sdp` | 100 | L15, L16 |
 | `sdp_altdir` | 35 | L17-L19 |
-| **total** | **853** | |
+| **total** | **984** | |
 
 ## Main contracts
 
@@ -94,7 +97,10 @@ lost proofs. The update to the row-normalized, RHS-scaled elimination of
   (`echelon_form`, `skipped_bounded`, tolerance `TOL * max |A_ij|`). A
   consistent result has right-hand sides zero or below
   `TOL * 2^rank * max |b_k|` in the rows without a pivot (`rhs_consistent`),
-  and comes from a zero input if its rank is 0.
+  and comes from a zero input if its rank is 0. The input is a row
+  combination `T` of the result (`row_comb`): the identity, with two columns
+  exchanged at each swap and a multiple of one column added to another at
+  each subtraction.
 - **Constraint operator** (`sym_matrix.rs`): `constraint_action` is `A(X)`;
   `constraint_lin_comb` is `A*(y)` with the off-diagonal factors 1/2 and
   satisfies `<A(X), y> = <X, A*(y)>_F`; `diag_scale_gram` is `Q D Q^T`.
@@ -107,9 +113,31 @@ lost proofs. The update to the row-normalized, RHS-scaled elimination of
 - **Reduction**: `linear_remove_redundant_sym` divides the input rows by
   their Frobenius norms (`normalized_r`), then returns the first `rank`
   echelon rows of `gauss_elim` divided by their Frobenius norms, which are
-  positive because each kept row holds a nonzero pivot (`reduced_with`).
-  The dropped rows are only known to pass the consistency test. Both norm
-  passes share the verified helper `packed_row_norm`.
+  positive because each kept row holds a nonzero pivot (`reduced_with`,
+  which also records the row transformation `T` of the elimination). Both
+  norm passes share the verified helper `packed_row_norm`.
+- **Reduction residual bound** (`resid_spec.rs`): with the first-stage
+  divisors `D` (1 for rows of norm zero), the second-stage divisors `S`, and
+  `T = [T_K | T_D]` split at the kept rows, the input is recovered as
+  `[A | b] = U [A_K | b_K] + [E | f]`, `U = D T_K S`, `[E | f] = D T_D H_D`
+  with `H_D` the dropped echelon rows (`lemma_recovery_identity`). The
+  dropped rows are small (zero in pivot columns, at most `2^rank * eps`
+  elsewhere, right-hand side at most `TOL * 2^rank * beta`), so
+  `||E||_F <= TOL * e_A` and `||f|| <= TOL * e_b` with
+  `e_A = 2^rank sqrt(q n) alpha L`, `e_b = 2^rank sqrt(q) beta L`, `q` the
+  number of dropped rows, `alpha`/`beta` the largest normalized coefficient /
+  right-hand side, `L = ||D T_D||_F` (`lemma_err_bounds`). With
+  `C = max(e_A / ||A||_F, e_b / ||b||)` (a zero denominator contributes 0)
+  and `d(z) = ||A||_F ||z|| + ||b||`, every `z` with `d(z) > 0` satisfies
+  `||A z - b|| / d(z) <= C TOL + ||U||_F ||A_K z - b_K|| / d(z)`
+  (`lemma_relative_residual_bound`); `d(z) = 0` forces `A z - b = 0`
+  (`lemma_residual_zero_scale`) and `q = 0` gives `C = 0`
+  (`lemma_red_const_no_drop`). `U` and `C` are spec functions of the data
+  only (`recovery_r`, `red_const_r`); `lemma_reduction_residual_bound` states
+  the bound for `reduced_system` with the witnesses `red_pivots`,
+  `red_transform`, and `lemma_reduced_from_residual_bound` (`sdpad_spec.rs`)
+  for the dense rows of a setup with `check` (`reduced_from`, witness
+  `red_echelon`). Nothing is claimed about the size of `C`.
 - **Jacobi** (`jacobi.rs`): `jacobi_rot` gives `c^2 + s^2 = 1`,
   `A' = J^T A J`, `Q' = Q J`, `A'_jk = 0`. Both eigensolvers establish
   `eigensolver_ok`: `Q^T Q = Q Q^T = I`, `A = Q B Q^T`, `vals = diag(B)`,
@@ -152,8 +180,8 @@ lost proofs. The update to the row-normalized, RHS-scaled elimination of
     slacks, `vars_of(Z)` (what `read_solution` returns) is feasible and
     `<C_F, Z>_F` is its objective (`lemma_standard_feasible_sound`); without
     reduction this follows from `A(Z) = b` (`lemma_action_feasible_sound`,
-    `lemma_action_feasible_sound_single`). With reduction, nothing is
-    claimed about the dropped rows.
+    `lemma_action_feasible_sound_single`). With reduction, the dropped rows
+    are controlled only by the reduction residual bound.
   - Converse, without reduction: feasible `X_n` lift to `lift_z`, block
     diagonal with blocks `H_i(X) - M_i`, `X_n + t_n I`, `t_n I`
     (`t_n = sum |X_n|`), which reads back the `X_n`, is PSD, solves the
@@ -165,9 +193,10 @@ lost proofs. The update to the row-normalized, RHS-scaled elimination of
     `A(Z) - b` (`lemma_approx_sound_unreduced`); a successful PSD check gives
     the LMI blocks `B_i >= -eps_i I` (`lemma_lmi_blocks_checked`), and
     `|res_l| <= pinf (1 + ||b||)`.
-  - Not certified with reduction (`check`): the residuals of the dropped
-    rows, the feasibility of the user's problem, and the equality of optimal
-    values. `A(Z) - b` then measures the reduced system only.
+  - Not certified with reduction (`check`): the feasibility of the user's
+    problem and the equality of optimal values. `A(Z) - b` then measures the
+    reduced system only; the residual of the unreduced dense rows is bounded
+    by the reduction residual bound, whose constant is data-dependent.
   - Supporting algebra (`mat_spec.rs`): a diagonal block of `A >= -eps I`
     satisfies the bound (`lemma_psd_shifted_block`), a block-diagonal matrix
     with such blocks does (`lemma_psd_shifted_two_blocks`, iterated in
@@ -205,6 +234,11 @@ lost proofs. The update to the row-normalized, RHS-scaled elimination of
   eigenvalues and similarity invariance, the order `psd_shifted(A, dim, eps)`
   (`x^T A x + eps |x|^2 >= 0`), congruence and diagonal lemmas shared by L07
   and L12.
+- **Rectangular norms** (`norm_spec.rs`): `mat_vec_rc` and `frob_rc` for a
+  `rows x cols` index-function matrix; Cauchy-Schwarz, the triangle
+  inequality, `||A x|| <= ||A||_F ||x||`, `||A B||_F <= ||A||_F ||B||_F` and
+  the entry bounds `||x|| <= sqrt(n) max |x_k|`,
+  `||A||_F <= sqrt(rows cols) max |A_ik|`.
 - **Eigensolvers.** Both solvers maintain `eigen_decomp_inv` (`Q` orthogonal,
   `A = Q B Q^T`) through shared init/step lemmas and stop on `offdiag_below`;
   `lemma_converged_approx` yields `eigensolver_ok`. The spectral operations
@@ -286,13 +320,14 @@ the installed Verus (0.2026.08.23).
   is possible; prove `a <= b` first or use the named iterator.
 - `nonlinear_arith` sees only its `requires`: prove one algebraic step at a
   time with identically bracketed monomials; use vstd `div_mod` lemmas for
-  `/` and `%`. It is not needed for products with a literal constant or for
-  `x * 0 == 0`. Commutativity, associativity and distribution of products of
-  variables usually go through in the default query, but a bare
-  `assert(p * q == q * p)` can fail when the surrounding context changes;
-  `by (nonlinear_arith)` makes such steps robust. It is needed for facts that
-  use hypotheses nonlinearly (sign reasoning, cancellation, bounds like
-  `a <= b, c >= 0 ==> a * c <= b * c`, division).
+  `/` and `%`. A `let`-bound name is an opaque variable inside the query:
+  write its definition out or add it to the `requires`. The default query
+  proves products with a literal constant, `x * 0 == 0`, and usually the
+  commutativity, associativity and distribution of products of variables,
+  but a bare `assert(p * q == q * p)` can fail when the surrounding context
+  changes; `by (nonlinear_arith)` makes such steps robust. It is needed for
+  facts that use hypotheses nonlinearly (sign reasoning, cancellation, bounds
+  like `a <= b, c >= 0 ==> a * c <= b * c`, division).
 - Closures match across the spec/proof boundary only when built from named
   spec functions and indexing.
 - An `exists` postcondition needs a ground witness with the trigger's exact

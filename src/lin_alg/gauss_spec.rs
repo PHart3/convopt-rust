@@ -14,6 +14,8 @@
 // compares the right-hand side of each row without a pivot against a scale
 // carried along the row operations; by the same doubling argument, a passed
 // test bounds those right-hand sides by TOL * 2^rank * max |b_k| (`rhs_consistent`).
+// The row operations are also recorded as a ghost transformation T with
+// input = T * output (`row_comb`), used by resid_spec.rs.
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -28,6 +30,8 @@ use crate::lin_alg::vec_spec::*;
 use crate::lin_alg::sym_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::solve_spec::abs_max_prefix_r;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::mat_spec::{MatF, mident};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::matrix::TOL;
 
@@ -101,6 +105,104 @@ pub open spec fn row_scaled(m: Seq<real>, m2: Seq<real>, row_dim: int, col_dim: 
     &&& m2.len() == m.len()
     &&& forall|i: int, c: int| 0 <= i < row_dim && 0 <= c < col_dim
             ==> #[trigger] cm_entry(m2, row_dim, i, c) == if i == r { cm_entry(m, row_dim, r, c) * k } else { cm_entry(m, row_dim, i, c) }
+}
+
+/* ---------- the row transformation ---------- */
+
+/// a = T b: row i of a is the combination sum_l t(i, l) (row l of b).
+pub open spec fn row_comb(a: Seq<real>, b: Seq<real>, row_dim: int, col_dim: int, t: MatF) -> bool {
+    forall|i: int, c: int| 0 <= i < row_dim && 0 <= c < col_dim
+        ==> #[trigger] cm_entry(a, row_dim, i, c) == sum_fn_r(|l: int| t(i, l) * cm_entry(b, row_dim, l, c), row_dim as nat)
+}
+
+/// t with columns r1 and r2 exchanged.
+pub open spec fn swap_cols(t: MatF, r1: int, r2: int) -> MatF {
+    |i: int, l: int| t(i, if l == r1 { r2 } else if l == r2 { r1 } else { l })
+}
+
+/// t with piv times column src added to column dst.
+pub open spec fn add_col(t: MatF, dst: int, src: int, piv: real) -> MatF {
+    |i: int, l: int| if l == dst { t(i, dst) + piv * t(i, src) } else { t(i, l) }
+}
+
+/// a = I a.
+pub proof fn lemma_row_comb_refl(a: Seq<real>, row_dim: int, col_dim: int)
+    ensures
+        row_comb(a, a, row_dim, col_dim, mident()),
+{
+    let t = mident();
+    assert forall|i: int, c: int| 0 <= i < row_dim && 0 <= c < col_dim
+        implies #[trigger] cm_entry(a, row_dim, i, c) == sum_fn_r(|l: int| t(i, l) * cm_entry(a, row_dim, l, c), row_dim as nat) by {
+        let f = |l: int| t(i, l) * cm_entry(a, row_dim, l, c);
+        assert forall|l: int| 0 <= l < row_dim && l != i implies #[trigger] f(l) == 0.0real by {
+            assert(t(i, l) == 0.0real);
+        }
+        lemma_sum_fn_single(f, row_dim as nat, i);
+        assert(f(i) == 1.0real * cm_entry(a, row_dim, i, c));
+    }
+}
+
+/// Exchanging two rows of b exchanges the corresponding columns of T.
+pub proof fn lemma_row_comb_swap(a: Seq<real>, b: Seq<real>, b2: Seq<real>, row_dim: int, col_dim: int, t: MatF, r1: int, r2: int)
+    requires
+        0 <= r1 < row_dim,
+        0 <= r2 < row_dim,
+        row_comb(a, b, row_dim, col_dim, t),
+        rows_swapped(b, b2, row_dim, col_dim, r1, r2),
+    ensures
+        row_comb(a, b2, row_dim, col_dim, swap_cols(t, r1, r2)),
+{
+    let t2 = swap_cols(t, r1, r2);
+    let n = row_dim as nat;
+    assert forall|i: int, c: int| 0 <= i < row_dim && 0 <= c < col_dim
+        implies #[trigger] cm_entry(a, row_dim, i, c) == sum_fn_r(|l: int| t2(i, l) * cm_entry(b2, row_dim, l, c), n) by {
+        let big = |l: int| t(i, l) * cm_entry(b, row_dim, l, c);
+        let g = |l: int| big(if l == r1 { r2 } else if l == r2 { r1 } else { l });
+        let h = |l: int| t2(i, l) * cm_entry(b2, row_dim, l, c);
+        assert forall|l: int| 0 <= l < row_dim implies #[trigger] h(l) == g(l) by {
+            let src = if l == r1 { r2 } else if l == r2 { r1 } else { l };
+            assert(cm_entry(b2, row_dim, l, c) == cm_entry(b, row_dim, src, c));
+            assert(t2(i, l) == t(i, src));
+        }
+        lemma_sum_fn_ext(h, g, n);
+        lemma_sum_fn_transpose(big, n, r1, r2);
+    }
+}
+
+/// Subtracting piv times row p from row j of b adds piv times column j to column p of T.
+pub proof fn lemma_row_comb_sub(a: Seq<real>, b: Seq<real>, b2: Seq<real>, row_dim: int, col_dim: int, t: MatF, j: int, p: int, piv: real)
+    requires
+        0 <= j < row_dim,
+        0 <= p < row_dim,
+        j != p,
+        row_comb(a, b, row_dim, col_dim, t),
+        row_subtracted(b, b2, row_dim, col_dim, j, p, piv),
+    ensures
+        row_comb(a, b2, row_dim, col_dim, add_col(t, p, j, piv)),
+{
+    let t2 = add_col(t, p, j, piv);
+    let n = row_dim as nat;
+    assert forall|i: int, c: int| 0 <= i < row_dim && 0 <= c < col_dim
+        implies #[trigger] cm_entry(a, row_dim, i, c) == sum_fn_r(|l: int| t2(i, l) * cm_entry(b2, row_dim, l, c), n) by {
+        let f = |l: int| t(i, l) * cm_entry(b, row_dim, l, c);
+        let h = |l: int| t2(i, l) * cm_entry(b2, row_dim, l, c);
+        let (tj, tp, bj, bp) = (t(i, j), t(i, p), cm_entry(b, row_dim, j, c), cm_entry(b, row_dim, p, c));
+        let delta = piv * (tj * bp);
+        let g = |l: int| if l == j { f(j) - delta } else { f(l) };
+        assert forall|l: int| 0 <= l < row_dim && l != j implies #[trigger] g(l) == f(l) by {}
+        lemma_sum_fn_update(f, g, n, j, -delta);
+        // h agrees with g except at p, where it gains delta
+        assert forall|l: int| 0 <= l < row_dim && l != p implies #[trigger] h(l) == g(l) by {
+            if l == j {
+                assert(cm_entry(b2, row_dim, j, c) == bj - piv * bp);
+                assert(tj * (bj - piv * bp) == tj * bj - piv * (tj * bp)) by (nonlinear_arith);
+            }
+        }
+        assert(cm_entry(b2, row_dim, p, c) == bp);
+        assert(h(p) == (tp + piv * tj) * bp);
+        assert((tp + piv * tj) * bp == tp * bp + piv * (tj * bp)) by (nonlinear_arith);
+        lemma_sum_fn_update(g, h, n, p, delta);
+    }
 }
 
 /* ---------- zero columns ---------- */
@@ -456,6 +558,31 @@ pub proof fn lemma_pow2_step(k: nat, e: real)
     assert((2.0real * p) * e == p * e + p * e) by (nonlinear_arith);
 }
 
+/// 2^k >= 1.
+pub proof fn lemma_pow2_pos(k: nat)
+    ensures
+        pow2_r(k) >= 1.0real,
+    decreases k,
+{
+    if k > 0 {
+        lemma_pow2_pos((k - 1) as nat);
+    }
+}
+
+/// 2^a <= 2^b for a <= b.
+pub proof fn lemma_pow2_monotone(a: nat, b: nat)
+    requires
+        a <= b,
+    ensures
+        pow2_r(a) <= pow2_r(b),
+    decreases b - a,
+{
+    if a < b {
+        lemma_pow2_monotone(a, (b - 1) as nat);
+        lemma_pow2_pos((b - 1) as nat);
+    }
+}
+
 /// Number of pivot columns strictly before column c: the row index at which column c was
 /// examined by the elimination.
 pub open spec fn pivots_below(pivots: Seq<int>, c: int) -> int
@@ -658,6 +785,47 @@ pub open spec fn rhs_consistent(m: Seq<real>, row_dim: int, col_dim: int, rank: 
     forall|i: int| rank <= i < row_dim
         ==> #[trigger] rhs_r(m, row_dim, col_dim, i) == 0.0real
             || abs_r(rhs_r(m, row_dim, col_dim, i)) < rv(TOL) * (pow2_r(rank) * bmax)
+}
+
+/// A row without a pivot is small: coefficient entries at most 2^rank * eps (zero in pivot
+/// columns, the skip bound otherwise), right-hand side at most TOL * 2^rank * bmax.
+pub proof fn lemma_dropped_row_bounded(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, bmax: real, k: int)
+    requires
+        eps >= 0.0real,
+        bmax >= 0.0real,
+        echelon_form(m, row_dim, col_dim, pivots, eps),
+        skipped_bounded(m, row_dim, col_dim, pivots, eps, col_dim - 1),
+        rhs_consistent(m, row_dim, col_dim, pivots.len(), bmax),
+        pivots.len() <= k < row_dim,
+    ensures
+        forall|c: int| 0 <= c < col_dim - 1 ==> abs_r(#[trigger] cm_entry(m, row_dim, k, c)) <= pow2_r(pivots.len()) * eps,
+        abs_r(rhs_r(m, row_dim, col_dim, k)) <= rv(TOL) * (pow2_r(pivots.len()) * bmax),
+{
+    let rank = pivots.len();
+    lemma_pow2_pos(rank);
+    assert(rv(TOL) == 0.0000000001real);
+    assert(pow2_r(rank) * eps >= 0.0real) by (nonlinear_arith)
+        requires pow2_r(rank) >= 1.0real, eps >= 0.0real;
+    assert(pow2_r(rank) * bmax >= 0.0real) by (nonlinear_arith)
+        requires pow2_r(rank) >= 1.0real, bmax >= 0.0real;
+    assert(rv(TOL) * (pow2_r(rank) * bmax) >= 0.0real) by (nonlinear_arith)
+        requires rv(TOL) >= 0.0real, pow2_r(rank) * bmax >= 0.0real;
+    assert forall|c: int| 0 <= c < col_dim - 1
+        implies abs_r(#[trigger] cm_entry(m, row_dim, k, c)) <= pow2_r(rank) * eps by {
+        if is_pivot_col(pivots, c) {
+            let l = choose|l: int| 0 <= l < pivots.len() && #[trigger] pivots[l] == c;
+            assert(cm_entry(m, row_dim, k, pivots[l]) == 0.0real);
+        } else {
+            lemma_pivots_below_bounds(pivots, c);
+            assert(abs_r(cm_entry(m, row_dim, k, c)) <= skip_bound(pivots, c, eps));
+            let d = (rank - pivots_below(pivots, c)) as nat;
+            lemma_pow2_monotone(d, rank);
+            assert(pow2_r(d) * eps <= pow2_r(rank) * eps) by (nonlinear_arith)
+                requires pow2_r(d) <= pow2_r(rank), eps >= 0.0real;
+        }
+    }
+    assert(rhs_r(m, row_dim, col_dim, k) == 0.0real
+        || abs_r(rhs_r(m, row_dim, col_dim, k)) < rv(TOL) * (pow2_r(rank) * bmax));
 }
 
 } // verus!

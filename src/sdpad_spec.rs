@@ -51,7 +51,8 @@
 // stagnation rule fires (`stagnation_ok`, `stagnation_stop`), or with the last
 // iterate after TOTAL_STEPS iterations; the returned iterate is an element of
 // the trajectory (`outcome_ok`). The user's solution is read from its diagonal
-// blocks (`solution_ok`).
+// blocks (`solution_ok`). With check, the relative residual bound of
+// resid_spec.rs applies to the dense rows (`lemma_reduced_from_residual_bound`).
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -72,6 +73,10 @@ use crate::lin_alg::constr_spec::*;
 use crate::lin_alg::ldlt_spec::{blocks_fit, block_psd_ok, lemma_block_half_solve};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::reduce_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::norm_spec::frob_rc;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::resid_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::gauss_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -964,6 +969,36 @@ pub proof fn lemma_reduced_zero_col(a0: Seq<real>, red: Seq<real>, dim: int, tot
         assert(cm_entry(e, rd, i, t) == 0.0real);
         assert(0.0real / sc == 0.0real);
     }
+}
+
+/// The echelon form behind a reduction (a witness of `reduced_from`).
+pub open spec fn red_echelon(a0: Seq<real>, red: Seq<real>, dim: int) -> Seq<real> {
+    choose|e: Seq<real>| reduced_system(a0, e, red, dim)
+}
+
+/// The relative residual bound for the dense rows of a setup with `check`: U and C are built
+/// from the witnesses `red_echelon`, `red_pivots` and `red_transform`, all independent of z.
+pub proof fn lemma_reduced_from_residual_bound(a0: Seq<real>, red: Seq<real>, dim: int, z: Seq<real>)
+    requires
+        dim >= 1,
+        reduced_from(a0, red, dim),
+        z.len() == red_col_dim(dim) - 1,
+        resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z) > 0.0real,
+    ensures
+        ({
+            let e = red_echelon(a0, red, dim);
+            let t = red_transform(a0, e, dim);
+            let rank = red_pivots(a0, e, red, dim).len() as int;
+            let d = resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z);
+            norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z)) / d
+                <= red_const_r(a0, dim, t, rank) * rv(TOL)
+                   + frob_rc(recovery_r(a0, e, dim, t), red_row_dim(a0, dim), rank)
+                     * norm_r(resid_vec_r(red, rank, red_col_dim(dim), z)) / d
+        }),
+{
+    let e = red_echelon(a0, red, dim);
+    assert(reduced_system(a0, e, red, dim));
+    lemma_reduction_residual_bound(a0, e, red, dim, z);
 }
 
 /// The solver's constraint operator satisfies the hypotheses of the block Gram form: the

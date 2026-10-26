@@ -1567,6 +1567,10 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
     let (echelon, rank, solvable) = gauss_elim(mat, col_dim, row_dim);
     let ghost e = rvs(echelon@);
     let ghost eps = gauss_eps_r(n0, rd, cd);
+    let ghost tr = choose|t: MatF| #[trigger] row_comb(rvs(pre), e, rd, cd, t);
+    proof {
+        assert(row_comb(n0, e, rd, cd, tr));
+    }
     let ghost pivots = choose|p: Seq<int>| {
         &&& #[trigger] echelon_form(rvs(echelon@), row_dim as int, col_dim as int, p, gauss_eps_r(rvs(pre), row_dim as int, col_dim as int))
         &&& skipped_bounded(rvs(echelon@), row_dim as int, col_dim as int, p, gauss_eps_r(rvs(pre), row_dim as int, col_dim as int), col_dim - 1)
