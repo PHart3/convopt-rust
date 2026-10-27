@@ -61,7 +61,8 @@ matrix of order `d`, satisfies:
    of `aug` (without `check`) or their reduction, which `Z` solves as well, so `A(Z) = b`;
 4. `<C_F, Z>_F = sum_j C_j(X_j)`, by `lemma_objective_value`.
 
-Without LMIs, `Z = X`.
+Without LMIs, a feasible `X` (`user_feasible_single`: `A(X) = b` and `X ⪰ 0`) lifts as
+`Z = X`; here `Z ⪰ 0` is the hypothesis `X ⪰ 0`.
 
 **Construction.** `Z` is block diagonal with blocks `B_i = W_i`, `P_j = X_j + t_j I` and
 `N_j = t_j I`, where `t_j = sum_{r, c} |X_j[r, c]|`; it is defined on packed indices via

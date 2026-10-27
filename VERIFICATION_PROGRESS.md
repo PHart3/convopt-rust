@@ -45,7 +45,7 @@ All 23 layers (L00-L22) are done; L21 holds the post-hoc proofs of `ADDITIONAL_P
 
 ## Verified-function count
 
-Last full run: **1022 verified, 0 errors** (about 29 s). `--time` reports no
+Last full run: **1024 verified, 0 errors** (about 29 s). `--time` reports no
 slow proof, and no `rlimit` is raised. The `verus!` blocks contain about
 17,400 lines of code, not counting blank and comment lines.
 
@@ -53,12 +53,7 @@ Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
 items are not counted. The count therefore drops when inline
 `nonlinear_arith` steps are folded into shared lemmas or when proofs leave
-the scope; such decreases are not lost proofs. The extension of L21 to
-constraint reduction (October 27, 2026) added 38 items: the reduced-case
-feasibility lemmas in `feas_spec`, the solution transfer in `reduce_spec`,
-the window, quadratic-form and perturbation lemmas in `norm_spec`, the grid
-sum in `sym_spec`, and seven single-step product lemmas in `real_spec` that
-replace the two-level nonlinear identities of `lemma_cauchy_schwarz`.
+the scope; such decreases are not lost proofs.
 
 | Module | Verified | Layers |
 |--------|---------:|--------|
@@ -82,11 +77,11 @@ replace the two-level nonlinear identities of `lemma_cauchy_schwarz`.
 | `lin_alg::sym_matrix` | 152 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 38 | L08, L10-L12 |
 | `sdp_spec` | 58 | L16 |
-| `sdpad_spec` | 36 | L17-L19, L21, L22 |
+| `sdpad_spec` | 38 | L17-L19, L21, L22 |
 | `feas_spec` | 50 | L21 |
 | `sdp` | 100 | L15, L16 |
 | `sdp_altdir` | 35 | L17-L19 |
-| **total** | **1022** | |
+| **total** | **1024** | |
 
 ## Main contracts
 
@@ -170,6 +165,8 @@ replace the two-level nonlinear identities of `lemma_cauchy_schwarz`.
     and each penalty the verified update from the new infeasibilities. The
     returned solution, its objective value, the recorded deltas and the
     termination reason all refer to indices into this trajectory.
+    `best_delta` starts at `0.0` and is set by the first iteration; after it,
+    `lemma_outcome_best_delta` shows it is the least recorded delta.
 - **Gap identity** (`sdpad_spec.rs`): for packed `Z`, `S` and multipliers `y`,
   `<C_F, Z>_F - b . y = <Z, S>_F + <Z, C_F - A*(y) - S>_F + y . (A(Z) - b)`
   (`lemma_gap_identity`); with `A(Z) = b` and `C_F - A*(y) = S` the gap is
@@ -273,7 +270,7 @@ replace the two-level nonlinear identities of `lemma_cauchy_schwarz`.
 
 ## Executable changes
 
-The four bugs in `EXPOSED_BUGS.md` were fixed. Other changes:
+The bugs in `EXPOSED_BUGS.md` were fixed. Other changes:
 
 - `linear_remove_redundant_sym` computes both row-norm passes with the helper
   `packed_row_norm` and `sqrt(2)` once per call.
@@ -293,8 +290,7 @@ The four bugs in `EXPOSED_BUGS.md` were fixed. Other changes:
   truncated silently); `constraint_lin_comb` slices its argument accordingly.
 - `ldlt_decomp` no longer rewrites the diagonal of `ident_mat_low_tri(dim)`,
   which is already 1 (a no-op loop of the original).
-- `jacobi_eigen_cach`: `biggest` starts at `0.0`; the rotation limit uses
-  `saturating_mul`; the eigenvector matrix is returned without a final copy;
+- `jacobi_eigen_cach`: the rotation limit uses `saturating_mul`; the eigenvector matrix is returned without a final copy;
   regression test `test_jacobi_cach_cache_update` in `src/sdp_tests.rs`.
 
 ## Constructs rewritten for Verus compatibility

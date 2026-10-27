@@ -770,14 +770,32 @@ pub open spec fn iterate_delta_r(s: &SdpadSetup, st: &WgyState) -> real {
 }
 
 /// The stagnation bookkeeping over the deltas of the iterations so far: best bounds every
-/// delta from below, the last it_stag deltas lie strictly above best, and the one before them
-/// equals best (when there is one; before the first iteration best is unconstrained).
+/// delta from below, the last it_stag deltas lie strictly above best, and after the first
+/// iteration the one before them exists and equals best (before it, best is unconstrained).
 pub open spec fn stagnation_ok(deltas: Seq<real>, best: real, it_stag: int) -> bool {
     let n = deltas.len() as int;
     &&& 0 <= it_stag <= n
     &&& forall|k: int| 0 <= k < n ==> #[trigger] deltas[k] >= best
     &&& forall|k: int| n - it_stag <= k < n ==> #[trigger] deltas[k] > best
-    &&& it_stag < n ==> deltas[n - 1 - it_stag] == best
+    &&& n >= 1 ==> it_stag < n && deltas[n - 1 - it_stag] == best
+}
+
+/// best is the minimum of the deltas: a lower bound attained by one of them.
+pub open spec fn is_min_r(deltas: Seq<real>, best: real) -> bool {
+    &&& forall|k: int| 0 <= k < deltas.len() ==> #[trigger] deltas[k] >= best
+    &&& exists|k: int| 0 <= k < deltas.len() && #[trigger] deltas[k] == best
+}
+
+/// After the first iteration the stagnation bookkeeping holds the least delta so far.
+pub proof fn lemma_stagnation_min(deltas: Seq<real>, best: real, it_stag: int)
+    requires
+        stagnation_ok(deltas, best, it_stag),
+        deltas.len() >= 1,
+    ensures
+        is_min_r(deltas, best),
+{
+    let k = deltas.len() - 1 - it_stag;
+    assert(deltas[k] == best);
 }
 
 /// One step of the bookkeeping: the delta of the first iteration becomes the best; afterwards
@@ -883,6 +901,19 @@ pub open spec fn outcome_ok(sdp: &SDP, s: &SdpadSetup, check: bool, o: SdpadOutc
                 && stagnation_stop(deltas[n - 1], o.it_stag@ as int),
             Termination::MaxIter => k == n && n == TOTAL_STEPS,
         }
+}
+
+/// The stagnation bookkeeping of an outcome: best_delta is the least delta of the iterations
+/// run, and the last it_stag deltas lie strictly above it.
+pub proof fn lemma_outcome_best_delta(sdp: &SDP, s: &SdpadSetup, check: bool, o: SdpadOutcome)
+    requires
+        outcome_ok(sdp, s, check, o),
+    ensures
+        is_min_r(rvs(o.deltas@), rv(o.best_delta@)),
+        forall|k: int| rvs(o.deltas@).len() - o.it_stag@ <= k < rvs(o.deltas@).len()
+            ==> #[trigger] rvs(o.deltas@)[k] > rv(o.best_delta@),
+{
+    lemma_stagnation_min(rvs(o.deltas@), rv(o.best_delta@), o.it_stag@ as int);
 }
 
 /* ---------- the penalty update ---------- */
