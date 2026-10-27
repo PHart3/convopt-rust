@@ -18,9 +18,9 @@
 // (solution set, zero columns, echelon structure, tolerance-based pivot, skip
 // and consistency rules, row transformation), and shows that every solution
 // of the input solves the reduced system (`lemma_input_solution_reduced`).
-// The dropped rows are only known to pass the consistency test; resid_spec.rs
-// bounds the residual A z - b of the input system by that of the reduced
-// system.
+// The dropped rows are known only through the skip and consistency rules;
+// resid_spec.rs uses them to bound the residual A z - b of the input system by
+// that of the reduced system.
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -207,8 +207,9 @@ pub proof fn lemma_row_scale_pos(e: Seq<real>, row_dim: int, dim: int, pivots: S
 
 /// The reduced system res (rank rows) obtained from the input a0 through the echelon form e
 /// (of the normalized input) with pivot sequence pivots: res row i is echelon row i divided by
-/// its Frobenius norm, the zero columns of a0 are zero columns of e, and the rows of e without a
-/// pivot pass the consistency test. The rank is positive (the input of the reduction is nonzero).
+/// its Frobenius norm, e has the solution set and the zero columns of a0, e is in echelon form
+/// under the pivot and skip rules, and the rows of e without a pivot pass the consistency test.
+/// The rank is positive (the input of the reduction is nonzero).
 /// The normalized input is a row combination T of e (the row operations of the elimination).
 pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>) -> bool {
     let cd = red_col_dim(dim);

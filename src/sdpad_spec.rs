@@ -1,6 +1,6 @@
-// Solver setup specification (not trusted).
+// Solver specification: setup, iteration, KKT quantities and loop (not trusted).
 //
-// sdpad (sdp_altdir.rs) prepares the standard-form problem (C, A, b) of
+// sdpad_setup (sdp_altdir.rs) prepares the standard-form problem (C, A, b) of
 // sdp_to_standard for the Wen-Goldfarb-Yin iteration:
 //
 //   - the objective is reweighted so that it acts through the Frobenius

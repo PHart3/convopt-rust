@@ -292,8 +292,8 @@ pub open spec fn sdp_single_input_ok(sdp: &SDP) -> bool {
             ==> symmap_shape(sdp.constraint.0@[0]@, d) && sdp.constraint.0@[0]@.len() == m && pk_len(d) * (m + 1) <= usize::MAX
 }
 
-/// Some entry of the single constraint map or of its right-hand side is nonzero (needed for
-/// the tolerance of the constraint reduction).
+/// Some entry of the single constraint map or of its right-hand side is nonzero (the
+/// constraint reduction requires a nonzero input).
 pub open spec fn single_constraint_nonzero(sdp: &SDP) -> bool {
     let d = sdp.objective@[0]@.len() as int;
     ||| exists|e: int, i: int, j: int| 0 <= e < sdp.constraint.1@.len() && 0 <= j <= i < d
