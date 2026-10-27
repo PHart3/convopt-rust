@@ -13,10 +13,10 @@
 // and right-hand side, L = ||D T_D||_F, q dropped rows, n columns of A).  With
 // C = max(e_A / ||A||_F, e_b / ||b||) (0 / 0 = 0) and d(z) = ||A||_F ||z|| + ||b||,
 //
-//     ||A z - b|| / d(z) <= C TOL + ||U||_F ||A_K z - b_K|| / d(z)   (d(z) > 0).
+//     ||A z - b|| <= C TOL d(z) + ||U||_F ||A_K z - b_K||,
 //
-// If d(z) = 0 the residual is 0; without dropped rows C = 0.  Nothing is
-// claimed about the size of C.
+// divided by d(z) when d(z) > 0.  If d(z) = 0 the residual is 0; without
+// dropped rows C = 0.  Nothing is claimed about the size of C.
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -782,26 +782,39 @@ pub open spec fn red_transform(a0: Seq<real>, e: Seq<real>, dim: int) -> MatF {
     choose|t: MatF| #[trigger] row_comb(normalized_r(a0, dim), e, red_row_dim(a0, dim), red_col_dim(dim), t)
 }
 
-/// The bound for `reduced_system`: U and C are built from the witnesses `red_pivots` and
-/// `red_transform`, both independent of z.
+/// The bound for `reduced_system`, with U and C built from the witnesses `red_pivots` and
+/// `red_transform` (both independent of z): ||A z - b|| <= C TOL d(z) + ||U||_F ||A_K z - b_K||,
+/// its relative form when d(z) > 0, and A z - b = 0 when d(z) = 0.
 pub proof fn lemma_reduction_residual_bound(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, z: Seq<real>)
     requires
         dim >= 1,
         reduced_system(a0, e, res, dim),
         z.len() == red_col_dim(dim) - 1,
-        resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z) > 0.0real,
     ensures
-        norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z)) / resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z)
-            <= red_const_r(a0, dim, red_transform(a0, e, dim), red_pivots(a0, e, res, dim).len() as int) * rv(TOL)
-               + frob_rc(recovery_r(a0, e, dim, red_transform(a0, e, dim)), red_row_dim(a0, dim), red_pivots(a0, e, res, dim).len() as int)
-                 * norm_r(resid_vec_r(res, red_pivots(a0, e, res, dim).len() as int, red_col_dim(dim), z))
-                 / resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z),
+        ({
+            let t = red_transform(a0, e, dim);
+            let rank = red_pivots(a0, e, res, dim).len() as int;
+            let nr = norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z));
+            let d = resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z);
+            let ct = red_const_r(a0, dim, t, rank) * rv(TOL);
+            let w = frob_rc(recovery_r(a0, e, dim, t), red_row_dim(a0, dim), rank)
+                * norm_r(resid_vec_r(res, rank, red_col_dim(dim), z));
+            &&& nr <= ct * d + w
+            &&& d > 0.0real ==> nr / d <= ct + w / d
+            &&& d == 0.0real ==> nr == 0.0real
+        }),
 {
     let pivots = red_pivots(a0, e, res, dim);
     assert(reduced_with(a0, e, res, dim, pivots));
     let t = red_transform(a0, e, dim);
     assert(row_comb(normalized_r(a0, dim), e, red_row_dim(a0, dim), red_col_dim(dim), t));
-    lemma_relative_residual_bound(a0, e, res, dim, pivots, t, z);
+    lemma_residual_bound(a0, e, res, dim, pivots, t, z);
+    let d = resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z);
+    if d > 0.0real {
+        lemma_relative_residual_bound(a0, e, res, dim, pivots, t, z);
+    } else if d == 0.0real {
+        lemma_residual_zero_scale(a0, dim, z);
+    }
 }
 
 } // verus!

@@ -2,8 +2,11 @@
 //
 // Products (`mat_vec_rc`) and Frobenius norms (`frob_rc`) of rows x cols index
 // functions (`MatF`), with Cauchy-Schwarz, the triangle inequality,
-// ||A x|| <= ||A||_F ||x||, ||A B||_F <= ||A||_F ||B||_F and the entry bounds
-// ||x|| <= sqrt(n) max |x_k|, ||A||_F <= sqrt(rows cols) max |A_ik|.
+// ||A x|| <= ||A||_F ||x||, ||A B||_F <= ||A||_F ||B||_F, the entry bounds
+// ||x|| <= sqrt(n) max |x_k|, ||A||_F <= sqrt(rows cols) max |A_ik|, the window
+// bound ||x[off .. off + len]|| <= ||x||, and the perturbation of the
+// semidefinite order: |x^T R x| <= ||R||_F ||x||^2, so A >= -eps I gives
+// A + R >= -(eps + ||R||_F) I.
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -245,8 +248,12 @@ pub proof fn lemma_cauchy_schwarz(x: Seq<real>, y: Seq<real>)
         assert forall|k: int| 0 <= k < n implies #[trigger] ww(k) == s123(k) by {
             let (u, v) = (x[k], y[k]);
             assert(w[k] == a * v - c * u);
-            assert((a * v - c * u) * (a * v - c * u) == (a * a) * (v * v) + (-(2.0real * (a * c))) * (u * v) + (c * c) * (u * u))
-                by (nonlinear_arith);
+            lemma_sq_diff(a * v, c * u);
+            lemma_mul_rearrange(a, v, a, v);
+            lemma_mul_rearrange(a, v, c, u);
+            lemma_mul_rearrange(c, u, c, u);
+            lemma_mul_comm(v, u);
+            lemma_neg_two_mul(a * c, u * v);
         }
         lemma_sum_fn_ext(ww, s123, n);
         lemma_sum_fn_add(s12, s3, s123, n);
@@ -255,9 +262,13 @@ pub proof fn lemma_cauchy_schwarz(x: Seq<real>, y: Seq<real>)
         lemma_sum_fn_scale(xy, s2, sb, n);
         lemma_sum_fn_scale(xx, s3, sc, n);
         assert(dot_r(w, w) == sa * b + sb * c + sc * a);
-        assert((a * a) * b + (-(2.0real * (a * c))) * c + (c * c) * a == a * (a * b - c * c)) by (nonlinear_arith);
-        assert(a * b - c * c >= 0.0real) by (nonlinear_arith)
-            requires a > 0.0real, a * (a * b - c * c) >= 0.0real;
+        // sa b + sb c + sc a = a (a b) - 2 a (c c) + a (c c) = a (a b - c c)
+        lemma_real_mul_assoc(a, a, b);
+        lemma_neg_two_mul(a * c, c);
+        lemma_real_mul_assoc(a, c, c);
+        lemma_mul_comm(c * c, a);
+        lemma_mul_sub_right(a, a * b, c * c);
+        lemma_nonneg_of_pos_factor(a, a * b - c * c);
     }
 }
 
@@ -427,6 +438,100 @@ pub proof fn lemma_mat_vec_rc_mul(a: MatF, b: MatF, rows: int, inner: int, cols:
         lemma_sum_fn_ext(g2, gk, m);
     }
     assert(lhs =~= rhs);
+}
+
+/* ---------- windows of a vector ---------- */
+
+/// The norm of the window x[off .. off + len] is at most ||x||.
+pub proof fn lemma_window_norm_le(x: Seq<real>, off: int, len: int)
+    requires
+        0 <= off,
+        0 <= len,
+        off + len <= x.len(),
+    ensures
+        dot_r(x.subrange(off, off + len), x.subrange(off, off + len)) <= dot_r(x, x),
+        norm_r(x.subrange(off, off + len)) <= norm_r(x),
+{
+    let w = x.subrange(off, off + len);
+    let sq = |i: int| x[i] * x[i];
+    let (a, b, c) = (off as nat, len as nat, (x.len() - off - len) as nat);
+    lemma_dot_sum_fn(x, x);
+    lemma_dot_sum_fn(w, w);
+    // sum_{i < n} x_i^2 = sum_{i < off} + sum_{window} + sum_{after}, all three nonnegative
+    lemma_sum_fn_split(sq, a + b, c);
+    lemma_sum_fn_split(sq, a, b);
+    let after = |i: int| sq((a + b) + i);
+    let window = |i: int| sq(a + i);
+    assert forall|i: int| 0 <= i < c implies #[trigger] after(i) >= 0.0real by {
+        lemma_sq_nonneg(x[(a + b) + i]);
+    }
+    assert forall|i: int| 0 <= i < a implies #[trigger] sq(i) >= 0.0real by {
+        lemma_sq_nonneg(x[i]);
+    }
+    lemma_sum_fn_nonneg(after, c);
+    lemma_sum_fn_nonneg(sq, a);
+    let sqw = |i: int| w[i] * w[i];
+    assert forall|i: int| 0 <= i < b implies #[trigger] sqw(i) == window(i) by {}
+    lemma_sum_fn_ext(sqw, window, b);
+    lemma_dot_self_nonneg(w);
+    lemma_sqrt_monotone(dot_r(w, w), dot_r(x, x));
+}
+
+/* ---------- the semidefinite order under perturbation ---------- */
+
+/// The square product mat_vec is the rectangular product with rows = cols.
+pub proof fn lemma_mat_vec_rc_square(a: MatF, dim: int, x: Seq<real>)
+    requires
+        dim >= 0,
+    ensures
+        mat_vec(a, dim, x) == mat_vec_rc(a, dim, dim, x),
+{
+    assert(mat_vec(a, dim, x) =~= mat_vec_rc(a, dim, dim, x));
+}
+
+/// |x^T A x| <= ||A||_F ||x||^2: Cauchy-Schwarz and ||A x|| <= ||A||_F ||x||.
+pub proof fn lemma_quad_frob_bound(a: MatF, dim: int, x: Seq<real>)
+    requires
+        dim >= 0,
+        x.len() == dim,
+    ensures
+        abs_r(quad_r(a, dim, x)) <= frob_rc(a, dim, dim) * dot_r(x, x),
+{
+    let ax = mat_vec_rc(a, dim, dim, x);
+    let (nx, na) = (norm_r(x), frob_rc(a, dim, dim));
+    lemma_mat_vec_rc_square(a, dim, x);
+    lemma_dot_le_norms(x, ax);
+    lemma_mat_vec_rc_bound(a, dim, dim, x);
+    lemma_dot_self_nonneg(x);
+    assert(nx * norm_r(ax) <= nx * (na * nx)) by (nonlinear_arith)
+        requires nx >= 0.0real, norm_r(ax) <= na * nx;
+    assert(nx * (na * nx) == na * (nx * nx)) by (nonlinear_arith);
+}
+
+/// A >= -eps I and B = A + R give B >= -(eps + ||R||_F) I.
+pub proof fn lemma_psd_shifted_perturbed(a: MatF, b: MatF, dim: int, eps: real)
+    requires
+        dim >= 0,
+        psd_shifted(a, dim, eps),
+    ensures
+        psd_shifted(b, dim, eps + frob_rc(msub(b, a), dim, dim)),
+{
+    let r = msub(b, a);
+    let nr = frob_rc(r, dim, dim);
+    assert forall|i: int, j: int| 0 <= i < dim && 0 <= j < dim implies #[trigger] madd(a, r)(i, j) == #[trigger] b(i, j) by {}
+    assert forall|x: Seq<real>| x.len() == dim
+        implies #[trigger] quad_r(b, dim, x) + (eps + nr) * dot_r(x, x) >= 0.0real by {
+        let (av, rv_, bv) = (mat_vec_rc(a, dim, dim, x), mat_vec_rc(r, dim, dim, x), mat_vec_rc(b, dim, dim, x));
+        lemma_mat_vec_rc_square(a, dim, x);
+        lemma_mat_vec_rc_square(r, dim, x);
+        lemma_mat_vec_rc_square(b, dim, x);
+        lemma_mat_vec_rc_meq(madd(a, r), b, dim, dim, x);
+        lemma_mat_vec_rc_add(a, r, dim, dim, x);
+        lemma_dot_add_right(x, av, rv_);
+        lemma_quad_frob_bound(r, dim, x);
+        assert(quad_r(a, dim, x) + eps * dot_r(x, x) >= 0.0real);
+        assert((eps + nr) * dot_r(x, x) == eps * dot_r(x, x) + nr * dot_r(x, x)) by (nonlinear_arith);
+    }
 }
 
 /* ---------- norm bounds ---------- */

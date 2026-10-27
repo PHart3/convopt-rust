@@ -50,15 +50,15 @@ case `eps = 0`.
 
 ## 3. Converse: a feasible user point lifts to a feasible standard-form point
 
-**Statement.** Assume the case with LMIs and without `check`, and let `X_j` be packed of order
-`r_j = vd[j]` and feasible for the user's problem (`user_feasible`): the equality constraints
-hold and each `W_i = H_i(X) - M_i` is symmetric PSD. Then `Z = lift_z(..)`, a packed matrix of
-order `d`, satisfies:
+**Statement.** Assume the case with LMIs, with or without `check`, and let `X_j` be packed of
+order `r_j = vd[j]` and feasible for the user's problem (`user_feasible`): the equality
+constraints hold and each `W_i = H_i(X) - M_i` is symmetric PSD. Then `Z = lift_z(..)`, a packed
+matrix of order `d`, satisfies:
 
 1. `zvar_r(Z, var_off(bsum, vd, j), r_j) == X_j` for every `j`;
 2. `is_psd(sym_view(Z), d)`;
-3. `Z` solves every row of `aug` and vanishes on the zero pattern; without `check` the
-   returned rows are those of `aug`, so `A(Z) = b`;
+3. `Z` solves every row of `aug` and vanishes on the zero pattern; the returned rows are those
+   of `aug` (without `check`) or their reduction, which `Z` solves as well, so `A(Z) = b`;
 4. `<C_F, Z>_F = sum_j C_j(X_j)`, by `lemma_objective_value`.
 
 Without LMIs, `Z = X`.
@@ -76,13 +76,15 @@ Without LMIs, `Z = X`.
   off the blocks and has blocks `B_i >= -eps I` satisfies `Z >= -eps I`, via
   `lemma_psd_shifted_two_blocks` (`lin_alg/mat_spec.rs`).
 - The row identities of `std_rows_ok`, instantiated at `Z`.
+- With `check`, a solution of the unreduced rows solves the reduced rows
+  (`lemma_solution_reduces`, `lemma_input_solution_reduced` in `lin_alg/reduce_spec.rs`): the
+  echelon form has the same solutions, and the kept rows are its first `rank` rows rescaled.
 
 **Not in Verus.** Without `check`, statements 2 and 3 together imply that the two problems
-have the same optimal value; this is not proved in Verus. With `check`, neither the
-feasibility of the user's problem nor the equality of optimal values is certified after the
-tolerance-based row removal: the lifted `Z` solves the unreduced rows, but no retained
-statement bounds the residual of the reduced system by that of the unreduced one (statement 5
-bounds the opposite direction).
+have the same optimal value; this is not proved in Verus. With `check`, statement 3 lifts every
+feasible user point, but statement 2 needs a solution of the unreduced rows, which `A(Z) = b`
+no longer provides: neither the feasibility of the user's problem at a returned point nor the
+equality of optimal values is certified after the tolerance-based row removal.
 
 ## 4. Approximate soundness
 
@@ -98,18 +100,33 @@ where `B_i = block_view(Z, block_off(bd, i))`. Hence:
 1. Without `check` (`lemma_approx_sound_unreduced`): both residuals are the entries of `res`
    at the corresponding row, `Z_rc = res[c_len + q]` at listed position `q`, and
    `<C_F, Z>_F = sum_j C_j(X_j)`.
-2. With `check`, `res` measures the reduced system only: its dense entries are the residuals
-   of the kept, normalized echelon rows; the residuals of the unreduced dense rows are bounded
-   only through statement 5, with a data-dependent constant. The zero-pattern entries of `Z`
-   are still entries of `res` (`lemma_action_residual_entries`) and
-   `<C_F, Z>_F = sum_j C_j(X_j)` (`lemma_objective_value`).
+2. With `check` (`lemma_approx_sound_reduced`), `res` measures the reduced system only. Let
+   `[A_0 | b_0] = setup_aug` be the unreduced system, `N = ||A_0 Z - b_0||` its residual norm
+   at `Z` (`std_resid_vec_r`), `phi(Z) = ||A_0||_F ||Z|| + ||b_0||` (`setup_resid_scale`), and
+   `C`, `||U||_F` the constant and recovery norm of statement 5 for this reduction
+   (`setup_red_const`, `setup_recovery_norm`). Then:
+   - `N <= C tau phi(Z) + ||U||_F pinf (1 + ||b||)`, and `phi(Z) = 0` forces `N = 0`
+     (`lemma_unreduced_residual_pinf`): the kept residual `||A_K Z - b_K||` is the norm of the
+     dense part of `res`, at most `||res|| = pinf (1 + ||b||)`;
+   - `|sum_j A_j(X_j)_e - b_e| <= N` for every equality row `e`;
+   - the linking residual `R_i = W_i - B_i` of every LMI, with `W_i = H_i(X) - M_i` the actual
+     slack (`lmi_slack_r`, `lmi_link_residual`), satisfies `||R_i||_F <= N`;
+   - if `B_i >= -eps_i I`, then `W_i >= -(eps_i + ||R_i||_F) I` (`lemma_lmi_slack_shifted`).
+
+   The zero-pattern entries of `Z` are still entries of `res` and
+   `<C_F, Z>_F = sum_j C_j(X_j)`. Nothing is claimed about the size of `C` and `||U||_F`, so
+   these bounds do not make the LMI violations small in absolute terms.
 3. A successful PSD check (`psd_blocks_ok`) gives `B_i >= -eps_i I` with the implementation's
    tolerance (`lemma_lmi_blocks_checked`), and `|res_l| <= pinf * (1 + ||b||)`
    (`lemma_residual_entry_pinf`).
 
 **Ingredients.** The row identities of `std_rows_ok` give the residual identities above for
 every `Z`; `lemma_result_aug_residual` identifies the residuals of the returned rows with the
-entries of `res`.
+entries of `res`. For the reduced case: the window bound `||x[off .. off + len]|| <= ||x||`
+(`lemma_window_norm_le`), the grid sum `sum_c sum_r f(c k + r) = sum_t f(t)`
+(`lemma_sum_fn_grid`) identifying `||R_i||_F` with the norm of a window of `A_0 Z - b_0`, and
+the perturbation of the semidefinite order `|x^T R x| <= ||R||_F ||x||^2`
+(`lemma_quad_frob_bound`, `lemma_psd_shifted_perturbed` in `lin_alg/norm_spec.rs`).
 
 ## 5. Relative residual bound of the constraint reduction
 
@@ -130,18 +147,21 @@ largest magnitudes of the normalized coefficients and right-hand sides (0 if emp
     C   = max(e_A / ||A||_F, e_b / ||b||)   (a zero denominator has a zero numerator; it counts 0),
     d(z) = ||A||_F ||z|| + ||b||.
 
-Then `||E||_F <= tau e_A`, `||f|| <= tau e_b`, and for every `z` with `d(z) > 0`
+Then `||E||_F <= tau e_A`, `||f|| <= tau e_b`, and for every `z`
 
-    ||A z - b|| / d(z) <= C tau + ||U||_F ||A_K z - b_K|| / d(z).
+    ||A z - b|| <= C tau d(z) + ||U||_F ||A_K z - b_K||,
 
-If `d(z) = 0` then `A z - b = 0`; if `q = 0` then `C = 0`. `U` and `C` depend on the data only,
-not on `z`; nothing is claimed about the size of `C`.
+which divided by `d(z) > 0` is the relative bound
+`||A z - b|| / d(z) <= C tau + ||U||_F ||A_K z - b_K|| / d(z)`. If `d(z) = 0` then
+`A z - b = 0`; if `q = 0` then `C = 0`. `U` and `C` depend on the data only, not on `z`;
+nothing is claimed about the size of `C`.
 
-**Proved by** `lemma_relative_residual_bound` (explicit pivots and transformation),
-`lemma_reduction_residual_bound` (for `reduced_system`, witnesses `red_pivots`, `red_transform`)
-and `lemma_reduced_from_residual_bound` in `sdpad_spec.rs` (for the dense rows of a setup with
-`check`, `reduced_from`, witness `red_echelon`); the zero cases are `lemma_residual_zero_scale`
-and `lemma_red_const_no_drop`.
+**Proved by** `lemma_residual_bound` and `lemma_relative_residual_bound` (explicit pivots and
+transformation), `lemma_reduction_residual_bound` (for `reduced_system`, witnesses
+`red_pivots`, `red_transform`) and `lemma_reduced_from_residual_bound` in `sdpad_spec.rs` (for
+the dense rows of a setup with `check`, `reduced_from`, witness `red_echelon`), the last two
+stating both forms and the zero case; the zero cases are `lemma_residual_zero_scale` and
+`lemma_red_const_no_drop`.
 
 **Ingredients.**
 - The ghost transformation `T` tracked through `gauss_elim` (`row_comb`, `lemma_row_comb_swap`,

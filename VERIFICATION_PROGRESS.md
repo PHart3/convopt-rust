@@ -14,8 +14,8 @@ build hash, which fails Verus's exact version check. `cargo build` and
 
 ## Layer status
 
-All 23 layers (L00-L22) are done; L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`,
-L22 the relative residual bound of the reduction (`RELATIVE_RESIDUAL_BOUND.md`).
+All 23 layers (L00-L22) are done; L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`
+(statements 1-4), L22 the residual bound of the reduction (statement 5).
 
 | Layer | Where |
 |-------|-------|
@@ -41,30 +41,31 @@ L22 the relative residual bound of the reduction (`RELATIVE_RESIDUAL_BOUND.md`).
 | L19 residuals and KKT quantities | `sdpad_loop`, `kkt_quantities`, `read_solution`, `SdpadOutcome` |
 | L20 final audit | this file, `TRUSTED_BASE.md`, `src/trusted.rs` |
 | L21 post-hoc proofs (gap identity, feasibility correspondence, approximate soundness) | `src/feas_spec.rs`; `lemma_gap_identity` in `sdpad_spec.rs`; block PSD lemmas in `mat_spec.rs` |
-| L22 relative residual bound of the reduction | `src/lin_alg/norm_spec.rs` (rectangular norms), `src/lin_alg/resid_spec.rs` (recovery matrix, error bounds, the theorem); `lemma_reduced_from_residual_bound` in `sdpad_spec.rs` |
+| L22 residual bound of the reduction | `src/lin_alg/norm_spec.rs` (rectangular norms), `src/lin_alg/resid_spec.rs` (recovery matrix, error bounds, the theorem); `lemma_reduced_from_residual_bound` in `sdpad_spec.rs` |
 
 ## Verified-function count
 
-Last full run: **984 verified, 0 errors** (about 28 s). `--time` reports no
+Last full run: **1022 verified, 0 errors** (about 29 s). `--time` reports no
 slow proof, and no `rlimit` is raised. The `verus!` blocks contain about
-16,900 lines of code, not counting blank and comment lines.
+17,400 lines of code, not counting blank and comment lines.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
 items are not counted. The count therefore drops when inline
 `nonlinear_arith` steps are folded into shared lemmas or when proofs leave
-the scope (the October 2026 scope reduction removed 38 items); such
-decreases are not lost proofs. L22 added 117 items: the row-transformation
-lemmas and the dropped-row bound in `gauss_spec`, the modules `norm_spec`
-and `resid_spec`, the solver-level corollary, and two `nonlinear_arith`
-steps in `sdp.rs` that had become brittle.
+the scope; such decreases are not lost proofs. The extension of L21 to
+constraint reduction (October 27, 2026) added 38 items: the reduced-case
+feasibility lemmas in `feas_spec`, the solution transfer in `reduce_spec`,
+the window, quadratic-form and perturbation lemmas in `norm_spec`, the grid
+sum in `sym_spec`, and seven single-step product lemmas in `real_spec` that
+replace the two-level nonlinear identities of `lemma_cauchy_schwarz`.
 
 | Module | Verified | Layers |
 |--------|---------:|--------|
 | `trusted` | 0 | trusted items only |
-| `real_spec` | 22 | L00 |
+| `real_spec` | 36 | L00 |
 | `lin_alg::vec_spec` | 20 | L01, L21 |
-| `lin_alg::sym_spec` | 64 | L02, L03, L21, L22 |
+| `lin_alg::sym_spec` | 66 | L02, L03, L21, L22 |
 | `lin_alg::mat_spec` | 87 | L03, L07, L12, L21 |
 | `lin_alg::constr_spec` | 23 | L04 |
 | `lin_alg::solve_spec` | 11 | L05 |
@@ -73,8 +74,8 @@ steps in `sdp.rs` that had become brittle.
 | `lin_alg::eigen_spec` | 19 | L09-L11 |
 | `lin_alg::spectral_spec` | 8 | L12 |
 | `lin_alg::gauss_spec` | 45 | L13, L22 |
-| `lin_alg::reduce_spec` | 9 | L14 |
-| `lin_alg::norm_spec` | 42 | L22 |
+| `lin_alg::reduce_spec` | 14 | L14, L21 |
+| `lin_alg::norm_spec` | 46 | L21, L22 |
 | `lin_alg::resid_spec` | 58 | L22 |
 | `lin_alg::matrix` | 48 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
@@ -82,10 +83,10 @@ steps in `sdp.rs` that had become brittle.
 | `lin_alg::jacobi` | 38 | L08, L10-L12 |
 | `sdp_spec` | 58 | L16 |
 | `sdpad_spec` | 36 | L17-L19, L21, L22 |
-| `feas_spec` | 37 | L21 |
+| `feas_spec` | 50 | L21 |
 | `sdp` | 100 | L15, L16 |
 | `sdp_altdir` | 35 | L17-L19 |
-| **total** | **984** | |
+| **total** | **1022** | |
 
 ## Main contracts
 
@@ -128,16 +129,17 @@ steps in `sdp.rs` that had become brittle.
   number of dropped rows, `alpha`/`beta` the largest normalized coefficient /
   right-hand side, `L = ||D T_D||_F` (`lemma_err_bounds`). With
   `C = max(e_A / ||A||_F, e_b / ||b||)` (a zero denominator contributes 0)
-  and `d(z) = ||A||_F ||z|| + ||b||`, every `z` with `d(z) > 0` satisfies
-  `||A z - b|| / d(z) <= C TOL + ||U||_F ||A_K z - b_K|| / d(z)`
-  (`lemma_relative_residual_bound`); `d(z) = 0` forces `A z - b = 0`
-  (`lemma_residual_zero_scale`) and `q = 0` gives `C = 0`
-  (`lemma_red_const_no_drop`). `U` and `C` are spec functions of the data
-  only (`recovery_r`, `red_const_r`); `lemma_reduction_residual_bound` states
-  the bound for `reduced_system` with the witnesses `red_pivots`,
-  `red_transform`, and `lemma_reduced_from_residual_bound` (`sdpad_spec.rs`)
-  for the dense rows of a setup with `check` (`reduced_from`, witness
-  `red_echelon`). Nothing is claimed about the size of `C`.
+  and `d(z) = ||A||_F ||z|| + ||b||`, every `z` satisfies
+  `||A z - b|| <= C TOL d(z) + ||U||_F ||A_K z - b_K||` (`lemma_residual_bound`),
+  divided by `d(z)` when `d(z) > 0` (`lemma_relative_residual_bound`);
+  `d(z) = 0` forces `A z - b = 0` (`lemma_residual_zero_scale`) and `q = 0`
+  gives `C = 0` (`lemma_red_const_no_drop`). `U` and `C` are spec functions
+  of the data only (`recovery_r`, `red_const_r`);
+  `lemma_reduction_residual_bound` states both forms and the zero case for
+  `reduced_system` with the witnesses `red_pivots`, `red_transform`, and
+  `lemma_reduced_from_residual_bound` (`sdpad_spec.rs`) for the dense rows of
+  a setup with `check` (`reduced_from`, witness `red_echelon`). Nothing is
+  claimed about the size of `C`.
 - **Jacobi** (`jacobi.rs`): `jacobi_rot` gives `c^2 + s^2 = 1`,
   `A' = J^T A J`, `Q' = Q J`, `A'_jk = 0`. Both eigensolvers establish
   `eigensolver_ok`: `Q^T Q = Q Q^T = I`, `A = Q B Q^T`, `vals = diag(B)`,
@@ -182,21 +184,33 @@ steps in `sdp.rs` that had become brittle.
     reduction this follows from `A(Z) = b` (`lemma_action_feasible_sound`,
     `lemma_action_feasible_sound_single`). With reduction, the dropped rows
     are controlled only by the reduction residual bound.
-  - Converse, without reduction: feasible `X_n` lift to `lift_z`, block
-    diagonal with blocks `H_i(X) - M_i`, `X_n + t_n I`, `t_n I`
+  - Converse, with or without reduction: feasible `X_n` lift to `lift_z`,
+    block diagonal with blocks `H_i(X) - M_i`, `X_n + t_n I`, `t_n I`
     (`t_n = sum |X_n|`), which reads back the `X_n`, is PSD, solves the
-    unreduced system, so `A(Z) = b`, and has the user's objective value
-    (`lemma_user_feasible_lifts`, `lemma_user_feasible_lifts_single`).
+    unreduced system and hence the setup's dense rows (a solution of the
+    input solves the reduced system, `lemma_input_solution_reduced`), so
+    `A(Z) = b`, and has the user's objective value
+    (`lemma_user_feasible_lifts`, `lemma_user_feasible_lifts_single`). The
+    unreduced system of a setup is the spec function `setup_aug`.
   - Approximate soundness, for any `Z`: the user-level residuals at
     `vars_of(Z)` are the residuals of the unreduced rows
     (`lemma_user_residuals`); without reduction these are entries of
     `A(Z) - b` (`lemma_approx_sound_unreduced`); a successful PSD check gives
     the LMI blocks `B_i >= -eps_i I` (`lemma_lmi_blocks_checked`), and
     `|res_l| <= pinf (1 + ||b||)`.
+  - Approximate soundness with reduction (`lemma_approx_sound_reduced`): the
+    unreduced residual norm `N = ||A_0 Z - b_0||` (`std_resid_vec_r`) satisfies
+    `N <= C TOL phi(Z) + ||U||_F pinf (1 + ||b||)` with `phi`, `C`, `||U||_F`
+    from the reduction residual bound (`setup_resid_scale`, `setup_red_const`,
+    `setup_recovery_norm`), and `phi(Z) = 0` forces `N = 0`
+    (`lemma_unreduced_residual_pinf`); every equality residual and every LMI
+    linking residual `R_i = W_i - B_i` (`lmi_link_residual`, `W_i` the actual
+    slack `lmi_slack_r`) satisfies `|res_e| <= N`, `||R_i||_F <= N`; a checked
+    block `B_i >= -eps_i I` gives `W_i >= -(eps_i + ||R_i||_F) I`
+    (`lemma_lmi_slack_shifted`). Nothing bounds `C` and `||U||_F`.
   - Not certified with reduction (`check`): the feasibility of the user's
-    problem and the equality of optimal values. `A(Z) - b` then measures the
-    reduced system only; the residual of the unreduced dense rows is bounded
-    by the reduction residual bound, whose constant is data-dependent.
+    problem at a returned point, small absolute LMI violations, and the
+    equality of optimal values.
   - Supporting algebra (`mat_spec.rs`): a diagonal block of `A >= -eps I`
     satisfies the bound (`lemma_psd_shifted_block`), a block-diagonal matrix
     with such blocks does (`lemma_psd_shifted_two_blocks`, iterated in
@@ -236,9 +250,12 @@ steps in `sdp.rs` that had become brittle.
   and L12.
 - **Rectangular norms** (`norm_spec.rs`): `mat_vec_rc` and `frob_rc` for a
   `rows x cols` index-function matrix; Cauchy-Schwarz, the triangle
-  inequality, `||A x|| <= ||A||_F ||x||`, `||A B||_F <= ||A||_F ||B||_F` and
-  the entry bounds `||x|| <= sqrt(n) max |x_k|`,
-  `||A||_F <= sqrt(rows cols) max |A_ik|`.
+  inequality, `||A x|| <= ||A||_F ||x||`, `||A B||_F <= ||A||_F ||B||_F`, the
+  entry bounds `||x|| <= sqrt(n) max |x_k|`,
+  `||A||_F <= sqrt(rows cols) max |A_ik|`, the window bound
+  `||x[off .. off + len]|| <= ||x||`, and `|x^T R x| <= ||R||_F ||x||^2`, which
+  perturbs the semidefinite order: `A >= -eps I` gives
+  `A + R >= -(eps + ||R||_F) I` (`lemma_psd_shifted_perturbed`).
 - **Eigensolvers.** Both solvers maintain `eigen_decomp_inv` (`Q` orthogonal,
   `A = Q B Q^T`) through shared init/step lemmas and stop on `offdiag_below`;
   `lemma_converged_approx` yields `eigensolver_ok`. The spectral operations
@@ -342,6 +359,12 @@ the installed Verus (0.2026.08.23).
   trigger `sum_upto(bs, j)` re-triggers on `sum_upto(bs, j + 1)`) floods the
   prover wherever its value is unfolded; `lift_entry` is `#[verifier::opaque]`
   and revealed only in `lemma_lift_z_entry`, which exposes both cases.
+- A two-level polynomial identity in four variables (the expansion of
+  `(a v - c u)^2` in `lemma_cauchy_schwarz`) made `nonlinear_arith` hang,
+  ignoring `--rlimit`, after unrelated lemmas were added to its module.
+  Single-step product identities are proved once in `real_spec.rs`
+  (`lemma_sq_diff`, `lemma_mul_rearrange`, `lemma_real_mul_assoc`, ..) and
+  instantiated; the linear solver combines the instances.
 - Large proofs can verify alone but fail in the full crate (`standard_lmi` at
   its call of `objective_sum`). Intermediate assertions, or naming a quantified
   precondition as a spec predicate (`objective_shapes_ok`) so that the call-site

@@ -51,7 +51,7 @@
 // stagnation rule fires (`stagnation_ok`, `stagnation_stop`), or with the last
 // iterate after TOTAL_STEPS iterations; the returned iterate is an element of
 // the trajectory (`outcome_ok`). The user's solution is read from its diagonal
-// blocks (`solution_ok`). With check, the relative residual bound of
+// blocks (`solution_ok`). With check, the residual bound of
 // resid_spec.rs applies to the dense rows (`lemma_reduced_from_residual_bound`).
 
 use vstd::prelude::*;
@@ -976,24 +976,28 @@ pub open spec fn red_echelon(a0: Seq<real>, red: Seq<real>, dim: int) -> Seq<rea
     choose|e: Seq<real>| reduced_system(a0, e, red, dim)
 }
 
-/// The relative residual bound for the dense rows of a setup with `check`: U and C are built
-/// from the witnesses `red_echelon`, `red_pivots` and `red_transform`, all independent of z.
+/// The residual bound for the dense rows of a setup with `check`: U and C are built from the
+/// witnesses `red_echelon`, `red_pivots` and `red_transform`, all independent of z. With
+/// d(z) = ||A||_F ||z|| + ||b||, ||A z - b|| <= C TOL d(z) + ||U||_F ||A_K z - b_K||, in relative
+/// form when d(z) > 0; d(z) = 0 forces A z - b = 0.
 pub proof fn lemma_reduced_from_residual_bound(a0: Seq<real>, red: Seq<real>, dim: int, z: Seq<real>)
     requires
         dim >= 1,
         reduced_from(a0, red, dim),
         z.len() == red_col_dim(dim) - 1,
-        resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z) > 0.0real,
     ensures
         ({
             let e = red_echelon(a0, red, dim);
             let t = red_transform(a0, e, dim);
             let rank = red_pivots(a0, e, red, dim).len() as int;
+            let nr = norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z));
             let d = resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z);
-            norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z)) / d
-                <= red_const_r(a0, dim, t, rank) * rv(TOL)
-                   + frob_rc(recovery_r(a0, e, dim, t), red_row_dim(a0, dim), rank)
-                     * norm_r(resid_vec_r(red, rank, red_col_dim(dim), z)) / d
+            let ct = red_const_r(a0, dim, t, rank) * rv(TOL);
+            let w = frob_rc(recovery_r(a0, e, dim, t), red_row_dim(a0, dim), rank)
+                * norm_r(resid_vec_r(red, rank, red_col_dim(dim), z));
+            &&& nr <= ct * d + w
+            &&& d > 0.0real ==> nr / d <= ct + w / d
+            &&& d == 0.0real ==> nr == 0.0real
         }),
 {
     let e = red_echelon(a0, red, dim);

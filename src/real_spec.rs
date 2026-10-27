@@ -28,6 +28,65 @@ pub proof fn lemma_sq_nonneg(x: real)
     assert(x * x >= 0.0real) by (nonlinear_arith);
 }
 
+/// Single-step product identities, proved once so that call sites need no nonlinear query.
+pub proof fn lemma_mul_comm(x: real, y: real)
+    ensures
+        x * y == y * x,
+{
+    assert(x * y == y * x) by (nonlinear_arith);
+}
+
+pub proof fn lemma_real_mul_assoc(x: real, y: real, z: real)
+    ensures
+        (x * y) * z == x * (y * z),
+{
+    assert((x * y) * z == x * (y * z)) by (nonlinear_arith);
+}
+
+/// (x y)(z w) = (x z)(y w).
+pub proof fn lemma_mul_rearrange(x: real, y: real, z: real, w: real)
+    ensures
+        (x * y) * (z * w) == (x * z) * (y * w),
+{
+    assert((x * y) * (z * w) == (x * z) * (y * w)) by (nonlinear_arith);
+}
+
+/// x (y - z) = x y - x z.
+pub proof fn lemma_mul_sub_right(x: real, y: real, z: real)
+    ensures
+        x * (y - z) == x * y - x * z,
+{
+    assert(x * (y - z) == x * y - x * z) by (nonlinear_arith);
+}
+
+/// (-2 x) y = -(2 x y).
+pub proof fn lemma_neg_two_mul(x: real, y: real)
+    ensures
+        (-(2.0real * x)) * y == -(2.0real * (x * y)),
+{
+    assert((-(2.0real * x)) * y == -(2.0real * (x * y))) by (nonlinear_arith);
+}
+
+/// (p - q)^2 = p^2 - 2 p q + q^2.
+pub proof fn lemma_sq_diff(p: real, q: real)
+    ensures
+        (p - q) * (p - q) == p * p - 2.0real * (p * q) + q * q,
+{
+    assert((p - q) * (p - q) == p * p - 2.0real * (p * q) + q * q) by (nonlinear_arith);
+}
+
+/// x > 0 and x t >= 0 give t >= 0.
+pub proof fn lemma_nonneg_of_pos_factor(x: real, t: real)
+    requires
+        x > 0.0real,
+        x * t >= 0.0real,
+    ensures
+        t >= 0.0real,
+{
+    assert(t >= 0.0real) by (nonlinear_arith)
+        requires x > 0.0real, x * t >= 0.0real;
+}
+
 /// |x y| = |x| |y|.
 pub proof fn lemma_abs_mul(x: real, y: real)
     ensures

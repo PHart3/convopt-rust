@@ -475,6 +475,32 @@ pub proof fn lemma_sum_fn_split(f: spec_fn(int) -> real, a: nat, b: nat)
     }
 }
 
+/// A double sum over the cells c k + r of m columns of height k is the single sum over the
+/// m k cells: sum_{c < m} sum_{r < k} f(c k + r) = sum_{t < m k} f(t).
+pub proof fn lemma_sum_fn_grid(f: spec_fn(int) -> real, k: nat, m: nat)
+    ensures
+        sum_fn_r(|c: int| sum_fn_r(|r: int| f(c * k + r), k), m) == sum_fn_r(f, m * k),
+    decreases m,
+{
+    let cols = |c: int| sum_fn_r(|r: int| f(c * k + r), k);
+    if m == 0 {
+        assert(m * k == 0);
+    } else {
+        let m1 = (m - 1) as nat;
+        let a: nat = m1 * k;
+        lemma_sum_fn_grid(f, k, m1);
+        lemma_sum_fn_split(f, a, k);
+        let g = |i: int| f(a + i);
+        let h = |r: int| f((m - 1) * k + r);
+        assert forall|r: int| 0 <= r < k implies #[trigger] g(r) == h(r) by {}
+        lemma_sum_fn_ext(g, h, k);
+        assert(cols(m - 1) == sum_fn_r(h, k));
+        assert(sum_fn_r(cols, m) == sum_fn_r(cols, m1) + cols(m - 1));
+        assert(m * k == a + k) by (nonlinear_arith)
+            requires a == (m - 1) * k;
+    }
+}
+
 /// Sums of nonnegative terms dominate each term.
 pub proof fn lemma_sum_fn_ge_term(f: spec_fn(int) -> real, n: nat, k: int)
     requires

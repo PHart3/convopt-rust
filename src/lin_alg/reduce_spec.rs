@@ -16,9 +16,11 @@
 // `reduced_system`: the kept rows are the normalized echelon rows of an
 // elimination of the normalized input satisfying the contract of `gauss_elim`
 // (solution set, zero columns, echelon structure, tolerance-based pivot, skip
-// and consistency rules, row transformation).  The dropped rows are only
-// known to pass the consistency test; resid_spec.rs bounds the residual
-// A z - b of the input system by that of the reduced system.
+// and consistency rules, row transformation), and shows that every solution
+// of the input solves the reduced system (`lemma_input_solution_reduced`).
+// The dropped rows are only known to pass the consistency test; resid_spec.rs
+// bounds the residual A z - b of the input system by that of the reduced
+// system.
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -226,6 +228,62 @@ pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
     &&& forall|i: int| 0 <= i < rank ==> #[trigger] row_scale_r(e, rd, dim, i) > 0.0real
     &&& forall|i: int, j: int| 0 <= i < rank && 0 <= j < cd
             ==> #[trigger] cm_entry(res, rank, i, j) == cm_entry(e, rd, i, j) / row_scale_r(e, rd, dim, i)
+}
+
+/// The residual of kept row l of the reduced system is that of echelon row l divided by its
+/// Frobenius norm: e_l(x) = s_l res_l(x).
+pub proof fn lemma_kept_row_residual(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, l: int, x: Seq<real>)
+    requires
+        dim >= 0,
+        reduced_with(a0, e, res, dim, pivots),
+        x.len() == red_col_dim(dim) - 1,
+        0 <= l < pivots.len(),
+    ensures
+        row_residual_r(e, red_row_dim(a0, dim), red_col_dim(dim), l, x)
+            == row_scale_r(e, red_row_dim(a0, dim), dim, l) * row_residual_r(res, pivots.len() as int, red_col_dim(dim), l, x),
+{
+    let cd = red_col_dim(dim);
+    let rd = red_row_dim(a0, dim);
+    let rank = pivots.len() as int;
+    let n = (cd - 1) as nat;
+    let s = row_scale_r(e, rd, dim, l);
+    let f = |c: int| cm_entry(e, rd, l, c) * x[c];
+    let g = |c: int| cm_entry(res, rank, l, c) * x[c];
+    assert forall|c: int| 0 <= c < n implies #[trigger] g(c) == (1.0real / s) * f(c) by {
+        let (u, w) = (cm_entry(e, rd, l, c), x[c]);
+        assert(cm_entry(res, rank, l, c) == u / s);
+        assert((u / s) * w == (1.0real / s) * (u * w)) by (nonlinear_arith)
+            requires s != 0.0real;
+    }
+    lemma_sum_fn_scale(f, g, 1.0real / s, n);
+    let (sf, b) = (sum_fn_r(f, n), cm_entry(e, rd, l, cd - 1));
+    assert(cm_entry(res, rank, l, cd - 1) == b / s);
+    assert(s * ((1.0real / s) * sf - b / s) == sf - b) by (nonlinear_arith)
+        requires s != 0.0real;
+}
+
+/// A solution of the input system solves the reduced system: the echelon form has the same
+/// solutions, and the kept rows are its first rank rows rescaled.
+pub proof fn lemma_input_solution_reduced(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, x: Seq<real>)
+    requires
+        dim >= 0,
+        reduced_with(a0, e, res, dim, pivots),
+        x.len() == red_col_dim(dim) - 1,
+        solves(a0, red_row_dim(a0, dim), red_col_dim(dim), x),
+    ensures
+        solves(res, pivots.len() as int, red_col_dim(dim), x),
+{
+    let cd = red_col_dim(dim);
+    let rd = red_row_dim(a0, dim);
+    let rank = pivots.len() as int;
+    assert(solves(e, rd, cd, x));
+    assert forall|i: int| 0 <= i < rank implies #[trigger] aug_row_ok(res, rank, cd, i, x) by {
+        assert(aug_row_ok(e, rd, cd, i, x));
+        lemma_kept_row_residual(a0, e, res, dim, pivots, i, x);
+        let (s, r) = (row_scale_r(e, rd, dim, i), row_residual_r(res, rank, cd, i, x));
+        assert(r == 0.0real) by (nonlinear_arith)
+            requires s != 0.0real, s * r == 0.0real;
+    }
 }
 
 /// The number of rows of an augmented system over dim x dim symmetric matrices.
