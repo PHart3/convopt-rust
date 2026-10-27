@@ -206,16 +206,17 @@ pub proof fn lemma_row_scale_pos(e: Seq<real>, row_dim: int, dim: int, pivots: S
 /* ---------- the result of the reduction ---------- */
 
 /// The reduced system res (rank rows) obtained from the input a0 through the echelon form e
-/// (of the normalized input) with pivot sequence pivots: res row i is echelon row i divided by
-/// its Frobenius norm, e has the solution set and the zero columns of a0, e is in echelon form
-/// under the pivot and skip rules, and the rows of e without a pivot pass the consistency test.
+/// (of the normalized input) with pivot sequence pivots, for the relative tolerance tol of the
+/// elimination: res row i is echelon row i divided by its Frobenius norm, e has the solution
+/// set and the zero columns of a0, e is in echelon form under the pivot and skip rules with
+/// tolerance tol, and the rows of e without a pivot pass the consistency test with tolerance tol.
 /// The rank is positive (the input of the reduction is nonzero).
 /// The normalized input is a row combination T of e (the row operations of the elimination).
-pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>) -> bool {
+pub open spec fn reduced_with(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>) -> bool {
     let cd = red_col_dim(dim);
     let rd = red_row_dim(a0, dim);
     let rank = pivots.len() as int;
-    let eps = gauss_eps_r(normalized_r(a0, dim), rd, cd);
+    let eps = gauss_eps_r(tol, normalized_r(a0, dim), rd, cd);
     &&& e.len() == a0.len()
     &&& rank >= 1
     &&& res.len() == cd * rank
@@ -224,7 +225,7 @@ pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
     &&& echelon_form(e, rd, cd, pivots, eps)
     &&& skipped_bounded(e, rd, cd, pivots, eps, cd - 1)
     &&& forall|l: int| 0 <= l < rank ==> #[trigger] pivots[l] < cd - 1
-    &&& rhs_consistent(e, rd, cd, rank as nat, rhs_abs_max_r(normalized_r(a0, dim), rd, cd))
+    &&& rhs_consistent(tol, e, rd, cd, rank as nat, rhs_abs_max_r(normalized_r(a0, dim), rd, cd))
     &&& exists|t: MatF| #[trigger] row_comb(normalized_r(a0, dim), e, rd, cd, t)
     &&& forall|i: int| 0 <= i < rank ==> #[trigger] row_scale_r(e, rd, dim, i) > 0.0real
     &&& forall|i: int, j: int| 0 <= i < rank && 0 <= j < cd
@@ -233,10 +234,10 @@ pub open spec fn reduced_with(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
 
 /// The residual of kept row l of the reduced system is that of echelon row l divided by its
 /// Frobenius norm: e_l(x) = s_l res_l(x).
-pub proof fn lemma_kept_row_residual(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, l: int, x: Seq<real>)
+pub proof fn lemma_kept_row_residual(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, l: int, x: Seq<real>)
     requires
         dim >= 0,
-        reduced_with(a0, e, res, dim, pivots),
+        reduced_with(tol, a0, e, res, dim, pivots),
         x.len() == red_col_dim(dim) - 1,
         0 <= l < pivots.len(),
     ensures
@@ -265,10 +266,10 @@ pub proof fn lemma_kept_row_residual(a0: Seq<real>, e: Seq<real>, res: Seq<real>
 
 /// A solution of the input system solves the reduced system: the echelon form has the same
 /// solutions, and the kept rows are its first rank rows rescaled.
-pub proof fn lemma_input_solution_reduced(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, x: Seq<real>)
+pub proof fn lemma_input_solution_reduced(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, x: Seq<real>)
     requires
         dim >= 0,
-        reduced_with(a0, e, res, dim, pivots),
+        reduced_with(tol, a0, e, res, dim, pivots),
         x.len() == red_col_dim(dim) - 1,
         solves(a0, red_row_dim(a0, dim), red_col_dim(dim), x),
     ensures
@@ -280,7 +281,7 @@ pub proof fn lemma_input_solution_reduced(a0: Seq<real>, e: Seq<real>, res: Seq<
     assert(solves(e, rd, cd, x));
     assert forall|i: int| 0 <= i < rank implies #[trigger] aug_row_ok(res, rank, cd, i, x) by {
         assert(aug_row_ok(e, rd, cd, i, x));
-        lemma_kept_row_residual(a0, e, res, dim, pivots, i, x);
+        lemma_kept_row_residual(tol, a0, e, res, dim, pivots, i, x);
         let (s, r) = (row_scale_r(e, rd, dim, i), row_residual_r(res, rank, cd, i, x));
         assert(r == 0.0real) by (nonlinear_arith)
             requires s != 0.0real, s * r == 0.0real;
@@ -292,9 +293,10 @@ pub open spec fn red_row_dim(a0: Seq<real>, dim: int) -> int {
     rows_of(a0.len() as int, red_col_dim(dim))
 }
 
-/// The postcondition of `linear_remove_redundant_sym` (a0 the input, e its echelon form, res the result).
-pub open spec fn reduced_system(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int) -> bool {
-    exists|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(a0, e, res, dim, pivots)
+/// The reduction of a0 with tolerance tol (e the echelon form, res the result); the postcondition
+/// of `linear_remove_redundant_sym` is the instance tol = TOL.
+pub open spec fn reduced_system(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int) -> bool {
+    exists|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(tol, a0, e, res, dim, pivots)
 }
 
 } // verus!

@@ -9,7 +9,7 @@ use crate::trusted::abort;
 #[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
-use crate::real_spec::{abs_r, max_r, lemma_sq_nonneg};
+use crate::real_spec::{abs_r, max_r, lemma_sq_nonneg, lemma_tol_scale_ge};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -431,6 +431,22 @@ fn cached_pivot_col(a: &SymMatrix, maxima: &Vec<usize>, dim: usize) -> (k: usize
 
 const MAX_SWEEPS: usize = 50;
 
+/// The relative stopping tolerance of both eigensolvers: they stop once every off-diagonal
+/// entry is below JACOBI_TOL * max(1, max_i |B_ii|) in magnitude.
+pub const JACOBI_TOL: f64 = 1e-12;
+
+/// The relative cutoff of the negative spectral part: negeigendecomp keeps the eigenvalues
+/// below -NEG_EIG_TOL * max(max_t |A_t|, 1).
+pub const NEG_EIG_TOL: f64 = 1e-8;
+
+/// The property of the stopping tolerance that the proofs use: it is positive, so that a
+/// pivot failing the stopping test is nonzero and the stopping bound is nonnegative.
+pub proof fn lemma_jacobi_tol_default()
+    ensures
+        rv(JACOBI_TOL) > 0.0real,
+{
+}
+
 // (for symmetric A of order dim, returns (diag(B), Q) with A = Q B Q^T, Q orthogonal and the
 // off-diagonal part of B below the stopping threshold; see eigen_spec.rs. Each rotation pivots
 // on the position of maximal off-diagonal magnitude, found through the per-column cache
@@ -444,7 +460,7 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
         final(a)@.len() == old(a)@.len(),
         res.0@.len() == dim,
         res.1@.len() == dim * dim,
-        eigensolver_ok(rvs(old(a)@), rvs(final(a)@), rvs(res.1@), rvs(res.0@), dim as int),
+        eigensolver_ok(rv(JACOBI_TOL), rvs(old(a)@), rvs(final(a)@), rvs(res.1@), rvs(res.0@), dim as int),
 {
     let ghost a0 = rvs(old(a)@);
     let ghost n = dim as int;
@@ -458,7 +474,8 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
         let res = (vec![a[0]], vec![1.0]);
         proof {
             assert(rvs(res.0@) =~= sym_diag_r(a0, 1));
-            lemma_eigensolver_dim1(a0, rvs(res.1@));
+            lemma_jacobi_tol_default();
+            lemma_eigensolver_dim1(rv(JACOBI_TOL), a0, rvs(res.1@));
         }
         return res;
     }
@@ -545,7 +562,7 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
             final(a)@ == final(vals)@,
             final(vects)@ == qf,
             eigen_decomp_inv(a0, rvs(vects@), rvs(vals@), n),
-            jacobi_converged(rvs(vals@), n),
+            jacobi_converged(rv(JACOBI_TOL), rvs(vals@), n),
         decreases max_rotations - count,
     {
         if count == max_rotations {
@@ -695,16 +712,18 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
             assert(vals.len() >= pk_len(n));
         }
         let piv = vals[(k * (k + 1)) / 2 + j];
-        if scaled_near_zero(piv, 1.0_f64.max(max_diag), 1e-12) {
+        if scaled_near_zero(piv, 1.0_f64.max(max_diag), JACOBI_TOL) {
             proof {
-                lemma_offdiag_max_below(cur, n, j as int, k as int, jacobi_thr_r(cur, n));
+                lemma_offdiag_max_below(cur, n, j as int, k as int, jacobi_thr_r(rv(JACOBI_TOL), cur, n));
             }
             break;
         }
-        // the pivot is nonzero: its magnitude is at least 1e-12 * max(1, max_diag)
+        // the pivot is nonzero: its magnitude is at least JACOBI_TOL * max(1, max_diag) > 0
         let ghost qprev = rvs(vects@);
         proof {
             prev = cur;
+            lemma_jacobi_tol_default();
+            lemma_tol_scale_ge(rv(JACOBI_TOL), max_r(1.0real, rv(max_diag)));
         }
         let (v, q, b) = jacobi_rot(vals, vects, dim, k, j);
         vals = v;
@@ -717,7 +736,8 @@ pub fn jacobi_eigen_cach(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix
     }
     let eigenvals = diag_of_sym_mat(vals, dim);
     proof {
-        lemma_converged_approx(a0, rvs(vects@), rvs(vals@), n);
+        lemma_jacobi_tol_default();
+        lemma_converged_approx(rv(JACOBI_TOL), a0, rvs(vects@), rvs(vals@), n);
     }
     (eigenvals, q0)
 }
@@ -737,7 +757,7 @@ pub fn jacobi_eigen_cyc(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix)
         final(a)@.len() == old(a)@.len(),
         res.0@.len() == dim,
         res.1@.len() == dim * dim,
-        eigensolver_ok(rvs(old(a)@), rvs(final(a)@), rvs(res.1@), rvs(res.0@), dim as int),
+        eigensolver_ok(rv(JACOBI_TOL), rvs(old(a)@), rvs(final(a)@), rvs(res.1@), rvs(res.0@), dim as int),
 {
     let ghost a0 = rvs(old(a)@);
     let ghost n = dim as int;
@@ -750,7 +770,8 @@ pub fn jacobi_eigen_cyc(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix)
         let res = (vec![a[0]], vec![1.0]);
         proof {
             assert(rvs(res.0@) =~= sym_diag_r(a0, 1));
-            lemma_eigensolver_dim1(a0, rvs(res.1@));
+            lemma_jacobi_tol_default();
+            lemma_eigensolver_dim1(rv(JACOBI_TOL), a0, rvs(res.1@));
         }
         return res;
     }
@@ -781,7 +802,7 @@ pub fn jacobi_eigen_cyc(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix)
             final(a)@ == final(vals)@,
             final(vects)@ == qf,
             eigen_decomp_inv(a0, rvs(vects@), rvs(vals@), n),
-            jacobi_converged(rvs(vals@), n),
+            jacobi_converged(rv(JACOBI_TOL), rvs(vals@), n),
         decreases MAX_SWEEPS - count,
     {
         if count == MAX_SWEEPS {
@@ -912,10 +933,10 @@ pub fn jacobi_eigen_cyc(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix)
             lemma_max0_fn_bound(fc, dim as nat);
             assert(rv(max_diag) == max_abs_diag_r(cur, n));
         }
-        if scaled_near_zero(max_offdiag, 1.0_f64.max(max_diag), 1e-12) {
+        if scaled_near_zero(max_offdiag, 1.0_f64.max(max_diag), JACOBI_TOL) {
             proof {
                 assert forall|r: int, l: int| 0 <= r < n && 0 <= l < n && r != l
-                    implies #[trigger] abs_r(sym_entry(cur, r, l)) < jacobi_thr_r(cur, n) by {
+                    implies #[trigger] abs_r(sym_entry(cur, r, l)) < jacobi_thr_r(rv(JACOBI_TOL), cur, n) by {
                     if r > l {
                         assert(sym_entry(cur, r, l) == sym_entry(cur, l, r));
                     }
@@ -926,7 +947,8 @@ pub fn jacobi_eigen_cyc(a: &mut SymMatrix, dim: usize) -> (res: (Vector, Matrix)
     }
     let eigenvals = diag_of_sym_mat(vals, dim);
     proof {
-        lemma_converged_approx(a0, rvs(vects@), rvs(vals@), n);
+        lemma_jacobi_tol_default();
+        lemma_converged_approx(rv(JACOBI_TOL), a0, rvs(vects@), rvs(vals@), n);
     }
     (eigenvals, q0)
 }
@@ -936,10 +958,10 @@ pub enum JacobiVariant {
     Cyclic,
 }
 
-/// The selection test of the two spectral parts: vals[k] < -1e-8 * scale for the negative
-/// part, vals[k] > 0 for the positive part.
+/// The selection test of the two spectral parts: vals[k] < -NEG_EIG_TOL * scale for the
+/// negative part, vals[k] > 0 for the positive part.
 pub open spec fn eig_sel(vals: Seq<real>, negative: bool, scale: real) -> spec_fn(int) -> bool {
-    if negative { neg_sel(vals, scale) } else { pos_sel(vals) }
+    if negative { neg_sel(rv(NEG_EIG_TOL), vals, scale) } else { pos_sel(vals) }
 }
 
 // the eigenpairs (vals[k], column k of vects) passing the selection test `eig_sel`, in index
@@ -988,7 +1010,7 @@ fn select_eigenpairs(vals: &Vector, vects: &Matrix, dim: usize, negative: bool, 
                 requires m <= i, n >= 0;
         }
         let v = vals[i];
-        let keep = if negative { is_significantly_negative(v, scale, 1e-8) } else { v > 0.0 };
+        let keep = if negative { is_significantly_negative(v, scale, NEG_EIG_TOL) } else { v > 0.0 };
         if keep {
             let lo = i * dim;
             let ghost prev_vals = rvs(sel_vals@);
@@ -1039,7 +1061,7 @@ pub fn poseigendecomp(a: &mut SymMatrix, dim: usize, var: &JacobiVariant) -> (re
         old(a)@.len() >= pk_len(dim as int),
     ensures
         final(a)@.len() == old(a)@.len(),
-        exists|q: Seq<real>| #[trigger] spectral_part_ok(rvs(old(a)@), rvs(final(a)@), q,
+        exists|q: Seq<real>| #[trigger] spectral_part_ok(rv(JACOBI_TOL), rvs(old(a)@), rvs(final(a)@), q,
             pos_sel(sym_diag_r(rvs(final(a)@), dim as int)), rvs(res.0@), rvs(res.1@), dim as int),
 {
     let (vals, vects) = match var {
@@ -1048,14 +1070,14 @@ pub fn poseigendecomp(a: &mut SymMatrix, dim: usize, var: &JacobiVariant) -> (re
     };
     let res = select_eigenpairs(&vals, &vects, dim, false, 0.0);
     proof {
-        assert(spectral_part_ok(rvs(old(a)@), rvs(a@), rvs(vects@),
+        assert(spectral_part_ok(rv(JACOBI_TOL), rvs(old(a)@), rvs(a@), rvs(vects@),
             pos_sel(sym_diag_r(rvs(a@), dim as int)), rvs(res.0@), rvs(res.1@), dim as int));
     }
     res
 }
 
 // extracting the negative part of the above spectral decomposition
-// (the eigenpairs with value < -1e-8 * scale, scale = max(max_t |a_t|, 1) of the input)
+// (the eigenpairs with value < -NEG_EIG_TOL * scale, scale = max(max_t |a_t|, 1) of the input)
 pub fn negeigendecomp(a: &mut SymMatrix, dim: usize, var: &JacobiVariant) -> (res: (Vector, Matrix))
     requires
         dim >= 1,
@@ -1063,8 +1085,8 @@ pub fn negeigendecomp(a: &mut SymMatrix, dim: usize, var: &JacobiVariant) -> (re
         old(a)@.len() >= pk_len(dim as int),
     ensures
         final(a)@.len() == old(a)@.len(),
-        exists|q: Seq<real>| #[trigger] spectral_part_ok(rvs(old(a)@), rvs(final(a)@), q,
-            neg_sel(sym_diag_r(rvs(final(a)@), dim as int), pivot_scale_r(rvs(old(a)@))), rvs(res.0@), rvs(res.1@), dim as int),
+        exists|q: Seq<real>| #[trigger] spectral_part_ok(rv(JACOBI_TOL), rvs(old(a)@), rvs(final(a)@), q,
+            neg_sel(rv(NEG_EIG_TOL), sym_diag_r(rvs(final(a)@), dim as int), pivot_scale_r(rvs(old(a)@))), rvs(res.0@), rvs(res.1@), dim as int),
 {
     let scale = pivot_scale(a);
     let (vals, vects) = match var {
@@ -1073,8 +1095,8 @@ pub fn negeigendecomp(a: &mut SymMatrix, dim: usize, var: &JacobiVariant) -> (re
     };
     let res = select_eigenpairs(&vals, &vects, dim, true, scale);
     proof {
-        assert(spectral_part_ok(rvs(old(a)@), rvs(a@), rvs(vects@),
-            neg_sel(sym_diag_r(rvs(a@), dim as int), pivot_scale_r(rvs(old(a)@))), rvs(res.0@), rvs(res.1@), dim as int));
+        assert(spectral_part_ok(rv(JACOBI_TOL), rvs(old(a)@), rvs(a@), rvs(vects@),
+            neg_sel(rv(NEG_EIG_TOL), sym_diag_r(rvs(a@), dim as int), pivot_scale_r(rvs(old(a)@))), rvs(res.0@), rvs(res.1@), dim as int));
     }
     res
 }

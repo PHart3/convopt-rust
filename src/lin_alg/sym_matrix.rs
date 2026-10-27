@@ -11,7 +11,7 @@ use crate::lin_alg::comparison::{pivot_below_positive_threshold, scaled_near_zer
 #[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
-use crate::real_spec::{abs_r, max_r, lemma_sq_nonneg};
+use crate::real_spec::{abs_r, max_r, lemma_sq_nonneg, lemma_tol_scale_ge};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::vec_spec::*;
 #[cfg(verus_keep_ghost)]
@@ -1415,7 +1415,7 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
         abs_max_r(rvs(old(mat)@)) > 0.0real,
     ensures
         final(mat)@.len() == old(mat)@.len(),
-        reduced_system(rvs(old(mat)@), rvs(final(mat)@), rvs(result@), dim as int),
+        reduced_system(rv(TOL), rvs(old(mat)@), rvs(final(mat)@), rvs(result@), dim as int),
 {
     let ghost a0 = rvs(old(mat)@);
     let ghost d = dim as int;
@@ -1566,14 +1566,14 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
     }
     let (echelon, rank, solvable) = gauss_elim(mat, col_dim, row_dim);
     let ghost e = rvs(echelon@);
-    let ghost eps = gauss_eps_r(n0, rd, cd);
+    let ghost eps = gauss_eps_r(rv(TOL), n0, rd, cd);
     let ghost tr = choose|t: MatF| #[trigger] row_comb(rvs(pre), e, rd, cd, t);
     proof {
         assert(row_comb(n0, e, rd, cd, tr));
     }
     let ghost pivots = choose|p: Seq<int>| {
-        &&& #[trigger] echelon_form(rvs(echelon@), row_dim as int, col_dim as int, p, gauss_eps_r(rvs(pre), row_dim as int, col_dim as int))
-        &&& skipped_bounded(rvs(echelon@), row_dim as int, col_dim as int, p, gauss_eps_r(rvs(pre), row_dim as int, col_dim as int), col_dim - 1)
+        &&& #[trigger] echelon_form(rvs(echelon@), row_dim as int, col_dim as int, p, gauss_eps_r(rv(TOL), rvs(pre), row_dim as int, col_dim as int))
+        &&& skipped_bounded(rvs(echelon@), row_dim as int, col_dim as int, p, gauss_eps_r(rv(TOL), rvs(pre), row_dim as int, col_dim as int), col_dim - 1)
         &&& forall|l: int| 0 <= l < p.len() ==> #[trigger] p[l] < col_dim - 1
         &&& p.len() == rank
     };
@@ -1689,7 +1689,7 @@ pub fn linear_remove_redundant_sym(mat: &mut Matrix, dim: usize) -> (result: Mat
         assert forall|i: int| 0 <= i < rk implies #[trigger] row_scale_r(e, rd, d, i) > 0.0real by {
             lemma_row_scale_pos(e, rd, d, pivots, eps, i);
         }
-        assert(reduced_with(a0, e, rvs(result@), d, pivots));
+        assert(reduced_with(rv(TOL), a0, e, rvs(result@), d, pivots));
         assert(pivots.len() == rk);
     }
     result
@@ -2344,11 +2344,18 @@ pub fn diag_solver(diag: &Vector, vect: &Vector) -> (solution: Vector)
         if scaled_near_zero(diag[i], scale, TOL) {
             abort("diag_solver: division by zero");
         }
+        proof {
+            // the divisor is nonzero: |d_i| >= TOL * scale >= TOL > 0
+            lemma_tol_default();
+            lemma_tol_scale_ge(rv(TOL), rv(scale));
+        }
         solution.push(vect[i] / diag[i]);
     }
     proof {
         let (d, x, b) = (rvs(diag@), rvs(solution@), rvs(vect@));
         let dim = vect@.len() as int;
+        lemma_tol_default();
+        lemma_tol_scale_ge(rv(TOL), rv(scale));
         assert forall|i: int| 0 <= i < dim implies #[trigger] mat_vec(diag_view(d), dim, x)[i] == b[i] by {
             lemma_diag_mat_vec(d, dim, x, i);
             let (u, v) = (d[i], b[i]);
@@ -2407,6 +2414,11 @@ pub fn forw_subst(mat: &LowTriMatrix, vect: &mut [f64]) -> (solution: Vector)
         d = mat[(j * (2 * dim - j + 1)) / 2];
         if scaled_near_zero(d, scale, TOL) {
             abort("forw_subst: division by zero");
+        }
+        proof {
+            // the divisor is nonzero: |d| >= TOL * scale >= TOL > 0
+            lemma_tol_default();
+            lemma_tol_scale_ge(rv(TOL), rv(scale));
         }
         let ghost sol = rvs(solution@);
         solution.push(vect[j] / d);
@@ -2513,6 +2525,11 @@ pub fn back_subst(mat: &LowTriMatrix, vect: &mut [f64]) -> (solution: Vector)
         d = mat[(j * (2 * dim - j + 1)) / 2];
         if scaled_near_zero(d, scale, TOL) {
             abort("back_subst: division by zero");
+        }
+        proof {
+            // the divisor is nonzero: |d| >= TOL * scale >= TOL > 0
+            lemma_tol_default();
+            lemma_tol_scale_ge(rv(TOL), rv(scale));
         }
         let ghost sol = rvs(solution@);
         solution[j] = vect[j] / d;
@@ -2649,7 +2666,8 @@ pub fn ldlt_decomp(mat: &SymMatrix, dim: usize) -> (result: Option<(LowTriMatrix
                 lemma_lt_idx_bound(dim as int, i as int, j as int, dim as int);
                 lemma_dim_fits_idx(dim as int, i as int);
                 lemma_pk_idx_bound(j as int, i as int, dim as int);
-                assert(rv(TOL) * scale >= rv(TOL));
+                lemma_tol_default();
+                lemma_tol_scale_ge(rv(TOL), scale);
             }
             let ghost prev = rvs(l@);
             l[j * (2 * dim - j + 1) / 2 + (i - j)] = (mat[(i * (i + 1)) / 2 + j] - sum) / d[j];
@@ -2799,23 +2817,35 @@ pub fn pos_def_solver_upperleft(mat: &SymMatrix, vect: &mut Vector, id_len: usiz
     result
 }
 
+/// The relative tolerance of the PSD check: the diagonal shift of each block is
+/// PSD_TOL * max(max_i |B_ii|, 1).
+pub const PSD_TOL: f64 = 1e-9;
+
+/// The property of the PSD tolerance that the proofs use: it is positive, so that the shift
+/// of a block with a passed check is positive.
+pub proof fn lemma_psd_tol_default()
+    ensures
+        rv(PSD_TOL) > 0.0real,
+{
+}
+
 // check whether a block-diagonal symmetric matrix S is positive semidefinite by running LDLT on S + eps * I
 // (a successful check establishes B >= -eps I for every listed diagonal block B, with
-// eps = 1e-9 * max(max_i |B_ii|, 1), because the factorization B + eps I = L D L^T has
+// eps = PSD_TOL * max(max_i |B_ii|, 1), because the factorization B + eps I = L D L^T has
 // positive pivots; nothing is claimed when the check fails)
 pub fn psd_block_check(mat: &SymMatrix, blocks: &Vec<(usize, usize)>) -> (result: bool)
     requires
         blocks_fit(blocks@, mat@.len()),
     ensures
         result ==> forall|b: int| 0 <= b < blocks@.len()
-            ==> #[trigger] block_psd_ok(rvs(mat@), blocks@[b].0 as int, blocks@[b].1 as int),
+            ==> #[trigger] block_psd_ok(rv(PSD_TOL), rvs(mat@), blocks@[b].0 as int, blocks@[b].1 as int),
 {
     let ghost a = rvs(mat@);
     for b in 0..blocks.len()
         invariant
             a == rvs(mat@),
             blocks_fit(blocks@, mat@.len()),
-            forall|t: int| 0 <= t < b ==> #[trigger] block_psd_ok(a, blocks@[t].0 as int, blocks@[t].1 as int),
+            forall|t: int| 0 <= t < b ==> #[trigger] block_psd_ok(rv(PSD_TOL), a, blocks@[t].0 as int, blocks@[t].1 as int),
     {
         let (start, dim) = blocks[b];
         proof {
@@ -2825,7 +2855,7 @@ pub fn psd_block_check(mat: &SymMatrix, blocks: &Vec<(usize, usize)>) -> (result
             lemma_dim_fits_monotone(dim as int, n);
         }
         let block = sym_matrix_diag_block(start, dim, mat);
-        let eps = 1e-9 * max_diag_sym(&block, dim).max(1.0);
+        let eps = PSD_TOL * max_diag_sym(&block, dim).max(1.0);
         // block + eps * I in packed form
         let mut block_add_scal: SymMatrix = Vec::new();
         let mut idx = 0;
@@ -2925,9 +2955,10 @@ pub fn psd_block_check(mat: &SymMatrix, blocks: &Vec<(usize, usize)>) -> (result
                 assert(sym_entry(a, start + r, start + c) == rv(mat@[pk_idx(start + lo, start + hi)]));
             }
             // positive pivots: d_k >= TOL * max(.., 1) >= TOL > 0
+            lemma_tol_default();
             assert forall|k: int| 0 <= k < n implies #[trigger] dv[k] >= 0.0real by {
                 let scale = max_r(max_abs_diag_r(sv, n), 1.0real);
-                assert(rv(TOL) * scale >= rv(TOL));
+                lemma_tol_scale_ge(rv(TOL), scale);
             }
             lemma_meq_trans(mmul(mmul(lt_view(rvs(l@), n), diag_view(dv), n), mtr(lt_view(rvs(l@), n)), n), sym_view(sv), shifted, n, n);
             lemma_shifted_factorization_psd(sym_view(bv), lt_view(rvs(l@), n), dv, n, rv(eps));
@@ -2940,9 +2971,9 @@ pub fn psd_block_check(mat: &SymMatrix, blocks: &Vec<(usize, usize)>) -> (result
                 }
                 lemma_block_max_abs_diag(bv, a, start as int, n);
             } else {
-                lemma_psd_shifted_zero_dim(block_view(a, start as int), psd_check_eps_r(a, start as int, n));
+                lemma_psd_shifted_zero_dim(block_view(a, start as int), psd_check_eps_r(rv(PSD_TOL), a, start as int, n));
             }
-            assert(block_psd_ok(a, start as int, dim as int));
+            assert(block_psd_ok(rv(PSD_TOL), a, start as int, dim as int));
         }
     }
     true

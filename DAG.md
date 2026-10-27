@@ -34,12 +34,12 @@ deps: L02 |
 targets: forw_subst, back_subst, diag_solver |
 status: done
 
-L06 | LDLT and positive-definite solvers: `L D L^T = A` with unit-lower `L` and pivots `d_i >= TOL * max(max_diag, 1)`; `A x = b`; the block solve `(A, I/2) x = b` |
+L06 | LDLT and positive-definite solvers: `L D L^T = A` with unit-lower `L` and pivots `d_i >= TOL * max(max_diag, 1)`, positive since `TOL > 0`; `A x = b`; the block solve `(A, I/2) x = b` |
 deps: L05, L03 |
 targets: ldlt_decomp, pos_def_solver, pos_def_solver_upperleft |
 status: done
 
-L07 | PSD block check: success gives `B >= -eps I` for each block, `eps = 1e-9 * max(max_diag(B), 1)`, from the shifted LDLT with positive pivots |
+L07 | PSD block check: success gives `B >= -eps I` for each block, `eps = PSD_TOL * max(max_diag(B), 1)`, from the shifted LDLT with positive pivots (`block_psd_ok` takes the tolerance as a parameter; the contract instantiates `PSD_TOL`) |
 deps: L06 |
 targets: psd_block_check |
 status: done
@@ -49,7 +49,7 @@ deps: L03 |
 targets: jacobi_rot |
 status: done
 
-L09 | Common eigensolver specification: the invariant `eigen_decomp_inv` (`Q` orthogonal, `A = Q B Q^T`) preserved by every rotation, the stopping predicate `offdiag_below` with its bound `||B - diag(B)||_F <= eps`, the shared contract `eigensolver_ok` |
+L09 | Common eigensolver specification: the invariant `eigen_decomp_inv` (`Q` orthogonal, `A = Q B Q^T`) preserved by every rotation, the stopping predicate `offdiag_below` with its bound `||B - diag(B)||_F <= eps`, the shared contract `eigensolver_ok`, parameterized by the stopping tolerance (nonnegative; both solvers instantiate `JACOBI_TOL`) |
 deps: L08 |
 targets: (spec/proof only: eigen_decomp_inv, eigen_decomp_approx, offdiag_below, lemma_eigen_inv_step, lemma_converged_approx, eigensolver_ok) |
 status: done
@@ -64,12 +64,12 @@ deps: L09 |
 targets: jacobi_eigen_cyc |
 status: done
 
-L12 | Spectral operations through `eigensolver_ok`: `poseigendecomp` keeps `B_kk > 0`, `negeigendecomp` keeps `B_kk < -1e-8 * scale`; the reconstruction is `Q diag(masked diag(B)) Q^T`, PSD for the positive part |
+L12 | Spectral operations through `eigensolver_ok`: `poseigendecomp` keeps `B_kk > 0`, `negeigendecomp` keeps `B_kk < -NEG_EIG_TOL * scale`; the reconstruction is `Q diag(masked diag(B)) Q^T`, PSD for the positive part |
 deps: L10, L11, L04 |
 targets: poseigendecomp, negeigendecomp |
 status: done
 
-L13 | Gaussian elimination: echelon invariants with pivots in the coefficient columns, partial pivoting, the tolerance-based skip rule (coefficient-only scale), solution set preserved (row swaps, subtractions, nonzero scalings), zero columns kept, rank, the consistency test (`TOL * 2^rank * max |b_k|` bound on the rows without a pivot), and the ghost row transformation `T` with input = `T` * output (`row_comb`) |
+L13 | Gaussian elimination: echelon invariants with pivots in the coefficient columns, partial pivoting, the tolerance-based skip rule (coefficient-only scale), solution set preserved (row swaps, subtractions, nonzero scalings), zero columns kept, rank (positive for a nonzero matrix since `TOL < 1`), the consistency test (`TOL * 2^rank * max |b_k|` bound on the rows without a pivot), and the ghost row transformation `T` with input = `T` * output (`row_comb`); the specification takes the tolerance as a parameter, instantiated with `TOL` by the contract |
 deps: L02 |
 targets: gauss_elim |
 status: done

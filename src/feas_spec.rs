@@ -69,6 +69,8 @@ use crate::lin_alg::ldlt_spec::{block_psd_ok, psd_check_eps_r};
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::matrix::TOL;
 #[cfg(verus_keep_ghost)]
+use crate::lin_alg::sym_matrix::PSD_TOL;
+#[cfg(verus_keep_ghost)]
 use crate::real_spec::{abs_r, lemma_sqrt_monotone};
 #[cfg(verus_keep_ghost)]
 use crate::sdp_spec::*;
@@ -1061,12 +1063,12 @@ pub proof fn lemma_solution_reduces(aug: Seq<real>, mat: Seq<f64>, point: Seq<f6
     lemma_reduced_rows(aug, mat, point, rows, total, dim, check);
     let res = result_aug(mat, point, rows);
     if check {
-        let e = choose|e: Seq<real>| reduced_system(aug, e, res, dim);
-        let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(aug, e, res, dim, pivots);
+        let e = choose|e: Seq<real>| reduced_system(rv(TOL), aug, e, res, dim);
+        let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(rv(TOL), aug, e, res, dim, pivots);
         assert(aug.len() as int == cd * total) by (nonlinear_arith)
             requires aug.len() as int == total * cd;
         lemma_div_multiples_vanish(total, cd);
-        lemma_input_solution_reduced(aug, e, res, dim, pivots, z);
+        lemma_input_solution_reduced(rv(TOL), aug, e, res, dim, pivots, z);
         let rank = pivots.len() as int;
         assert(res.len() == rows * cols + rows);
         assert(rows * cols + rows == rows * (cols + 1)) by (nonlinear_arith);
@@ -1339,7 +1341,8 @@ pub proof fn lemma_user_residuals(sdp: &SDP, aug: Seq<real>, z: Seq<real>)
 }
 
 /// The LMI blocks of z are blocks of the PSD partition, so a successful PSD check establishes
-/// B_i >= -eps_i I with the implementation's tolerance eps_i (block_psd_ok).
+/// B_i >= -eps_i I with the implementation's tolerance eps_i = PSD_TOL max(max_t |(B_i)_tt|, 1)
+/// (block_psd_ok).
 pub proof fn lemma_lmi_blocks_checked(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>)
     requires
         sdpad_input_ok(sdp, check),
@@ -1347,7 +1350,7 @@ pub proof fn lemma_lmi_blocks_checked(sdp: &SDP, check: bool, s: &SdpadSetup, z:
         sdp.lmi@.len() >= 1,
         psd_blocks_ok(s, z),
     ensures
-        forall|i: int| 0 <= i < bdims_r(sdp.lmi@).len() ==> #[trigger] block_psd_ok(z, block_off(bdims_r(sdp.lmi@), i), bdims_r(sdp.lmi@)[i]),
+        forall|i: int| 0 <= i < bdims_r(sdp.lmi@).len() ==> #[trigger] block_psd_ok(rv(PSD_TOL), z, block_off(bdims_r(sdp.lmi@), i), bdims_r(sdp.lmi@)[i]),
 {
     let d = s.var_dim as int;
     let nv = n_vars(sdp);
@@ -1364,10 +1367,10 @@ pub proof fn lemma_lmi_blocks_checked(sdp: &SDP, check: bool, s: &SdpadSetup, z:
     lemma_sum_upto_ge(bd, bd.len() as int);
     assert(block_sum(bd) >= 1);
     assert(psd_partition(bd, vd, d) == bs);
-    assert forall|i: int| 0 <= i < bd.len() implies #[trigger] block_psd_ok(z, block_off(bd, i), bd[i]) by {
+    assert forall|i: int| 0 <= i < bd.len() implies #[trigger] block_psd_ok(rv(PSD_TOL), z, block_off(bd, i), bd[i]) by {
         assert(s.psd_blocks@[i].0 as int == sum_upto(bs, i));
         assert(s.psd_blocks@[i].1 as int == bs[i]);
-        assert(block_psd_ok(z, s.psd_blocks@[i].0 as int, s.psd_blocks@[i].1 as int));
+        assert(block_psd_ok(rv(PSD_TOL), z, s.psd_blocks@[i].0 as int, s.psd_blocks@[i].1 as int));
     }
 }
 
@@ -1473,16 +1476,16 @@ pub proof fn lemma_lmi_slack_shifted(sdp: &SDP, z: Seq<real>, i: int)
     requires
         sdp_lmi_input_ok(sdp),
         0 <= i < bdims_r(sdp.lmi@).len(),
-        block_psd_ok(z, block_off(bdims_r(sdp.lmi@), i), bdims_r(sdp.lmi@)[i]),
+        block_psd_ok(rv(PSD_TOL), z, block_off(bdims_r(sdp.lmi@), i), bdims_r(sdp.lmi@)[i]),
     ensures
         psd_shifted(lmi_slack_r(sdp, z, i), bdims_r(sdp.lmi@)[i],
-            psd_check_eps_r(z, block_off(bdims_r(sdp.lmi@), i), bdims_r(sdp.lmi@)[i])
+            psd_check_eps_r(rv(PSD_TOL), z, block_off(bdims_r(sdp.lmi@), i), bdims_r(sdp.lmi@)[i])
                 + frob_rc(lmi_link_residual(sdp, z, i), bdims_r(sdp.lmi@)[i], bdims_r(sdp.lmi@)[i])),
 {
     let bd = bdims_r(sdp.lmi@);
     let (k, off) = (bd[i], block_off(bd, i));
     assert(k >= 1);
-    lemma_psd_shifted_perturbed(block_view(z, off), lmi_slack_r(sdp, z, i), k, psd_check_eps_r(z, off, k));
+    lemma_psd_shifted_perturbed(block_view(z, off), lmi_slack_r(sdp, z, i), k, psd_check_eps_r(rv(PSD_TOL), z, off, k));
 }
 
 /// ||R_i||_F <= ||A_0 z - b_0||: the entries of R_i are the residuals of the k_i^2 LMI rows of
@@ -1552,7 +1555,7 @@ pub open spec fn setup_red_const(sdp: &SDP, s: &SdpadSetup) -> real {
     let aug = setup_aug(sdp, true, s);
     let red = result_aug(s.mat_dense@, s.point@, s.c_len as int);
     let e = red_echelon(aug, red, d);
-    red_const_r(aug, d, red_transform(aug, e, d), red_pivots(aug, e, red, d).len() as int)
+    red_const_r(aug, d, red_transform(aug, e, d), red_pivots(rv(TOL), aug, e, red, d).len() as int)
 }
 
 pub open spec fn setup_recovery_norm(sdp: &SDP, s: &SdpadSetup) -> real {
@@ -1560,7 +1563,7 @@ pub open spec fn setup_recovery_norm(sdp: &SDP, s: &SdpadSetup) -> real {
     let aug = setup_aug(sdp, true, s);
     let red = result_aug(s.mat_dense@, s.point@, s.c_len as int);
     let e = red_echelon(aug, red, d);
-    frob_rc(recovery_r(aug, e, d, red_transform(aug, e, d)), red_row_dim(aug, d), red_pivots(aug, e, red, d).len() as int)
+    frob_rc(recovery_r(aug, e, d, red_transform(aug, e, d)), red_row_dim(aug, d), red_pivots(rv(TOL), aug, e, red, d).len() as int)
 }
 
 /// With reduction, the residual N = ||A_0 z - b_0|| of the unreduced system at z satisfies
@@ -1587,9 +1590,9 @@ pub proof fn lemma_unreduced_residual_pinf(sdp: &SDP, s: &SdpadSetup, z: Seq<rea
     let aug = setup_aug(sdp, true, s);
     let red = result_aug(s.mat_dense@, s.point@, rows);
     let e = red_echelon(aug, red, d);
-    assert(reduced_system(aug, e, red, d));
-    let pivots = red_pivots(aug, e, red, d);
-    assert(reduced_with(aug, e, red, d, pivots));
+    assert(reduced_system(rv(TOL), aug, e, red, d));
+    let pivots = red_pivots(rv(TOL), aug, e, red, d);
+    assert(reduced_with(rv(TOL), aug, e, red, d, pivots));
     let rank = pivots.len() as int;
     lemma_pk_col_start_monotone(0, d);
     assert(red.len() == rows * cols + rows);
@@ -1644,9 +1647,9 @@ pub proof fn lemma_approx_sound_reduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
             &&& forall|e: int| 0 <= e < sdp.constraint.1@.len()
                     ==> abs_r(#[trigger] user_row_r(sdp.constraint.0@, vd, e, xs) - rv(sdp.constraint.1@[e])) <= nr
             &&& forall|i: int| 0 <= i < bd.len() ==> frob_rc(#[trigger] lmi_link_residual(sdp, z, i), bd[i], bd[i]) <= nr
-            &&& forall|i: int| 0 <= i < bd.len() && block_psd_ok(z, block_off(bd, i), bd[i])
+            &&& forall|i: int| 0 <= i < bd.len() && block_psd_ok(rv(PSD_TOL), z, block_off(bd, i), bd[i])
                     ==> psd_shifted(#[trigger] lmi_slack_r(sdp, z, i), bd[i],
-                        psd_check_eps_r(z, block_off(bd, i), bd[i]) + frob_rc(lmi_link_residual(sdp, z, i), bd[i], bd[i]))
+                        psd_check_eps_r(rv(PSD_TOL), z, block_off(bd, i), bd[i]) + frob_rc(lmi_link_residual(sdp, z, i), bd[i], bd[i]))
             &&& res.len() == s.point@.len()
             &&& forall|q: int| 0 <= q < s.zeros@.len() ==> z[#[trigger] zero_idx(s.zeros@, q)] == res[s.c_len + q]
             &&& prim_val_r(s, z) == user_obj_r(sdp.objective@, vd, xs)
@@ -1677,9 +1680,9 @@ pub proof fn lemma_approx_sound_reduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
     assert forall|i: int| 0 <= i < bd.len() implies frob_rc(#[trigger] lmi_link_residual(sdp, z, i), bd[i], bd[i]) <= nr by {
         lemma_lmi_link_residual_norm(sdp, aug, z, i);
     }
-    assert forall|i: int| 0 <= i < bd.len() && block_psd_ok(z, block_off(bd, i), bd[i])
+    assert forall|i: int| 0 <= i < bd.len() && block_psd_ok(rv(PSD_TOL), z, block_off(bd, i), bd[i])
         implies psd_shifted(#[trigger] lmi_slack_r(sdp, z, i), bd[i],
-            psd_check_eps_r(z, block_off(bd, i), bd[i]) + frob_rc(lmi_link_residual(sdp, z, i), bd[i], bd[i])) by {
+            psd_check_eps_r(rv(PSD_TOL), z, block_off(bd, i), bd[i]) + frob_rc(lmi_link_residual(sdp, z, i), bd[i], bd[i])) by {
         lemma_lmi_slack_shifted(sdp, z, i);
     }
     // the objective

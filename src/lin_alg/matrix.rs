@@ -36,8 +36,19 @@ verus! {
 
 broadcast use crate::trusted::group_real_model;
 
-// default tolerance level
+/// The base tolerance: the relative threshold of the pivot tests (Gaussian elimination, the
+/// LDLT factorization, the triangular and diagonal solvers), of the diagonal shift that
+/// regularizes the Gram matrix, and of the accuracy stopping test of the solver loop.
 pub const TOL: f64 = 1e-10;
+
+/// The properties of the base tolerance that the proofs use: it is positive, so that a pivot
+/// passing its test is nonzero, and below 1, so that the largest coefficient of a nonzero
+/// matrix passes the pivot test.
+pub proof fn lemma_tol_default()
+    ensures
+        0.0real < rv(TOL) < 1.0real,
+{
+}
 
 // standard basis vectors
 pub fn standard_basis(i: usize, dim: usize) -> (result: Vector)
@@ -426,12 +437,12 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         same_solutions(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int),
         zero_cols_kept(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int),
         exists|pivots: Seq<int>| {
-            &&& #[trigger] echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rvs(old(mat)@), row_dim as int, col_dim as int))
-            &&& skipped_bounded(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rvs(old(mat)@), row_dim as int, col_dim as int), col_dim - 1)
+            &&& #[trigger] echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rv(TOL), rvs(old(mat)@), row_dim as int, col_dim as int))
+            &&& skipped_bounded(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rv(TOL), rvs(old(mat)@), row_dim as int, col_dim as int), col_dim - 1)
             &&& forall|l: int| 0 <= l < pivots.len() ==> #[trigger] pivots[l] < col_dim - 1
             &&& pivots.len() == res.1
         },
-        res.2 ==> rhs_consistent(rvs(res.0@), row_dim as int, col_dim as int, res.1 as nat, rhs_abs_max_r(rvs(old(mat)@), row_dim as int, col_dim as int)),
+        res.2 ==> rhs_consistent(rv(TOL), rvs(res.0@), row_dim as int, col_dim as int, res.1 as nat, rhs_abs_max_r(rvs(old(mat)@), row_dim as int, col_dim as int)),
         abs_max_prefix_r(rvs(old(mat)@), ((col_dim - 1) * row_dim) as nat) > 0.0real ==> res.1 >= 1,
         res.1 == 0 && res.2 ==> forall|t: int| 0 <= t < old(mat)@.len() ==> rv(#[trigger] old(mat)@[t]) == 0.0real,
         exists|t: MatF| #[trigger] row_comb(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int, t),
@@ -482,7 +493,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         }
         rhs_scales.push(mat[rhs_start + i].abs());
     }
-    let ghost eps = gauss_eps_r(a0, rd, cd);
+    let ghost eps = gauss_eps_r(rv(TOL), a0, rd, cd);
     // the RHS scales start below max |b_k| and at most double with each pivot step
     let ghost bmax = rhs_abs_max_r(a0, rd, cd);
     proof {
@@ -502,7 +513,9 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
         lemma_zero_cols_refl(a0, rd, cd);
         lemma_row_comb_refl(a0, rd, cd);
         lemma_max0_fn_bound(|u: int| abs_r(a0[u]), rhs_start as nat);
-        assert(rv(TOL) == 0.0000000001real);
+        lemma_tol_default();
+        assert(rv(TOL) * rv(coeff_scale) >= 0.0real) by (nonlinear_arith)
+            requires rv(TOL) > 0.0real, rv(coeff_scale) >= 0.0real;
     }
     let mut n = 0;
     while n < col_dim - 1 && row_search < row_dim
@@ -519,7 +532,8 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             rv(coeff_scale) >= 0.0real,
             rhs_start == nc * rd,
             eps == rv(TOL) * rv(coeff_scale),
-            rv(TOL) == 0.0000000001real,
+            eps >= 0.0real,
+            0.0real < rv(TOL) < 1.0real,
             pivots.len() == row_search,
             row_search == 0 ==> mat@ == old(mat)@,
             row_search == 0 ==> forall|k: int| 0 <= k < rd ==> rv(#[trigger] rhs_scales@[k]) == abs_r(rhs_r(a0, rd, cd, k)),
@@ -819,6 +833,9 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             assert(pivots_below(pivots, c) == 0);
             assert(skip_bound(pivots, c, eps) == pow2_r(0) * eps);
             assert(abs_r(a0[t]) <= eps);
+            // but eps = TOL * |a0[t]| < |a0[t]| since TOL < 1
+            assert(rv(TOL) * rv(coeff_scale) < rv(coeff_scale)) by (nonlinear_arith)
+                requires rv(TOL) < 1.0real, rv(coeff_scale) > 0.0real;
             assert(false);
         }
     }
@@ -835,7 +852,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
             nc * rd + rd == mat@.len(),
             mat@.len() <= usize::MAX,
             rhs_scales@.len() == row_dim,
-            rv(TOL) == 0.0000000001real,
+            0.0real < rv(TOL) < 1.0real,
             solvable ==> forall|k: int| row_search <= k < i
                 ==> rhs_r(rvs(mat@), rd, cd, k) == 0.0real || abs_r(rhs_r(rvs(mat@), rd, cd, k)) < rv(TOL) * #[trigger] rvs(rhs_scales@)[k],
         decreases row_dim - i,
@@ -863,6 +880,11 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                     let k = t - rhs_start;
                     assert(cm_idx(rd, k, cd - 1) == t);
                     assert(s[k] == abs_r(rhs_r(a0, rd, cd, k)));
+                    // the test |b_k| < TOL |b_k| fails for |b_k| > 0 since TOL < 1
+                    if s[k] > 0.0real {
+                        assert(rv(TOL) * s[k] < s[k]) by (nonlinear_arith)
+                            requires rv(TOL) < 1.0real, s[k] > 0.0real;
+                    }
                 }
             }
             assert forall|t: int| 0 <= t < a0.len() implies rv(#[trigger] old(mat)@[t]) == 0.0real by {
@@ -873,7 +895,7 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
     let res = (mat, row_search, solvable);
     proof {
         // the pivot sequence witnesses the echelon form and the transformation the row combination
-        assert(echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rvs(old(mat)@), row_dim as int, col_dim as int)));
+        assert(echelon_form(rvs(res.0@), row_dim as int, col_dim as int, pivots, gauss_eps_r(rv(TOL), rvs(old(mat)@), row_dim as int, col_dim as int)));
         assert(row_comb(rvs(old(mat)@), rvs(res.0@), row_dim as int, col_dim as int, tr));
         // a passed test: |b_i| < TOL * s_i <= TOL * 2^rank * bmax
         if solvable {
@@ -881,6 +903,8 @@ pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&m
                 #[trigger] rhs_r(rvs(res.0@), rd, cd, k) == 0.0real
                     || abs_r(rhs_r(rvs(res.0@), rd, cd, k)) < rv(TOL) * (pow2_r(row_search as nat) * bmax) by {
                 assert(s[k] == rv(rhs_scales@[k]));
+                assert(rv(TOL) * s[k] <= rv(TOL) * (pow2_r(row_search as nat) * bmax)) by (nonlinear_arith)
+                    requires s[k] <= pow2_r(row_search as nat) * bmax, rv(TOL) >= 0.0real;
             }
         }
     }

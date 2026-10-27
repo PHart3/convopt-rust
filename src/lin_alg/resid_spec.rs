@@ -8,12 +8,12 @@
 //     [A | b] = U [A_K | b_K] + [E | f],   U = D T_K S,   [E | f] = D T_D H_D.
 //
 // The dropped rows are small (skip bounds, consistency test), so
-// ||E||_F <= TOL e_A and ||f|| <= TOL e_b with e_A = 2^rank sqrt(q n) alpha L,
+// ||E||_F <= tol e_A and ||f|| <= tol e_b with e_A = 2^rank sqrt(q n) alpha L,
 // e_b = 2^rank sqrt(q) beta L (alpha, beta the largest normalized coefficient
 // and right-hand side, L = ||D T_D||_F, q dropped rows, n columns of A).  With
 // C = max(e_A / ||A||_F, e_b / ||b||) (0 / 0 = 0) and d(z) = ||A||_F ||z|| + ||b||,
 //
-//     ||A z - b|| <= C TOL d(z) + ||U||_F ||A_K z - b_K||,
+//     ||A z - b|| <= C tol d(z) + ||U||_F ||A_K z - b_K||,
 //
 // divided by d(z) when d(z) > 0.  If d(z) = 0 the residual is 0; without
 // dropped rows C = 0.  Nothing is claimed about the size of C.
@@ -41,8 +41,6 @@ use crate::lin_alg::solve_spec::abs_max_prefix_r;
 use crate::lin_alg::gauss_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::reduce_spec::*;
-#[cfg(verus_keep_ghost)]
-use crate::lin_alg::matrix::TOL;
 
 verus! {
 
@@ -212,43 +210,43 @@ pub proof fn lemma_normalized_entry(a0: Seq<real>, dim: int, i: int, c: int)
 
 /* ---------- the dropped rows ---------- */
 
-/// The dropped echelon rows have small entries: coefficients at most 2^rank TOL alpha,
-/// right-hand sides at most 2^rank TOL beta.
-pub proof fn lemma_dropped_rows_small(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>)
+/// The dropped echelon rows have small entries: coefficients at most 2^rank tol alpha,
+/// right-hand sides at most 2^rank tol beta.
+pub proof fn lemma_dropped_rows_small(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>)
     requires
+        tol >= 0.0real,
         dim >= 1,
-        reduced_with(a0, e, res, dim, pivots),
+        reduced_with(tol, a0, e, res, dim, pivots),
     ensures
         coef_max_r(a0, dim) >= 0.0real,
         rhs_max_r(a0, dim) >= 0.0real,
         forall|l: int, c: int| 0 <= l < red_row_dim(a0, dim) - pivots.len() && 0 <= c < red_col_dim(dim) - 1
             ==> abs_r(#[trigger] drop_rows_r(e, red_row_dim(a0, dim), pivots.len() as int)(l, c))
-                <= pow2_r(pivots.len()) * (rv(TOL) * coef_max_r(a0, dim)),
+                <= pow2_r(pivots.len()) * (tol * coef_max_r(a0, dim)),
         forall|l: int| 0 <= l < red_row_dim(a0, dim) - pivots.len()
             ==> abs_r(#[trigger] drop_rows_r(e, red_row_dim(a0, dim), pivots.len() as int)(l, red_col_dim(dim) - 1))
-                <= rv(TOL) * (pow2_r(pivots.len()) * rhs_max_r(a0, dim)),
+                <= tol * (pow2_r(pivots.len()) * rhs_max_r(a0, dim)),
 {
     let (rd, cd) = (red_row_dim(a0, dim), red_col_dim(dim));
     let rank = pivots.len();
     let n0 = normalized_r(a0, dim);
-    let eps = gauss_eps_r(n0, rd, cd);
+    let eps = gauss_eps_r(tol, n0, rd, cd);
     let bmax = rhs_abs_max_r(n0, rd, cd);
     let alpha = coef_max_r(a0, dim);
     lemma_max0_fn_bound(|u: int| abs_r(n0[u]), ((cd - 1) * rd) as nat);
     lemma_max0_fn_bound(|i: int| abs_r(rhs_r(n0, rd, cd, i)), rd as nat);
-    assert(rv(TOL) == 0.0000000001real);
-    assert(eps == rv(TOL) * alpha);
+    assert(eps == tol * alpha);
     assert(eps >= 0.0real) by (nonlinear_arith)
-        requires rv(TOL) >= 0.0real, alpha >= 0.0real, eps == rv(TOL) * alpha;
+        requires tol >= 0.0real, alpha >= 0.0real, eps == tol * alpha;
     let hd = drop_rows_r(e, rd, rank as int);
     assert forall|l: int, c: int| 0 <= l < rd - rank && 0 <= c < cd - 1
-        implies abs_r(#[trigger] hd(l, c)) <= pow2_r(rank) * (rv(TOL) * alpha) by {
-        lemma_dropped_row_bounded(e, rd, cd, pivots, eps, bmax, rank + l);
+        implies abs_r(#[trigger] hd(l, c)) <= pow2_r(rank) * (tol * alpha) by {
+        lemma_dropped_row_bounded(tol, e, rd, cd, pivots, eps, bmax, rank + l);
         assert(hd(l, c) == cm_entry(e, rd, rank + l, c));
     }
     assert forall|l: int| 0 <= l < rd - rank
-        implies abs_r(#[trigger] hd(l, cd - 1)) <= rv(TOL) * (pow2_r(rank) * bmax) by {
-        lemma_dropped_row_bounded(e, rd, cd, pivots, eps, bmax, rank + l);
+        implies abs_r(#[trigger] hd(l, cd - 1)) <= tol * (pow2_r(rank) * bmax) by {
+        lemma_dropped_row_bounded(tol, e, rd, cd, pivots, eps, bmax, rank + l);
         assert(hd(l, cd - 1) == rhs_r(e, rd, cd, rank + l));
     }
 }
@@ -256,10 +254,10 @@ pub proof fn lemma_dropped_rows_small(a0: Seq<real>, e: Seq<real>, res: Seq<real
 /* ---------- recovering the input from the reduced system ---------- */
 
 /// [A | b] = U [A_K | b_K] + [E | f].
-pub proof fn lemma_recovery_identity(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF)
+pub proof fn lemma_recovery_identity(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF)
     requires
         dim >= 1,
-        reduced_with(a0, e, res, dim, pivots),
+        reduced_with(tol, a0, e, res, dim, pivots),
         row_comb(normalized_r(a0, dim), e, red_row_dim(a0, dim), red_col_dim(dim), t),
     ensures
         meq(cm_view(a0, red_row_dim(a0, dim)),
@@ -372,10 +370,10 @@ pub proof fn lemma_mat_vec_rc_aug(a: MatF, rows: int, cols: int, z: Seq<real>)
 }
 
 /// A z - b = U (A_K z - b_K) + (E z - f).
-pub proof fn lemma_residual_decomp(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF, z: Seq<real>)
+pub proof fn lemma_residual_decomp(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF, z: Seq<real>)
     requires
         dim >= 1,
-        reduced_with(a0, e, res, dim, pivots),
+        reduced_with(tol, a0, e, res, dim, pivots),
         row_comb(normalized_r(a0, dim), e, red_row_dim(a0, dim), red_col_dim(dim), t),
         z.len() == red_col_dim(dim) - 1,
     ensures
@@ -388,7 +386,7 @@ pub proof fn lemma_residual_decomp(a0: Seq<real>, e: Seq<real>, res: Seq<real>, 
     let (rd, cd) = (red_row_dim(a0, dim), red_col_dim(dim));
     let rk = pivots.len() as int;
     lemma_red_dims(a0, dim);
-    lemma_recovery_identity(a0, e, res, dim, pivots, t);
+    lemma_recovery_identity(tol, a0, e, res, dim, pivots, t);
     let zt = aug_vec_r(z);
     let u = recovery_r(a0, e, dim, t);
     let rv_ = cm_view(res, rk);
@@ -403,23 +401,24 @@ pub proof fn lemma_residual_decomp(a0: Seq<real>, e: Seq<real>, res: Seq<real>, 
 
 /* ---------- bounding the error ---------- */
 
-/// ||E||_F <= TOL e_A and ||f|| <= TOL e_b.
-pub proof fn lemma_err_bounds(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF)
+/// ||E||_F <= tol e_A and ||f|| <= tol e_b.
+pub proof fn lemma_err_bounds(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF)
     requires
+        tol >= 0.0real,
         dim >= 1,
-        reduced_with(a0, e, res, dim, pivots),
+        reduced_with(tol, a0, e, res, dim, pivots),
     ensures
         frob_rc(err_r(a0, e, dim, t, pivots.len() as int), red_row_dim(a0, dim), red_col_dim(dim) - 1)
-            <= rv(TOL) * err_coef_bound_r(a0, dim, t, pivots.len() as int),
+            <= tol * err_coef_bound_r(a0, dim, t, pivots.len() as int),
         norm_r(err_rhs_r(a0, e, dim, t, pivots.len() as int))
-            <= rv(TOL) * err_rhs_bound_r(a0, dim, t, pivots.len() as int),
+            <= tol * err_rhs_bound_r(a0, dim, t, pivots.len() as int),
 {
     let (rd, cd) = (red_row_dim(a0, dim), red_col_dim(dim));
     let rank = pivots.len();
     let rk = rank as int;
     let (q, n) = (rd - rk, cd - 1);
     lemma_red_dims(a0, dim);
-    lemma_dropped_rows_small(a0, e, res, dim, pivots);
+    lemma_dropped_rows_small(tol, a0, e, res, dim, pivots);
     let (alpha, beta) = (coef_max_r(a0, dim), rhs_max_r(a0, dim));
     let dt = drop_comb_r(a0, dim, t, rk);
     let hd = drop_rows_r(e, rd, rk);
@@ -427,12 +426,13 @@ pub proof fn lemma_err_bounds(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
     let big_l = drop_norm_r(a0, dim, t, rk);
     let p2 = pow2_r(rank);
     lemma_pow2_pos(rank);
-    assert(rv(TOL) == 0.0000000001real);
     lemma_frob_sq_rc_nonneg(dt, rd, q);
     // the coefficient part
-    let ma = p2 * (rv(TOL) * alpha);
+    let ma = p2 * (tol * alpha);
+    assert(tol * alpha >= 0.0real) by (nonlinear_arith)
+        requires tol >= 0.0real, alpha >= 0.0real;
     assert(ma >= 0.0real) by (nonlinear_arith)
-        requires p2 >= 1.0real, rv(TOL) >= 0.0real, alpha >= 0.0real, ma == p2 * (rv(TOL) * alpha);
+        requires p2 >= 1.0real, tol * alpha >= 0.0real, ma == p2 * (tol * alpha);
     lemma_frob_rc_entry_bound(hd, q, n, ma);
     lemma_mmul_frob_rc(dt, hd, rd, q, n);
     let sq = sqrt_r((q as real) * (n as real));
@@ -443,12 +443,14 @@ pub proof fn lemma_err_bounds(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
             big_l >= 0.0real,
             frob_rc(er, rd, n) <= big_l * frob_rc(hd, q, n),
             frob_rc(hd, q, n) <= sq * ma;
-    assert(big_l * (sq * (p2 * (rv(TOL) * alpha))) == rv(TOL) * (p2 * sq * alpha * big_l)) by (nonlinear_arith);
+    assert(big_l * (sq * (p2 * (tol * alpha))) == tol * (p2 * sq * alpha * big_l)) by (nonlinear_arith);
     // the right-hand side
     let h = col_vec_rc(hd, q, n);
-    let mb = rv(TOL) * (p2 * beta);
+    let mb = tol * (p2 * beta);
+    assert(p2 * beta >= 0.0real) by (nonlinear_arith)
+        requires p2 >= 1.0real, beta >= 0.0real;
     assert(mb >= 0.0real) by (nonlinear_arith)
-        requires p2 >= 1.0real, rv(TOL) >= 0.0real, beta >= 0.0real, mb == rv(TOL) * (p2 * beta);
+        requires tol >= 0.0real, p2 * beta >= 0.0real, mb == tol * (p2 * beta);
     assert forall|l: int| 0 <= l < q implies abs_r(#[trigger] h[l]) <= mb by {
         assert(h[l] == hd(l, n));
     }
@@ -471,7 +473,7 @@ pub proof fn lemma_err_bounds(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: 
             big_l >= 0.0real,
             norm_r(f) <= big_l * norm_r(h),
             norm_r(h) <= sq1 * mb;
-    assert(big_l * (sq1 * (rv(TOL) * (p2 * beta))) == rv(TOL) * (p2 * sq1 * beta * big_l)) by (nonlinear_arith);
+    assert(big_l * (sq1 * (tol * (p2 * beta))) == tol * (p2 * sq1 * beta * big_l)) by (nonlinear_arith);
 }
 
 /* ---------- the constant ---------- */
@@ -609,16 +611,17 @@ pub proof fn lemma_red_const_dominates(a0: Seq<real>, dim: int, t: MatF, rank: i
 
 /* ---------- the residual bound ---------- */
 
-/// ||A z - b|| <= C TOL d(z) + ||U||_F ||A_K z - b_K||.
-pub proof fn lemma_residual_bound(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF, z: Seq<real>)
+/// ||A z - b|| <= C tol d(z) + ||U||_F ||A_K z - b_K||.
+pub proof fn lemma_residual_bound(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF, z: Seq<real>)
     requires
+        tol >= 0.0real,
         dim >= 1,
-        reduced_with(a0, e, res, dim, pivots),
+        reduced_with(tol, a0, e, res, dim, pivots),
         row_comb(normalized_r(a0, dim), e, red_row_dim(a0, dim), red_col_dim(dim), t),
         z.len() == red_col_dim(dim) - 1,
     ensures
         norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z))
-            <= red_const_r(a0, dim, t, pivots.len() as int) * rv(TOL) * resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z)
+            <= red_const_r(a0, dim, t, pivots.len() as int) * tol * resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z)
                + frob_rc(recovery_r(a0, e, dim, t), red_row_dim(a0, dim), pivots.len() as int)
                  * norm_r(resid_vec_r(res, pivots.len() as int, red_col_dim(dim), z)),
 {
@@ -626,7 +629,7 @@ pub proof fn lemma_residual_bound(a0: Seq<real>, e: Seq<real>, res: Seq<real>, d
     let rk = pivots.len() as int;
     let n = cd - 1;
     lemma_red_dims(a0, dim);
-    lemma_residual_decomp(a0, e, res, dim, pivots, t, z);
+    lemma_residual_decomp(tol, a0, e, res, dim, pivots, t, z);
     let r = resid_vec_r(a0, rd, cd, z);
     let rk_vec = resid_vec_r(res, rk, cd, z);
     let u = recovery_r(a0, e, dim, t);
@@ -647,46 +650,46 @@ pub proof fn lemma_residual_bound(a0: Seq<real>, e: Seq<real>, res: Seq<real>, d
     // matrix-vector bounds
     lemma_mat_vec_rc_bound(u, rd, rk, rk_vec);
     lemma_mat_vec_rc_bound(er, rd, n, z);
-    lemma_err_bounds(a0, e, res, dim, pivots, t);
+    lemma_err_bounds(tol, a0, e, res, dim, pivots, t);
     lemma_red_const_dominates(a0, dim, t, rk);
     lemma_dot_self_nonneg(z);
-    assert(rv(TOL) == 0.0000000001real);
-    assert(norm_r(ez) <= rv(TOL) * (ea * nz)) by (nonlinear_arith)
+    assert(norm_r(ez) <= tol * (ea * nz)) by (nonlinear_arith)
         requires
             norm_r(ez) <= frob_rc(er, rd, n) * nz,
-            frob_rc(er, rd, n) <= rv(TOL) * ea,
+            frob_rc(er, rd, n) <= tol * ea,
             nz >= 0.0real;
     assert(ea * nz <= (c * na) * nz) by (nonlinear_arith)
         requires ea <= c * na, nz >= 0.0real;
-    assert(rv(TOL) * (ea * nz) <= rv(TOL) * ((c * na) * nz)) by (nonlinear_arith)
-        requires ea * nz <= (c * na) * nz, rv(TOL) >= 0.0real;
-    assert(rv(TOL) * eb <= rv(TOL) * (c * nb)) by (nonlinear_arith)
-        requires eb <= c * nb, rv(TOL) >= 0.0real;
-    assert(c * rv(TOL) * (na * nz + nb) == rv(TOL) * ((c * na) * nz) + rv(TOL) * (c * nb)) by (nonlinear_arith);
+    assert(tol * (ea * nz) <= tol * ((c * na) * nz)) by (nonlinear_arith)
+        requires ea * nz <= (c * na) * nz, tol >= 0.0real;
+    assert(tol * eb <= tol * (c * nb)) by (nonlinear_arith)
+        requires eb <= c * nb, tol >= 0.0real;
+    assert(c * tol * (na * nz + nb) == tol * ((c * na) * nz) + tol * (c * nb)) by (nonlinear_arith);
 }
 
 /// The relative residual bound: for d(z) > 0,
-/// ||A z - b|| / d(z) <= C TOL + ||U||_F ||A_K z - b_K|| / d(z).
-pub proof fn lemma_relative_residual_bound(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF, z: Seq<real>)
+/// ||A z - b|| / d(z) <= C tol + ||U||_F ||A_K z - b_K|| / d(z).
+pub proof fn lemma_relative_residual_bound(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>, t: MatF, z: Seq<real>)
     requires
+        tol >= 0.0real,
         dim >= 1,
-        reduced_with(a0, e, res, dim, pivots),
+        reduced_with(tol, a0, e, res, dim, pivots),
         row_comb(normalized_r(a0, dim), e, red_row_dim(a0, dim), red_col_dim(dim), t),
         z.len() == red_col_dim(dim) - 1,
         resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z) > 0.0real,
     ensures
         norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z)) / resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z)
-            <= red_const_r(a0, dim, t, pivots.len() as int) * rv(TOL)
+            <= red_const_r(a0, dim, t, pivots.len() as int) * tol
                + frob_rc(recovery_r(a0, e, dim, t), red_row_dim(a0, dim), pivots.len() as int)
                  * norm_r(resid_vec_r(res, pivots.len() as int, red_col_dim(dim), z))
                  / resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z),
 {
     let (rd, cd) = (red_row_dim(a0, dim), red_col_dim(dim));
     let rk = pivots.len() as int;
-    lemma_residual_bound(a0, e, res, dim, pivots, t, z);
+    lemma_residual_bound(tol, a0, e, res, dim, pivots, t, z);
     let nr = norm_r(resid_vec_r(a0, rd, cd, z));
     let d = resid_scale_r(a0, rd, cd, z);
-    let ct = red_const_r(a0, dim, t, rk) * rv(TOL);
+    let ct = red_const_r(a0, dim, t, rk) * tol;
     let w = frob_rc(recovery_r(a0, e, dim, t), rd, rk) * norm_r(resid_vec_r(res, rk, cd, z));
     assert(nr / d <= ct + w / d) by (nonlinear_arith)
         requires d > 0.0real, nr <= ct * d + w;
@@ -773,8 +776,8 @@ pub proof fn lemma_red_const_no_drop(a0: Seq<real>, dim: int, t: MatF, rank: int
 /* ---------- the bound for a reduction ---------- */
 
 /// The pivot sequence of a reduction (a witness of `reduced_system`).
-pub open spec fn red_pivots(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int) -> Seq<int> {
-    choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(a0, e, res, dim, pivots)
+pub open spec fn red_pivots(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int) -> Seq<int> {
+    choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(tol, a0, e, res, dim, pivots)
 }
 
 /// The row transformation of a reduction: normalized input = T * echelon form.
@@ -783,20 +786,21 @@ pub open spec fn red_transform(a0: Seq<real>, e: Seq<real>, dim: int) -> MatF {
 }
 
 /// The bound for `reduced_system`, with U and C built from the witnesses `red_pivots` and
-/// `red_transform` (both independent of z): ||A z - b|| <= C TOL d(z) + ||U||_F ||A_K z - b_K||,
+/// `red_transform` (both independent of z): ||A z - b|| <= C tol d(z) + ||U||_F ||A_K z - b_K||,
 /// its relative form when d(z) > 0, and A z - b = 0 when d(z) = 0.
-pub proof fn lemma_reduction_residual_bound(a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, z: Seq<real>)
+pub proof fn lemma_reduction_residual_bound(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, z: Seq<real>)
     requires
+        tol >= 0.0real,
         dim >= 1,
-        reduced_system(a0, e, res, dim),
+        reduced_system(tol, a0, e, res, dim),
         z.len() == red_col_dim(dim) - 1,
     ensures
         ({
             let t = red_transform(a0, e, dim);
-            let rank = red_pivots(a0, e, res, dim).len() as int;
+            let rank = red_pivots(tol, a0, e, res, dim).len() as int;
             let nr = norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z));
             let d = resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z);
-            let ct = red_const_r(a0, dim, t, rank) * rv(TOL);
+            let ct = red_const_r(a0, dim, t, rank) * tol;
             let w = frob_rc(recovery_r(a0, e, dim, t), red_row_dim(a0, dim), rank)
                 * norm_r(resid_vec_r(res, rank, red_col_dim(dim), z));
             &&& nr <= ct * d + w
@@ -804,14 +808,14 @@ pub proof fn lemma_reduction_residual_bound(a0: Seq<real>, e: Seq<real>, res: Se
             &&& d == 0.0real ==> nr == 0.0real
         }),
 {
-    let pivots = red_pivots(a0, e, res, dim);
-    assert(reduced_with(a0, e, res, dim, pivots));
+    let pivots = red_pivots(tol, a0, e, res, dim);
+    assert(reduced_with(tol, a0, e, res, dim, pivots));
     let t = red_transform(a0, e, dim);
     assert(row_comb(normalized_r(a0, dim), e, red_row_dim(a0, dim), red_col_dim(dim), t));
-    lemma_residual_bound(a0, e, res, dim, pivots, t, z);
+    lemma_residual_bound(tol, a0, e, res, dim, pivots, t, z);
     let d = resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z);
     if d > 0.0real {
-        lemma_relative_residual_bound(a0, e, res, dim, pivots, t, z);
+        lemma_relative_residual_bound(tol, a0, e, res, dim, pivots, t, z);
     } else if d == 0.0real {
         lemma_residual_zero_scale(a0, dim, z);
     }

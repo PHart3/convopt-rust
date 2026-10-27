@@ -303,7 +303,7 @@ pub open spec fn single_constraint_nonzero(sdp: &SDP) -> bool {
 
 /// red is the reduced system of the augmented matrix aug (through some echelon form).
 pub open spec fn reduced_from(aug: Seq<real>, red: Seq<real>, dim: int) -> bool {
-    exists|e: Seq<real>| reduced_system(aug, e, red, dim)
+    exists|e: Seq<real>| reduced_system(rv(TOL), aug, e, red, dim)
 }
 
 /// The augmented system returned by the conversion: the constraint matrix followed by the
@@ -1485,7 +1485,7 @@ fn standard_single(sdp: &SDP, check_constraints: bool)
                 let total_size = (total_dim * (total_dim + 1)) / 2;
                 let rank = constraints_red.len() / (total_size + 1);
                 proof {
-                    let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(aug, rvs(constraints@), red, d, pivots);
+                    let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(rv(TOL), aug, rvs(constraints@), red, d, pivots);
                     assert(red.len() == (cols + 1) * pivots.len());
                     assert(((cols + 1) * pivots.len()) / (cols + 1) == pivots.len()) by (nonlinear_arith)
                         requires cols + 1 >= 1;
@@ -1496,7 +1496,7 @@ fn standard_single(sdp: &SDP, check_constraints: bool)
                 let res = (obj_packed, (constraints_red, vec![]), point, total_dim, vec![], vec![]);
                 proof {
                     assert(result_aug(res.1.0@, res.2@, rank as int) =~= red);
-                    assert(reduced_system(aug, rvs(constraints@), red, d));
+                    assert(reduced_system(rv(TOL), aug, rvs(constraints@), red, d));
                     assert(reduced_from(aug, result_aug(res.1.0@, res.2@, rank as int), d));
                     assert(res.2@.len() == rank);
                     assert(res.3 as int == d);
@@ -1829,7 +1829,7 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
             let ghost red = rvs(constraints_red@);
             let rank = constraints_red.len() / (total_size + 1);
             proof {
-                let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(aug, rvs(mat@), red, sd, pivots);
+                let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(rv(TOL), aug, rvs(mat@), red, sd, pivots);
                 assert(red.len() == (cols + 1) * pivots.len());
                 assert(((cols + 1) * pivots.len()) / (cols + 1) == pivots.len()) by (nonlinear_arith)
                     requires cols + 1 >= 1;
@@ -1843,7 +1843,7 @@ fn standard_lmi(sdp: &SDP, check_constraints: bool)
             proof {
                 assert(res.2@.subrange(0, rank as int) =~= head);
                 assert(result_aug(res.1.0@, res.2@, rank as int) =~= red);
-                assert(reduced_system(aug, rvs(mat@), red, sd));
+                assert(reduced_system(rv(TOL), aug, rvs(mat@), red, sd));
                 assert(reduced_from(aug, result_aug(res.1.0@, res.2@, rank as int), sd));
                 assert(std_rows_ok(lmis@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug));
                 let nz = res.1.1@.len() as int;

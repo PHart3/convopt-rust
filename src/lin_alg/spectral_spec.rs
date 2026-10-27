@@ -6,7 +6,9 @@
 // (vals[k], column k of Q) whose value passes a selection test:
 //
 //     positive part:  vals[k] > 0,
-//     negative part:  vals[k] < -1e-8 * scale,  scale = max(max_t |A_t|, 1).
+//     negative part:  vals[k] < -tol * scale,  scale = max(max_t |A_t|, 1),
+//
+// for the relative tolerance tol of the negative cutoff (NEG_EIG_TOL in jacobi.rs).
 //
 // This module defines the list of selected indices, the predicate relating
 // the returned (values, columns) to (vals, Q), and proves what the
@@ -55,14 +57,14 @@ pub open spec fn pos_sel(vals: Seq<real>) -> spec_fn(int) -> bool {
     |k: int| vals[k] > 0.0real
 }
 
-/// The tolerance of the negative part: 1e-8 * scale.
-pub open spec fn neg_tol_r(scale: real) -> real {
-    0.00000001real * scale
+/// The cutoff of the negative part for the relative tolerance tol: tol * scale.
+pub open spec fn neg_tol_r(tol: real, scale: real) -> real {
+    tol * scale
 }
 
-/// The selection test of the negative part: vals[k] < -1e-8 * scale.
-pub open spec fn neg_sel(vals: Seq<real>, scale: real) -> spec_fn(int) -> bool {
-    |k: int| vals[k] < -neg_tol_r(scale)
+/// The selection test of the negative part: vals[k] < -tol * scale.
+pub open spec fn neg_sel(tol: real, vals: Seq<real>, scale: real) -> spec_fn(int) -> bool {
+    |k: int| vals[k] < -neg_tol_r(tol, scale)
 }
 
 /// vals with every unselected entry replaced by 0.
@@ -203,8 +205,8 @@ pub open spec fn selected_pairs(q: Seq<real>, vals: Seq<real>, sel: spec_fn(int)
 
 /// The contract of a spectral part of A: the eigensolver contract for (B, Q) and the
 /// selection of the pairs (diag(B)[k], column k of Q) with sel(k), k < dim.
-pub open spec fn spectral_part_ok(a: Seq<real>, b: Seq<real>, q: Seq<real>, sel: spec_fn(int) -> bool, sel_vals: Seq<real>, sel_vects: Seq<real>, dim: int) -> bool {
-    &&& eigensolver_ok(a, b, q, sym_diag_r(b, dim), dim)
+pub open spec fn spectral_part_ok(tol: real, a: Seq<real>, b: Seq<real>, q: Seq<real>, sel: spec_fn(int) -> bool, sel_vals: Seq<real>, sel_vects: Seq<real>, dim: int) -> bool {
+    &&& eigensolver_ok(tol, a, b, q, sym_diag_r(b, dim), dim)
     &&& selected_pairs(q, sym_diag_r(b, dim), sel, dim, sel_vals, sel_vects, dim)
 }
 

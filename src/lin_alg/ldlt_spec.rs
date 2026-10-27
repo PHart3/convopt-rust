@@ -237,14 +237,15 @@ pub open spec fn block_max_abs_diag_r(a: Seq<real>, start: int, dim: int) -> rea
     max0_fn_r(|i: int| block_diag_abs_r(a, start, i), dim as nat)
 }
 
-/// The shift eps = 1e-9 * max(max_i |B_ii|, 1) used by psd_block_check on the block B.
-pub open spec fn psd_check_eps_r(a: Seq<real>, start: int, dim: int) -> real {
-    0.000000001real * max_r(block_max_abs_diag_r(a, start, dim), 1.0real)
+/// The shift eps = tol * max(max_i |B_ii|, 1) used by psd_block_check on the block B for the
+/// relative tolerance tol.
+pub open spec fn psd_check_eps_r(tol: real, a: Seq<real>, start: int, dim: int) -> real {
+    tol * max_r(block_max_abs_diag_r(a, start, dim), 1.0real)
 }
 
-/// The guarantee of a successful check on one block: B >= -eps I.
-pub open spec fn block_psd_ok(a: Seq<real>, start: int, dim: int) -> bool {
-    psd_shifted(block_view(a, start), dim, psd_check_eps_r(a, start, dim))
+/// The guarantee of a successful check with tolerance tol on one block: B >= -eps I.
+pub open spec fn block_psd_ok(tol: real, a: Seq<real>, start: int, dim: int) -> bool {
+    psd_shifted(block_view(a, start), dim, psd_check_eps_r(tol, a, start, dim))
 }
 
 /// Every listed block (start, dim) lies inside a packed matrix of length len whose

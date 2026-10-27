@@ -13,7 +13,8 @@
 // partial pivoting) at most doubles those entries.  The consistency test
 // compares the right-hand side of each row without a pivot against a scale
 // carried along the row operations; by the same doubling argument, a passed
-// test bounds those right-hand sides by TOL * 2^rank * max |b_k| (`rhs_consistent`).
+// test bounds those right-hand sides by tol * 2^rank * max |b_k| (`rhs_consistent`), for the
+// relative tolerance tol of the pivot and consistency tests.
 // The row operations are also recorded as a ghost transformation T with
 // input = T * output (`row_comb`), used by resid_spec.rs.
 
@@ -32,8 +33,6 @@ use crate::lin_alg::sym_spec::*;
 use crate::lin_alg::solve_spec::abs_max_prefix_r;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::mat_spec::{MatF, mident};
-#[cfg(verus_keep_ghost)]
-use crate::lin_alg::matrix::TOL;
 
 verus! {
 
@@ -764,9 +763,10 @@ pub proof fn lemma_skipped_extend(m: Seq<real>, row_dim: int, col_dim: int, pivo
 
 /* ---------- tolerance and right-hand side ---------- */
 
-/// The pivot tolerance of gauss_elim: TOL * max |entry of the coefficient part A|.
-pub open spec fn gauss_eps_r(a0: Seq<real>, row_dim: int, col_dim: int) -> real {
-    rv(TOL) * abs_max_prefix_r(a0, ((col_dim - 1) * row_dim) as nat)
+/// The pivot tolerance of gauss_elim for the relative tolerance tol:
+/// tol * max |entry of the coefficient part A|.
+pub open spec fn gauss_eps_r(tol: real, a0: Seq<real>, row_dim: int, col_dim: int) -> real {
+    tol * abs_max_prefix_r(a0, ((col_dim - 1) * row_dim) as nat)
 }
 
 /// Right-hand side b_i of row i.
@@ -779,37 +779,38 @@ pub open spec fn rhs_abs_max_r(m: Seq<real>, row_dim: int, col_dim: int) -> real
     max0_fn_r(|i: int| abs_r(rhs_r(m, row_dim, col_dim, i)), row_dim as nat)
 }
 
-/// The passed consistency test: every row from row `rank` on (the rows without a pivot) has
-/// a right-hand side that is zero or below TOL * 2^rank * bmax, with bmax = max |b_k| of the input.
-pub open spec fn rhs_consistent(m: Seq<real>, row_dim: int, col_dim: int, rank: nat, bmax: real) -> bool {
+/// The passed consistency test with the relative tolerance tol: every row from row `rank` on
+/// (the rows without a pivot) has a right-hand side that is zero or below tol * 2^rank * bmax,
+/// with bmax = max |b_k| of the input.
+pub open spec fn rhs_consistent(tol: real, m: Seq<real>, row_dim: int, col_dim: int, rank: nat, bmax: real) -> bool {
     forall|i: int| rank <= i < row_dim
         ==> #[trigger] rhs_r(m, row_dim, col_dim, i) == 0.0real
-            || abs_r(rhs_r(m, row_dim, col_dim, i)) < rv(TOL) * (pow2_r(rank) * bmax)
+            || abs_r(rhs_r(m, row_dim, col_dim, i)) < tol * (pow2_r(rank) * bmax)
 }
 
 /// A row without a pivot is small: coefficient entries at most 2^rank * eps (zero in pivot
-/// columns, the skip bound otherwise), right-hand side at most TOL * 2^rank * bmax.
-pub proof fn lemma_dropped_row_bounded(m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, bmax: real, k: int)
+/// columns, the skip bound otherwise), right-hand side at most tol * 2^rank * bmax.
+pub proof fn lemma_dropped_row_bounded(tol: real, m: Seq<real>, row_dim: int, col_dim: int, pivots: Seq<int>, eps: real, bmax: real, k: int)
     requires
+        tol >= 0.0real,
         eps >= 0.0real,
         bmax >= 0.0real,
         echelon_form(m, row_dim, col_dim, pivots, eps),
         skipped_bounded(m, row_dim, col_dim, pivots, eps, col_dim - 1),
-        rhs_consistent(m, row_dim, col_dim, pivots.len(), bmax),
+        rhs_consistent(tol, m, row_dim, col_dim, pivots.len(), bmax),
         pivots.len() <= k < row_dim,
     ensures
         forall|c: int| 0 <= c < col_dim - 1 ==> abs_r(#[trigger] cm_entry(m, row_dim, k, c)) <= pow2_r(pivots.len()) * eps,
-        abs_r(rhs_r(m, row_dim, col_dim, k)) <= rv(TOL) * (pow2_r(pivots.len()) * bmax),
+        abs_r(rhs_r(m, row_dim, col_dim, k)) <= tol * (pow2_r(pivots.len()) * bmax),
 {
     let rank = pivots.len();
     lemma_pow2_pos(rank);
-    assert(rv(TOL) == 0.0000000001real);
     assert(pow2_r(rank) * eps >= 0.0real) by (nonlinear_arith)
         requires pow2_r(rank) >= 1.0real, eps >= 0.0real;
     assert(pow2_r(rank) * bmax >= 0.0real) by (nonlinear_arith)
         requires pow2_r(rank) >= 1.0real, bmax >= 0.0real;
-    assert(rv(TOL) * (pow2_r(rank) * bmax) >= 0.0real) by (nonlinear_arith)
-        requires rv(TOL) >= 0.0real, pow2_r(rank) * bmax >= 0.0real;
+    assert(tol * (pow2_r(rank) * bmax) >= 0.0real) by (nonlinear_arith)
+        requires tol >= 0.0real, pow2_r(rank) * bmax >= 0.0real;
     assert forall|c: int| 0 <= c < col_dim - 1
         implies abs_r(#[trigger] cm_entry(m, row_dim, k, c)) <= pow2_r(rank) * eps by {
         if is_pivot_col(pivots, c) {
@@ -825,7 +826,7 @@ pub proof fn lemma_dropped_row_bounded(m: Seq<real>, row_dim: int, col_dim: int,
         }
     }
     assert(rhs_r(m, row_dim, col_dim, k) == 0.0real
-        || abs_r(rhs_r(m, row_dim, col_dim, k)) < rv(TOL) * (pow2_r(rank) * bmax));
+        || abs_r(rhs_r(m, row_dim, col_dim, k)) < tol * (pow2_r(rank) * bmax));
 }
 
 } // verus!

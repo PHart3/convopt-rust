@@ -91,6 +91,8 @@ use crate::sdp_altdir::*;
 use crate::lin_alg::eigen_spec::*;
 #[cfg(verus_keep_ghost)]
 use crate::lin_alg::spectral_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::lin_alg::jacobi::JACOBI_TOL;
 
 verus! {
 
@@ -144,8 +146,8 @@ pub proof fn lemma_reduced_rows(aug: Seq<real>, mat: Seq<f64>, point: Seq<f64>, 
     assert(res.len() == rows * pk_len(dim) + rows);
     assert(rows * pk_len(dim) + rows == rows * (pk_len(dim) + 1)) by (nonlinear_arith);
     if check {
-        let e = choose|e: Seq<real>| reduced_system(aug, e, result_aug(mat, point, rows), dim);
-        let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(aug, e, result_aug(mat, point, rows), dim, pivots);
+        let e = choose|e: Seq<real>| reduced_system(rv(TOL), aug, e, result_aug(mat, point, rows), dim);
+        let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(rv(TOL), aug, e, result_aug(mat, point, rows), dim, pivots);
         let rank = pivots.len() as int;
         // res.len() == cd * rank == rows * cd, hence rank == rows
         assert(rank == rows) by (nonlinear_arith)
@@ -314,32 +316,32 @@ pub proof fn lemma_block_list_fits(list: Seq<(usize, usize)>, bs: Seq<int>, dim:
 
 /* ---------- the equality-system solve ---------- */
 
-/// The diagonal shift of the Gram matrix: 0 with reduced constraints, otherwise
-/// TOL * max(max_i |G_ii|, 1).
-pub open spec fn reg_shift_r(g: Seq<real>, c_len: int, check: bool) -> real {
-    if check { 0.0real } else { rv(TOL) * max_r(max_abs_diag_r(g, c_len), 1.0real) }
+/// The diagonal shift of the Gram matrix for the relative tolerance tol: 0 with reduced
+/// constraints, otherwise tol * max(max_i |G_ii|, 1).
+pub open spec fn reg_shift_r(tol: real, g: Seq<real>, c_len: int, check: bool) -> real {
+    if check { 0.0real } else { tol * max_r(max_abs_diag_r(g, c_len), 1.0real) }
 }
 
-/// The residual test of the regularized solve: ||G y - b|| / (||G||_F ||y|| + ||b||) < 1e-9
-/// (nothing is claimed when the denominator is zero).
-pub open spec fn residual_ok(g: Seq<real>, c_len: int, yt: Seq<real>, bt: Seq<real>) -> bool {
+/// The residual test of the regularized solve with tolerance tol:
+/// ||G y - b|| / (||G||_F ||y|| + ||b||) < tol (nothing is claimed when the denominator is zero).
+pub open spec fn residual_ok(tol: real, g: Seq<real>, c_len: int, yt: Seq<real>, bt: Seq<real>) -> bool {
     let top = dist_r(sym_mat_vec_r(g, c_len, yt), bt);
     let bottom = frob_norm_r(g, c_len) * norm_r(yt) + norm_r(bt);
-    bottom != 0.0real ==> top / bottom < 0.000000001real
+    bottom != 0.0real ==> top / bottom < tol
 }
 
 /// y solves the block system of one iteration: (G + s I) y_top = b_top with the shift s of
-/// `reg_shift_r`, y_bottom = 2 b_bottom (the multipliers of the zero constraints, whose Gram
-/// block is I/2), and, when G was regularized, the residual of the unregularized system
-/// passes the test.
+/// `reg_shift_r` for the base tolerance TOL, y_bottom = 2 b_bottom (the multipliers of the
+/// zero constraints, whose Gram block is I/2), and, when G was regularized, the residual of
+/// the unregularized system passes the test with tolerance GRAM_RESID_TOL.
 pub open spec fn dual_solve_ok(g: Seq<real>, b: Seq<real>, c_len: int, check: bool, y: Seq<real>) -> bool {
     let n = b.len() as int;
     let yt = y.subrange(0, c_len);
     let bt = b.subrange(0, c_len);
     &&& y.len() == n
-    &&& mat_vec(madd(sym_view(g), mscale(reg_shift_r(g, c_len, check), mident())), c_len, yt) == bt
+    &&& mat_vec(madd(sym_view(g), mscale(reg_shift_r(rv(TOL), g, c_len, check), mident())), c_len, yt) == bt
     &&& forall|t: int| c_len <= t < n ==> #[trigger] y[t] == 2.0real * b[t]
-    &&& !check && c_len > 0 ==> residual_ok(g, c_len, yt, bt)
+    &&& !check && c_len > 0 ==> residual_ok(rv(GRAM_RESID_TOL), g, c_len, yt, bt)
 }
 
 /// A solution of the block system (A, I/2) x = b solves A x_top = b_top and has x_bottom = 2 b_bottom.
@@ -457,12 +459,13 @@ pub open spec fn is_shifted_slack(v: Seq<real>, diff: Seq<real>, mu: real, z: Se
 }
 
 /// s is the positive spectral part of v computed from the eigensolver output (q, b):
-/// v = Q B Q^T with Q orthogonal and ||B - diag(B)||_F <= eps (eigensolver_ok), and
+/// v = Q B Q^T with Q orthogonal and ||B - diag(B)||_F <= eps (eigensolver_ok with the
+/// stopping tolerance JACOBI_TOL), and
 /// s = Q diag(lambda_+) Q^T with lambda = diag(B) and lambda_+ keeping the entries > 0
 /// (the selection of poseigendecomp).
 pub open spec fn pos_part_of(v: Seq<real>, b: Seq<real>, q: Seq<real>, s: Seq<real>, dim: int) -> bool {
     let vals = sym_diag_r(b, dim);
-    &&& eigensolver_ok(v, b, q, vals, dim)
+    &&& eigensolver_ok(rv(JACOBI_TOL), v, b, q, vals, dim)
     &&& s.len() == pk_len(dim)
     &&& meq(sym_view(s), mmul(mmul(cm_view(q, dim), diag_view(masked_r(vals, pos_sel(vals))), dim), mtr(cm_view(q, dim)), dim), dim, dim)
 }
@@ -494,7 +497,7 @@ pub proof fn lemma_adjoint_entry_empty(m: Seq<real>, list: Seq<(usize, usize)>, 
 pub proof fn lemma_zero_pos_part(v: Seq<real>, b: Seq<real>, q: Seq<real>, s: Seq<real>, dim: int)
     requires
         dim >= 0,
-        eigensolver_ok(v, b, q, sym_diag_r(b, dim), dim),
+        eigensolver_ok(rv(JACOBI_TOL), v, b, q, sym_diag_r(b, dim), dim),
         sel_indices(pos_sel(sym_diag_r(b, dim)), dim as nat).len() == 0,
         s.len() == pk_len(dim),
         forall|t: int| 0 <= t < s.len() ==> #[trigger] s[t] == 0.0real,
@@ -531,7 +534,7 @@ pub proof fn lemma_zero_pos_part(v: Seq<real>, b: Seq<real>, q: Seq<real>, s: Se
 pub proof fn lemma_selected_pos_part(v: Seq<real>, b: Seq<real>, q: Seq<real>, vals: Seq<real>, vects: Seq<real>, s: Seq<real>, dim: int)
     requires
         dim >= 0,
-        spectral_part_ok(v, b, q, pos_sel(sym_diag_r(b, dim)), vals, vects, dim),
+        spectral_part_ok(rv(JACOBI_TOL), v, b, q, pos_sel(sym_diag_r(b, dim)), vals, vects, dim),
         s.len() == pk_len(dim),
         meq(sym_view(s), mmul(mmul(cm_view(vects, dim), diag_view(vals), vals.len() as int), mtr(cm_view(vects, dim)), vals.len() as int), dim, dim),
     ensures
@@ -696,10 +699,11 @@ pub proof fn lemma_diag_block_view(b: Seq<f64>, zf: Seq<f64>, st: int, dn: int)
 
 /* ---------- the termination of the loop ---------- */
 
-/// Every block of the PSD partition of z passed the check: B >= -eps I (block_psd_ok, L07).
+/// Every block of the PSD partition of z passed the check with tolerance PSD_TOL:
+/// B >= -eps I (block_psd_ok, L07).
 pub open spec fn psd_blocks_ok(s: &SdpadSetup, z: Seq<real>) -> bool {
     forall|b: int| 0 <= b < s.psd_blocks@.len()
-        ==> #[trigger] block_psd_ok(z, s.psd_blocks@[b].0 as int, s.psd_blocks@[b].1 as int)
+        ==> #[trigger] block_psd_ok(rv(PSD_TOL), z, s.psd_blocks@[b].0 as int, s.psd_blocks@[b].1 as int)
 }
 
 /// The penalty bookkeeping of an iteration: the penalty mu and the counters it_pinf, it_dinf
@@ -861,11 +865,11 @@ pub open spec fn best_record_ok(s: &SdpadSetup, states: Seq<WgyState>, feasible:
 }
 
 /// The stagnation stopping rule: more than STAG1 (STAG2, STAG3) iterations without improving
-/// the best delta, and the current delta below 1e-5 (1e-4, 1e-3).
+/// the best delta, and the current delta below STAG_TOL1 (STAG_TOL2, STAG_TOL3).
 pub open spec fn stagnation_stop(delta: real, it_stag: int) -> bool {
-    ||| it_stag > STAG1 as int && delta < 0.00001real
-    ||| it_stag > STAG2 as int && delta < 0.0001real
-    ||| it_stag > STAG3 as int && delta < 0.001real
+    ||| it_stag > STAG1 as int && delta < rv(STAG_TOL1)
+    ||| it_stag > STAG2 as int && delta < rv(STAG_TOL2)
+    ||| it_stag > STAG3 as int && delta < rv(STAG_TOL3)
 }
 
 /// The outcome of the loop: the trajectory of the n iterations run (states, pens), whose
@@ -984,8 +988,8 @@ pub proof fn lemma_reduced_zero_col(a0: Seq<real>, red: Seq<real>, dim: int, tot
 {
     let cd = red_col_dim(dim);
     lemma_pk_col_start_monotone(0, dim);
-    let e = choose|e: Seq<real>| reduced_system(a0, e, red, dim);
-    let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(a0, e, red, dim, pivots);
+    let e = choose|e: Seq<real>| reduced_system(rv(TOL), a0, e, red, dim);
+    let pivots = choose|pivots: Seq<int>| #![trigger pivots.len()] reduced_with(rv(TOL), a0, e, red, dim, pivots);
     let rd = a0.len() as int / cd;
     assert(a0.len() as int == cd * total) by (nonlinear_arith)
         requires a0.len() as int == total * cd;
@@ -1005,7 +1009,7 @@ pub proof fn lemma_reduced_zero_col(a0: Seq<real>, red: Seq<real>, dim: int, tot
 
 /// The echelon form behind a reduction (a witness of `reduced_from`).
 pub open spec fn red_echelon(a0: Seq<real>, red: Seq<real>, dim: int) -> Seq<real> {
-    choose|e: Seq<real>| reduced_system(a0, e, red, dim)
+    choose|e: Seq<real>| reduced_system(rv(TOL), a0, e, red, dim)
 }
 
 /// The residual bound for the dense rows of a setup with `check`: U and C are built from the
@@ -1021,7 +1025,7 @@ pub proof fn lemma_reduced_from_residual_bound(a0: Seq<real>, red: Seq<real>, di
         ({
             let e = red_echelon(a0, red, dim);
             let t = red_transform(a0, e, dim);
-            let rank = red_pivots(a0, e, red, dim).len() as int;
+            let rank = red_pivots(rv(TOL), a0, e, red, dim).len() as int;
             let nr = norm_r(resid_vec_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z));
             let d = resid_scale_r(a0, red_row_dim(a0, dim), red_col_dim(dim), z);
             let ct = red_const_r(a0, dim, t, rank) * rv(TOL);
@@ -1033,8 +1037,9 @@ pub proof fn lemma_reduced_from_residual_bound(a0: Seq<real>, red: Seq<real>, di
         }),
 {
     let e = red_echelon(a0, red, dim);
-    assert(reduced_system(a0, e, red, dim));
-    lemma_reduction_residual_bound(a0, e, red, dim, z);
+    assert(reduced_system(rv(TOL), a0, e, red, dim));
+    lemma_tol_default();
+    lemma_reduction_residual_bound(rv(TOL), a0, e, red, dim, z);
 }
 
 /// The solver's constraint operator satisfies the hypotheses of the block Gram form: the
@@ -1158,7 +1163,7 @@ pub proof fn lemma_mat_vec_shift(a: MatF, s: real, dim: int, x: Seq<real>)
 /// The right-hand side of the Gram system actually satisfied by the regularized solve: b less
 /// the shift s y on the dense rows (b itself when there is no shift).
 pub open spec fn reg_rhs_r(g: Seq<real>, b: Seq<real>, c_len: int, check: bool, y: Seq<real>) -> Seq<real> {
-    Seq::new(b.len(), |t: int| b[t] - (if t < c_len { reg_shift_r(g, c_len, check) } else { 0.0real }) * y[t])
+    Seq::new(b.len(), |t: int| b[t] - (if t < c_len { reg_shift_r(rv(TOL), g, c_len, check) } else { 0.0real }) * y[t])
 }
 
 /// A solution of the block system of dual_solve solves the Gram system of the full constraint
@@ -1178,7 +1183,7 @@ pub proof fn lemma_dual_solve_gram(g: Seq<real>, m: Seq<real>, list: Seq<(usize,
         mat_vec(full_gram_view(m, c_len, list, dim), b.len() as int, y) == reg_rhs_r(g, b, c_len, check, y),
 {
     let n = b.len() as int;
-    let sh = reg_shift_r(g, c_len, check);
+    let sh = reg_shift_r(rv(TOL), g, c_len, check);
     let bs = reg_rhs_r(g, b, c_len, check, y);
     let yt = y.subrange(0, c_len);
     let bt = b.subrange(0, c_len);

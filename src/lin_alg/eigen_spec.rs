@@ -5,9 +5,9 @@
 // accumulating the rotations into a column-major matrix Q (initially I),
 // and stop once every off-diagonal entry of B is below the threshold
 //
-//     thr = 1e-12 * max(1, max_i |B_ii|)
+//     thr = tol * max(1, max_i |B_ii|)
 //
-// in magnitude. This module defines the invariant they maintain,
+// in magnitude, for a nonnegative relative tolerance tol (JACOBI_TOL in jacobi.rs). This module defines the invariant they maintain,
 //
 //     A = Q B Q^T with Q orthogonal            (`eigen_decomp_inv`),
 //
@@ -123,15 +123,25 @@ pub open spec fn offdiag_below(b: Seq<real>, dim: int, thr: real) -> bool {
         ==> #[trigger] abs_r(sym_entry(b, r, c)) < thr
 }
 
-/// The stopping threshold of both eigensolvers: 1e-12 * max(1, max_i |B_ii|)
-/// (`scaled_near_zero(.., 1.0.max(max_diag), 1e-12)` in jacobi.rs).
-pub open spec fn jacobi_thr_r(b: Seq<real>, dim: int) -> real {
-    0.000000000001real * max_r(1.0real, max_abs_diag_r(b, dim))
+/// The stopping threshold of both eigensolvers for the relative tolerance tol:
+/// tol * max(1, max_i |B_ii|) (`scaled_near_zero(.., 1.0.max(max_diag), JACOBI_TOL)` in jacobi.rs).
+pub open spec fn jacobi_thr_r(tol: real, b: Seq<real>, dim: int) -> real {
+    tol * max_r(1.0real, max_abs_diag_r(b, dim))
 }
 
 /// The stopping criterion: the largest off-diagonal magnitude of B is below the threshold.
-pub open spec fn jacobi_converged(b: Seq<real>, dim: int) -> bool {
-    offdiag_below(b, dim, jacobi_thr_r(b, dim))
+pub open spec fn jacobi_converged(tol: real, b: Seq<real>, dim: int) -> bool {
+    offdiag_below(b, dim, jacobi_thr_r(tol, b, dim))
+}
+
+/// For a nonnegative tolerance the threshold is nonnegative.
+pub proof fn lemma_jacobi_thr_nonneg(tol: real, b: Seq<real>, dim: int)
+    requires
+        tol >= 0.0real,
+    ensures
+        jacobi_thr_r(tol, b, dim) >= tol,
+{
+    lemma_tol_scale_ge(tol, max_r(1.0real, max_abs_diag_r(b, dim)));
 }
 
 /* ---------- the off-diagonal part and its Frobenius norm ---------- */
@@ -360,51 +370,53 @@ pub open spec fn eigen_decomp_approx(a: Seq<real>, q: Seq<real>, b: Seq<real>, d
     &&& offdiag_norm_r(b, dim) <= eps
 }
 
-/// The bound established by the stopping criterion: sqrt(dim (dim - 1)) * thr.
-pub open spec fn jacobi_eps_r(b: Seq<real>, dim: int) -> real {
-    sqrt_r(offdiag_count_r(dim)) * jacobi_thr_r(b, dim)
+/// The bound established by the stopping criterion with tolerance tol: sqrt(dim (dim - 1)) * thr.
+pub open spec fn jacobi_eps_r(tol: real, b: Seq<real>, dim: int) -> real {
+    sqrt_r(offdiag_count_r(dim)) * jacobi_thr_r(tol, b, dim)
 }
 
-/// The invariant plus the stopping criterion give the approximate eigendecomposition
-/// with the eigensolvers' bound.
-pub proof fn lemma_converged_approx(a: Seq<real>, q: Seq<real>, b: Seq<real>, dim: int)
+/// The invariant plus the stopping criterion with a nonnegative tolerance give the
+/// approximate eigendecomposition with the eigensolvers' bound.
+pub proof fn lemma_converged_approx(tol: real, a: Seq<real>, q: Seq<real>, b: Seq<real>, dim: int)
     requires
+        tol >= 0.0real,
         dim >= 0,
         eigen_decomp_inv(a, q, b, dim),
-        jacobi_converged(b, dim),
+        jacobi_converged(tol, b, dim),
     ensures
-        eigen_decomp_approx(a, q, b, dim, jacobi_eps_r(b, dim)),
+        eigen_decomp_approx(a, q, b, dim, jacobi_eps_r(tol, b, dim)),
 {
     lemma_sym_view_symmetric(b, dim);
-    lemma_max0_fn_bound(|i: int| abs_r(sym_diag(b, i)), dim as nat);
-    lemma_offdiag_norm_bound(b, dim, jacobi_thr_r(b, dim));
+    lemma_jacobi_thr_nonneg(tol, b, dim);
+    lemma_offdiag_norm_bound(b, dim, jacobi_thr_r(tol, b, dim));
 }
 
-/// The contract shared by both eigensolvers, for the input A, the final transformed
-/// matrix B, the accumulated Q and the returned eigenvalue vector: the returned
-/// values are the diagonal of B, and (Q, B) is an approximate eigendecomposition of A
+/// The contract shared by both eigensolvers with stopping tolerance tol, for the input A,
+/// the final transformed matrix B, the accumulated Q and the returned eigenvalue vector: the
+/// returned values are the diagonal of B, and (Q, B) is an approximate eigendecomposition of A
 /// within the stopping bound `jacobi_eps_r`.
-pub open spec fn eigensolver_ok(a: Seq<real>, b: Seq<real>, q: Seq<real>, vals: Seq<real>, dim: int) -> bool {
+pub open spec fn eigensolver_ok(tol: real, a: Seq<real>, b: Seq<real>, q: Seq<real>, vals: Seq<real>, dim: int) -> bool {
     &&& q.len() == dim * dim
     &&& vals == sym_diag_r(b, dim)
-    &&& eigen_decomp_approx(a, q, b, dim, jacobi_eps_r(b, dim))
+    &&& eigen_decomp_approx(a, q, b, dim, jacobi_eps_r(tol, b, dim))
 }
 
 /// A 1 x 1 matrix is its own eigendecomposition: Q = (1) and B = A have no off-diagonal entries.
-pub proof fn lemma_eigensolver_dim1(a: Seq<real>, q: Seq<real>)
+pub proof fn lemma_eigensolver_dim1(tol: real, a: Seq<real>, q: Seq<real>)
     requires
+        tol >= 0.0real,
         a.len() >= 1,
         q.len() == 1,
         q[0] == 1.0real,
     ensures
-        eigensolver_ok(a, a, q, sym_diag_r(a, 1), 1),
+        eigensolver_ok(tol, a, a, q, sym_diag_r(a, 1), 1),
 {
     assert forall|r: int, c: int| 0 <= r < 1 && 0 <= c < 1
         implies #[trigger] cm_entry(q, 1, r, c) == (if r == c { 1.0real } else { 0.0real }) by {
         assert(cm_idx(1, r, c) == 0);
     }
     lemma_eigen_inv_init(a, q, 1);
-    lemma_converged_approx(a, q, a, 1);
+    lemma_converged_approx(tol, a, q, a, 1);
 }
 
 } // verus!

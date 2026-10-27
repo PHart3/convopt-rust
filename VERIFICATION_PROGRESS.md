@@ -45,9 +45,9 @@ All 23 layers (L00-L22) are done; L21 holds the post-hoc proofs of `ADDITIONAL_P
 
 ## Verified-function count
 
-Last full run: **1024 verified, 0 errors** (about 29 s). `--time` reports no
+Last full run: **1046 verified, 0 errors** (about 28 s). `--time` reports no
 slow proof, and no `rlimit` is raised. The `verus!` blocks contain about
-17,400 lines of code, not counting blank and comment lines.
+18,000 lines of code, not counting blank and comment lines.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
@@ -58,7 +58,7 @@ the scope; such decreases are not lost proofs.
 | Module | Verified | Layers |
 |--------|---------:|--------|
 | `trusted` | 0 | trusted items only |
-| `real_spec` | 36 | L00 |
+| `real_spec` | 38 | L00 |
 | `lin_alg::vec_spec` | 20 | L01, L21 |
 | `lin_alg::sym_spec` | 66 | L02, L03, L21, L22 |
 | `lin_alg::mat_spec` | 87 | L03, L07, L12, L21 |
@@ -66,22 +66,58 @@ the scope; such decreases are not lost proofs.
 | `lin_alg::solve_spec` | 11 | L05 |
 | `lin_alg::ldlt_spec` | 9 | L06, L07 |
 | `lin_alg::jacobi_spec` | 57 | L08 |
-| `lin_alg::eigen_spec` | 19 | L09-L11 |
+| `lin_alg::eigen_spec` | 20 | L09-L11 |
 | `lin_alg::spectral_spec` | 8 | L12 |
 | `lin_alg::gauss_spec` | 45 | L13, L22 |
 | `lin_alg::reduce_spec` | 14 | L14, L21 |
 | `lin_alg::norm_spec` | 46 | L21, L22 |
-| `lin_alg::resid_spec` | 58 | L22 |
-| `lin_alg::matrix` | 48 | L01, L13 |
+| `lin_alg::resid_spec` | 60 | L22 |
+| `lin_alg::matrix` | 53 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
-| `lin_alg::sym_matrix` | 152 | L02, L04-L07, L14, L15 |
-| `lin_alg::jacobi` | 38 | L08, L10-L12 |
+| `lin_alg::sym_matrix` | 154 | L02, L04-L07, L14, L15 |
+| `lin_alg::jacobi` | 41 | L08, L10-L12 |
 | `sdp_spec` | 58 | L16 |
 | `sdpad_spec` | 38 | L17-L19, L21, L22 |
 | `feas_spec` | 50 | L21 |
 | `sdp` | 100 | L15, L16 |
-| `sdp_altdir` | 35 | L17-L19 |
-| **total** | **1024** | |
+| `sdp_altdir` | 42 | L17-L19 |
+| **total** | **1046** | |
+
+## Tolerances
+
+Every tolerance is a named default, and the specifications and lemmas take
+the tolerance as a parameter (`gauss_eps_r(tol, ..)`, `rhs_consistent(tol, ..)`,
+`reduced_with(tol, ..)`, `reduced_system(tol, ..)`, the `resid_spec` lemmas,
+`psd_check_eps_r(tol, ..)`, `block_psd_ok(tol, ..)`, `jacobi_thr_r(tol, ..)`,
+`jacobi_converged(tol, ..)`, `jacobi_eps_r(tol, ..)`, `eigensolver_ok(tol, ..)`,
+`spectral_part_ok(tol, ..)`, `neg_sel(tol, ..)`, `reg_shift_r(tol, ..)`,
+`residual_ok(tol, ..)`). Each executable contract instantiates the parameter
+with its named default (`reduced_from`, `dual_solve_ok`, `psd_blocks_ok`,
+`pos_part_of`, `stagnation_stop` and `outcome_ok` refer to the defaults
+directly). The conditions a proof needs are its explicit hypotheses, and one
+lemma per default proves them from the literal reading T5:
+
+| Default | Value | Condition (lemma) |
+|---------|-------|-------------------|
+| `TOL` (`matrix.rs`) | `1e-10` | `0 < TOL < 1` (`lemma_tol_default`): pivots passing their test are nonzero; the largest coefficient of a nonzero matrix passes the pivot test, so a nonzero system has rank `>= 1` |
+| `PSD_TOL` (`sym_matrix.rs`) | `1e-9` | `PSD_TOL > 0` (`lemma_psd_tol_default`) |
+| `JACOBI_TOL` (`jacobi.rs`) | `1e-12` | `JACOBI_TOL > 0` (`lemma_jacobi_tol_default`): a pivot failing the stopping test is nonzero; the stopping bound is nonnegative |
+| `NEG_EIG_TOL` (`jacobi.rs`) | `1e-8` | none |
+| `GRAM_RESID_TOL` (`sdp_altdir.rs`) | `1e-9` | none |
+| `STAG_TOL1..3` (`sdp_altdir.rs`) | `1e-5`, `1e-4`, `1e-3` | none |
+| `PEN_MIN`, `PEN_INIT`, `PEN_MAX`, `PEN_FACT` | `1e-4`, `5.0`, `1e4`, `0.5` | `0 < PEN_MIN <= PEN_INIT <= PEN_MAX`, `0 < PEN_FACT <= 1` (`lemma_penalty_defaults`) |
+
+No relation between different tolerances is needed. The real-arithmetic
+helper `lemma_tol_scale_ge` (`tol >= 0, s >= 1 ==> tol * s >= tol`) turns
+each threshold `tol * max(.., 1)` into a positive lower bound.
+
+**Audit.** The full crate verifies when the tolerance entries of
+`axiom_literals` (T5) are replaced by exactly these conditions (`0.0`, `0.5`,
+`1.0`, `2.0` keep their values; `1e-10` in `(0, 1)`; `1e-9`, `1e-12`
+positive; `0 < 1e-4 <= 5.0 <= 1e4`; nothing about `1.6`, `1e-3`, `1e-5`,
+`1e-8`). Re-run this audit after touching a tolerance proof: with the exact
+values available, the linear solver proves facts such as `TOL * s >= 0` or
+`|b| < TOL |b| ==> b = 0` silently, and the audit is what exposes them.
 
 ## Main contracts
 
@@ -105,7 +141,7 @@ the scope; such decreases are not lost proofs.
   with pivots `>= TOL * max(max_i |A_ii|, 1)`; `pos_def_solver_upperleft`
   solves the block system `(A, I/2) x = b`.
 - **PSD check**: success of `psd_block_check` gives `B >= -eps I` for each
-  block, `eps = 1e-9 * max(max_i |B_ii|, 1)`.
+  block, `eps = PSD_TOL * max(max_i |B_ii|, 1)` (`block_psd_ok(rv(PSD_TOL), ..)`).
 - **Reduction**: `linear_remove_redundant_sym` divides the input rows by
   their Frobenius norms (`normalized_r`), then returns the first `rank`
   echelon rows of `gauss_elim` divided by their Frobenius norms, which are
@@ -138,14 +174,15 @@ the scope; such decreases are not lost proofs.
 - **Jacobi** (`jacobi.rs`): `jacobi_rot` gives `c^2 + s^2 = 1`,
   `A' = J^T A J`, `Q' = Q J`, `A'_jk = 0`. Both eigensolvers establish
   `eigensolver_ok`: `Q^T Q = Q Q^T = I`, `A = Q B Q^T`, `vals = diag(B)`,
-  `||B - diag(B)||_F <= sqrt(dim (dim - 1)) * 1e-12 * max(1, max_i |B_ii|)`.
+  `||B - diag(B)||_F <= sqrt(dim (dim - 1)) * JACOBI_TOL * max(1, max_i |B_ii|)`
+  (`eigensolver_ok(rv(JACOBI_TOL), ..)`).
   Each rotation preserves symmetry and eigenvalues
   (`lemma_jacobi_step_similar`), and so does the whole run: `A` and `B` have
   the same eigenvalues (`lemma_eigen_inv_eigenvalues`). The cached pivot has
   maximal off-diagonal magnitude; each cyclic sweep visits every pair `j < k`
   once in column-cyclic order.
 - **Spectral parts**: `poseigendecomp` and `negeigendecomp` return the pairs
-  `(B_kk, q_k)` with `B_kk > 0`, resp. `B_kk < -1e-8 * max(max_t |A_t|, 1)`
+  `(B_kk, q_k)` with `B_kk > 0`, resp. `B_kk < -NEG_EIG_TOL * max(max_t |A_t|, 1)`
   (`spectral_part_ok`). Nothing relates them to the exact PSD projection.
 - **Standard form** (`sdp.rs`): `sdp_to_standard` preserves the objective,
   the equality and LMI rows (`std_rows_ok`), the zero pattern (`zeros_ok`)
@@ -154,8 +191,9 @@ the scope; such decreases are not lost proofs.
 - **Solver** (`sdp_altdir.rs`):
   - `sdpad_setup` (`sdpad_setup_ok`): Frobenius weighting, Gram matrix, PSD
     partition, standard form.
-  - `dual_solve`: `(G + s I) y_top = b_top`, `y_bottom = 2 b_bottom`, with
-    the residual contract.
+  - `dual_solve`: `(G + s I) y_top = b_top` with `s = TOL * max(max_i |G_ii|, 1)`
+    (0 with `check`), `y_bottom = 2 b_bottom`, and the residual test with
+    `GRAM_RESID_TOL`.
   - `wgy_update` (`wgy_update_ok`): dual solve; `V = C_F - A*(y) - mu Z`;
     `S' = poseigendecomp` part of `V`; `Z' = (1 - rho) Z + (rho / mu)(S' - V)`.
   - `penalty_update`, `kkt_quantities` (`kkt_ok`: `pinf`, `dinf`, objective,
@@ -292,6 +330,9 @@ The bugs in `EXPOSED_BUGS.md` were fixed. Other changes:
   which is already 1 (a no-op loop of the original).
 - `jacobi_eigen_cach`: the rotation limit uses `saturating_mul`; the eigenvector matrix is returned without a final copy;
   regression test `test_jacobi_cach_cache_update` in `src/sdp_tests.rs`.
+- The tolerance literals `1e-9`, `1e-12`, `1e-8`, `1e-5`, `1e-4`, `1e-3` became
+  the named constants `PSD_TOL`, `JACOBI_TOL`, `NEG_EIG_TOL`, `GRAM_RESID_TOL`,
+  `STAG_TOL1..3` with the same values; the executable behavior is unchanged.
 
 ## Constructs rewritten for Verus compatibility
 

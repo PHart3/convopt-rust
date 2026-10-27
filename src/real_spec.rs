@@ -20,6 +20,18 @@ pub open spec fn min_r(x: real, y: real) -> real {
     if x <= y { x } else { y }
 }
 
+/// A nonnegative tolerance times a scale of at least 1 is at least the tolerance.
+pub proof fn lemma_tol_scale_ge(tol: real, scale: real)
+    requires
+        tol >= 0.0real,
+        scale >= 1.0real,
+    ensures
+        tol * scale >= tol,
+{
+    assert(tol * scale >= tol * 1.0real) by (nonlinear_arith)
+        requires tol >= 0.0real, scale >= 1.0real;
+}
+
 /// x^2 >= 0.
 pub proof fn lemma_sq_nonneg(x: real)
     ensures

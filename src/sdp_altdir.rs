@@ -38,8 +38,8 @@ broadcast use crate::trusted::group_real_model;
 pub const TOTAL_STEPS: usize = 5000;
 
 // tuning parameters: the penalty interval and scaling factor, the step of the primal update,
-// the stagnation thresholds, and the consecutive-iteration count and ratio thresholds of the
-// penalty update
+// the stagnation counts and tolerances, and the consecutive-iteration count and ratio
+// thresholds of the penalty update
 pub const PEN_INIT: f64 = 5.0;
 pub const PEN_MIN: f64 = 1e-4;
 pub const PEN_MAX: f64 = 1e4;
@@ -48,9 +48,26 @@ pub const STEP: f64 = 1.6;
 pub const STAG1: i32 = 20;
 pub const STAG2: i32 = 150;
 pub const STAG3: i32 = 300;
+pub const STAG_TOL1: f64 = 1e-5;
+pub const STAG_TOL2: f64 = 1e-4;
+pub const STAG_TOL3: f64 = 1e-3;
 pub const PEN_COUNT: i32 = 50;
 pub const PEN_RATIO1: f64 = 1.0;
 pub const PEN_RATIO2: f64 = 1.0;
+
+/// The relative tolerance of the residual test of the regularized Gram solve (dual_solve).
+pub const GRAM_RESID_TOL: f64 = 1e-9;
+
+/// The properties of the penalty parameters that the proofs use: the initial penalty lies in
+/// the positive interval [PEN_MIN, PEN_MAX], so that the penalty never vanishes, and the
+/// scaling factor lies in (0, 1], so that scaling by it or its reciprocal keeps the clamped
+/// penalty in the interval.
+pub proof fn lemma_penalty_defaults()
+    ensures
+        0.0real < rv(PEN_MIN) <= rv(PEN_INIT) <= rv(PEN_MAX),
+        0.0real < rv(PEN_FACT) <= 1.0real,
+{
+}
 
 /// The standard-form problem prepared for the iteration (see sdpad_spec.rs).
 pub struct SdpadSetup {
@@ -192,7 +209,7 @@ fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> 
     if n == 0 {
         let y: Vector = vec![];
         proof {
-            assert(mat_vec(madd(sym_view(g), mscale(reg_shift_r(g, cl, check), mident())), cl, rvs(y@).subrange(0, cl))
+            assert(mat_vec(madd(sym_view(g), mscale(reg_shift_r(rv(TOL), g, cl, check), mident())), cl, rvs(y@).subrange(0, cl))
                 =~= b.subrange(0, cl));
         }
         return y;
@@ -206,7 +223,7 @@ fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> 
                 lemma_shift_zero_meq(sym_view(g), cl);
                 lemma_mat_vec_meq(madd(sym_view(g), mscale(0.0real, mident())), sym_view(g), cl, yt);
             } else {
-                assert(mat_vec(madd(sym_view(g), mscale(reg_shift_r(g, cl, check), mident())), cl, yt) =~= b.subrange(0, cl));
+                assert(mat_vec(madd(sym_view(g), mscale(reg_shift_r(rv(TOL), g, cl, check), mident())), cl, yt) =~= b.subrange(0, cl));
             }
         }
         return y;
@@ -220,7 +237,7 @@ fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> 
     // regularize the Gram matrix so that it can be fed to the solver
     let reg = max_diag_sym(gram, c_len);
     let shift = TOL * reg.max(1.0);
-    let ghost sh = reg_shift_r(g, cl, check);
+    let ghost sh = reg_shift_r(rv(TOL), g, cl, check);
     let mut gram_reg = gram.clone();
     proof {
         lemma_dim_fits_idx(cl, cl);
@@ -280,7 +297,7 @@ fn dual_solve(gram: &SymMatrix, rhs: &mut Vector, c_len: usize, check: bool) -> 
     }
     let resid_top = euclid_distance(&sym_mat_act(gram, y_top), &rhs_top);
     let resid_bottom = frob_norm_sym(gram, c_len) * euclid_norm(y_top) + euclid_norm(&rhs_top);
-    if !(resid_bottom == 0.0 && resid_top == 0.0) && !relative_residual_is_small(resid_top, resid_bottom, 1e-9) {
+    if !(resid_bottom == 0.0 && resid_top == 0.0) && !relative_residual_is_small(resid_top, resid_bottom, GRAM_RESID_TOL) {
         abort("regularized Gram solve is not an accurate solution to original system");
     }
     y
@@ -610,7 +627,7 @@ pub fn wgy_update(s: &SdpadSetup, check: bool, var: &JacobiVariant, penalty: f64
     let (egnvals, egnvects) = poseigendecomp(&mut st.dual_sfull_temp, var_dim, var);
     let ghost b = rvs(st.dual_sfull_temp@);
     let ghost vals = sym_diag_r(b, d);
-    let ghost q = choose|q: Seq<real>| #[trigger] spectral_part_ok(v, b, q, pos_sel(vals), rvs(egnvals@), rvs(egnvects@), d);
+    let ghost q = choose|q: Seq<real>| #[trigger] spectral_part_ok(rv(JACOBI_TOL), v, b, q, pos_sel(vals), rvs(egnvals@), rvs(egnvects@), d);
     if egnvals.is_empty() {
         st.dual_s = vec![0.0; var_dim_tot];
         proof {
@@ -698,6 +715,14 @@ pub fn penalty_update(penalty: f64, pinf: f64, dinf: f64, it_pinf: i32, it_dinf:
     let res = (penalty, it_pinf, it_dinf);
     proof {
         assert(penalty_step_ok(mu0, rv(i_ratio), ip0, id0, rv(res.0), res.1 as int, res.2 as int));
+        // the clamped penalty stays in the interval: PEN_FACT mu0 <= mu0 and mu0 / PEN_FACT >= mu0
+        lemma_penalty_defaults();
+        if rv(PEN_MIN) <= mu0 <= rv(PEN_MAX) {
+            assert(rv(PEN_FACT) * mu0 <= mu0) by (nonlinear_arith)
+                requires 0.0real < rv(PEN_FACT) <= 1.0real, mu0 >= 0.0real;
+            assert(mu0 / rv(PEN_FACT) >= mu0) by (nonlinear_arith)
+                requires 0.0real < rv(PEN_FACT) <= 1.0real, mu0 >= 0.0real;
+        }
     }
     res
 }
@@ -854,6 +879,7 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
     proof {
         lemma_setup_wgy(sdp, check, s);
         lemma_dim_fits_idx(d, d);
+        lemma_penalty_defaults();
     }
     let var_dim = s.var_dim;
     let (mut it_stag, mut it_pinf, mut it_dinf): (i32, i32, i32) = (0, 0, 0);
@@ -977,9 +1003,9 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
             it_stag = 0;
         }
         if let Some(best_val) = best_prim_val {
-            if (it_stag > STAG1 && residual_is_small(delta, 1e-5)) ||
-                (it_stag > STAG2 && residual_is_small(delta, 1e-4)) ||
-                (it_stag > STAG3 && residual_is_small(delta, 1e-3)) {
+            if (it_stag > STAG1 && residual_is_small(delta, STAG_TOL1)) ||
+                (it_stag > STAG2 && residual_is_small(delta, STAG_TOL2)) ||
+                (it_stag > STAG3 && residual_is_small(delta, STAG_TOL3)) {
                 proof {
                     let j = best_idx - 1;
                     assert(wgy_update_ok(s, check, pens[j].mu, rv(STEP), &states[j], &states[j + 1]));

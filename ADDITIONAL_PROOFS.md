@@ -144,7 +144,7 @@ divisors of the kept rows and `H_D` the dropped echelon rows. With
 
 the input is recovered as `[A | b] = U [A_K | b_K] + [E | f]`. Let `alpha` and `beta` be the
 largest magnitudes of the normalized coefficients and right-hand sides (0 if empty),
-`L = ||D T_D||_F`, `tau = TOL`, and
+`L = ||D T_D||_F`, `tau` the elimination tolerance (`TOL` for the executable reduction; the lemmas hold for every `tau >= 0`), and
 
     e_A = 2^rank sqrt(q n) alpha L,    e_b = 2^rank sqrt(q) beta L,
     C   = max(e_A / ||A||_F, e_b / ||b||)   (a zero denominator has a zero numerator; it counts 0),
