@@ -1,5 +1,5 @@
 // Two variants of Jacobi eigenvalue algorithm, one using a cache to find new pivot, the other using column-cyclic ordering
-// Boths Jacobi methods compute spectral decomposition (L, Q) of real symmetric matrix via Jacobi rotations
+// Both Jacobi methods compute spectral decomposition (L, Q) of real symmetric matrix via Jacobi rotations
 // and store eigenvalues in L and corresponding eigenvectors in Q.
 
 // Jacobi rotation subroutine (where orth stores the eventual eigenvectors)
