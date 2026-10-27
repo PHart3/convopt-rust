@@ -206,8 +206,10 @@ replace the two-level nonlinear identities of `lemma_cauchy_schwarz`.
     (`lemma_unreduced_residual_pinf`); every equality residual and every LMI
     linking residual `R_i = W_i - B_i` (`lmi_link_residual`, `W_i` the actual
     slack `lmi_slack_r`) satisfies `|res_e| <= N`, `||R_i||_F <= N`; a checked
-    block `B_i >= -eps_i I` gives `W_i >= -(eps_i + ||R_i||_F) I`
-    (`lemma_lmi_slack_shifted`). Nothing bounds `C` and `||U||_F`.
+    block `B_i >= -eps_i I` gives `x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2` for
+    every `x` (`lemma_lmi_slack_shifted`), a bound on the quadratic form since
+    `W_i` need not be symmetric at an approximate point. Nothing bounds `C`
+    and `||U||_F`.
   - Not certified with reduction (`check`): the feasibility of the user's
     problem at a returned point, small absolute LMI violations, and the
     equality of optimal values.
@@ -254,8 +256,9 @@ replace the two-level nonlinear identities of `lemma_cauchy_schwarz`.
   entry bounds `||x|| <= sqrt(n) max |x_k|`,
   `||A||_F <= sqrt(rows cols) max |A_ik|`, the window bound
   `||x[off .. off + len]|| <= ||x||`, and `|x^T R x| <= ||R||_F ||x||^2`, which
-  perturbs the semidefinite order: `A >= -eps I` gives
-  `A + R >= -(eps + ||R||_F) I` (`lemma_psd_shifted_perturbed`).
+  perturbs quadratic-form bounds: `x^T A x >= -eps |x|^2` for all `x` gives
+  `x^T (A + R) x >= -(eps + ||R||_F) |x|^2` for all `x`, with no symmetry
+  assumed (`lemma_psd_shifted_perturbed`).
 - **Eigensolvers.** Both solvers maintain `eigen_decomp_inv` (`Q` orthogonal,
   `A = Q B Q^T`) through shared init/step lemmas and stop on `offdiag_below`;
   `lemma_converged_approx` yields `eigensolver_ok`. The spectral operations

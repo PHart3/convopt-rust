@@ -4,9 +4,10 @@
 // functions (`MatF`), with Cauchy-Schwarz, the triangle inequality,
 // ||A x|| <= ||A||_F ||x||, ||A B||_F <= ||A||_F ||B||_F, the entry bounds
 // ||x|| <= sqrt(n) max |x_k|, ||A||_F <= sqrt(rows cols) max |A_ik|, the window
-// bound ||x[off .. off + len]|| <= ||x||, and the perturbation of the
-// semidefinite order: |x^T R x| <= ||R||_F ||x||^2, so A >= -eps I gives
-// A + R >= -(eps + ||R||_F) I.
+// bound ||x[off .. off + len]|| <= ||x||, and the perturbation bound
+// |x^T R x| <= ||R||_F ||x||^2: if x^T A x >= -eps ||x||^2 for all x, then
+// x^T (A + R) x >= -(eps + ||R||_F) ||x||^2 for all x (psd_shifted, which
+// assumes no symmetry).
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -477,7 +478,7 @@ pub proof fn lemma_window_norm_le(x: Seq<real>, off: int, len: int)
     lemma_sqrt_monotone(dot_r(w, w), dot_r(x, x));
 }
 
-/* ---------- the semidefinite order under perturbation ---------- */
+/* ---------- quadratic forms under perturbation ---------- */
 
 /// The square product mat_vec is the rectangular product with rows = cols.
 pub proof fn lemma_mat_vec_rc_square(a: MatF, dim: int, x: Seq<real>)
@@ -508,7 +509,8 @@ pub proof fn lemma_quad_frob_bound(a: MatF, dim: int, x: Seq<real>)
     assert(nx * (na * nx) == na * (nx * nx)) by (nonlinear_arith);
 }
 
-/// A >= -eps I and B = A + R give B >= -(eps + ||R||_F) I.
+/// x^T A x >= -eps |x|^2 for all x and B = A + R give x^T B x >= -(eps + ||R||_F) |x|^2 for
+/// all x (psd_shifted); neither A nor B is assumed symmetric.
 pub proof fn lemma_psd_shifted_perturbed(a: MatF, b: MatF, dim: int, eps: real)
     requires
         dim >= 0,

@@ -38,8 +38,10 @@
 // A(Z) - b (`lemma_unreduced_residual_pinf`); every equality residual and every ||R_i||_F is
 // at most N (`lemma_approx_sound_reduced`). The blocks B_i are the LMI blocks of the PSD
 // partition, so a successful PSD check gives B_i >= -eps_i I (`lemma_lmi_blocks_checked`), and
-// then the actual slack satisfies W_i = B_i + R_i >= -(eps_i + ||R_i||_F) I
-// (`lemma_lmi_slack_shifted`). Nothing bounds the constants C and ||U||_F.
+// then the actual slack W_i = B_i + R_i satisfies x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2 for
+// every x (`lemma_lmi_slack_shifted`). W_i need not be symmetric at an approximate point, so
+// this is a bound on its quadratic form, not a semidefinite-order statement. Nothing bounds
+// the constants C and ||U||_F.
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -1465,7 +1467,8 @@ pub open spec fn lmi_link_residual(sdp: &SDP, z: Seq<real>, i: int) -> MatF {
     msub(lmi_slack_r(sdp, z, i), block_view(z, block_off(bdims_r(sdp.lmi@), i)))
 }
 
-/// A checked LMI block B_i >= -eps_i I gives W_i = B_i + R_i >= -(eps_i + ||R_i||_F) I.
+/// A checked LMI block B_i >= -eps_i I gives x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2 for every
+/// x, where W_i = B_i + R_i need not be symmetric (psd_shifted is this quadratic-form bound).
 pub proof fn lemma_lmi_slack_shifted(sdp: &SDP, z: Seq<real>, i: int)
     requires
         sdp_lmi_input_ok(sdp),
@@ -1620,8 +1623,8 @@ pub proof fn lemma_unreduced_residual_pinf(sdp: &SDP, s: &SdpadSetup, z: Seq<rea
 /// of the unreduced system (bounded as in lemma_unreduced_residual_pinf), every user-level
 /// equality residual at the variables read from z and every linking residual R_i = W_i - B_i
 /// satisfy |res_e| <= N and ||R_i||_F <= N; a checked LMI block B_i >= -eps_i I gives
-/// W_i >= -(eps_i + ||R_i||_F) I; the zero-pattern entries of z are entries of A(z) - b, and
-/// <C_F, z>_F is the user's objective.
+/// x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2 for every x (W_i need not be symmetric); the
+/// zero-pattern entries of z are entries of A(z) - b, and <C_F, z>_F is the user's objective.
 pub proof fn lemma_approx_sound_reduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
     requires
         sdpad_input_ok(sdp, true),

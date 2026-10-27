@@ -111,7 +111,9 @@ where `B_i = block_view(Z, block_off(bd, i))`. Hence:
    - `|sum_j A_j(X_j)_e - b_e| <= N` for every equality row `e`;
    - the linking residual `R_i = W_i - B_i` of every LMI, with `W_i = H_i(X) - M_i` the actual
      slack (`lmi_slack_r`, `lmi_link_residual`), satisfies `||R_i||_F <= N`;
-   - if `B_i >= -eps_i I`, then `W_i >= -(eps_i + ||R_i||_F) I` (`lemma_lmi_slack_shifted`).
+   - if `B_i >= -eps_i I`, then `x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2` for every `x`
+     (`lemma_lmi_slack_shifted`). `W_i` need not be symmetric at an approximate point, so this
+     is a bound on its quadratic form (`psd_shifted`), not a semidefinite-order statement.
 
    The zero-pattern entries of `Z` are still entries of `res` and
    `<C_F, Z>_F = sum_j C_j(X_j)`. Nothing is claimed about the size of `C` and `||U||_F`, so
@@ -125,7 +127,7 @@ every `Z`; `lemma_result_aug_residual` identifies the residuals of the returned 
 entries of `res`. For the reduced case: the window bound `||x[off .. off + len]|| <= ||x||`
 (`lemma_window_norm_le`), the grid sum `sum_c sum_r f(c k + r) = sum_t f(t)`
 (`lemma_sum_fn_grid`) identifying `||R_i||_F` with the norm of a window of `A_0 Z - b_0`, and
-the perturbation of the semidefinite order `|x^T R x| <= ||R||_F ||x||^2`
+the perturbation bound `|x^T R x| <= ||R||_F ||x||^2` on quadratic forms
 (`lemma_quad_frob_bound`, `lemma_psd_shifted_perturbed` in `lin_alg/norm_spec.rs`).
 
 ## 5. Relative residual bound of the constraint reduction
