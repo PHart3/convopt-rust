@@ -23,7 +23,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
     let (mut prim_z, mut dual_s) : (SymMatrix, SymMatrix) = (ident_sym_mat(var_dim), vec![0.0; var_dim_tot]);
     let (mut pinf, mut dinf, mut gap) : (f64, f64, f64);
     let mut delta : f64;
-    let mut best_delta = f64::INFINITY;
+    let mut best_delta = 0.0;
     let (mut inverse_y, mut dual_sfull, mut dual_sfull_temp) : (Vector, SymMatrix, SymMatrix) =
 	(Vec::with_capacity(c_len), Vec::with_capacity(var_dim), Vec::with_capacity(var_dim));
     let mut diff : SymMatrix;
@@ -32,7 +32,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
     let (mut prim_val, mut dual_val) : (f64, f64);
     let mut best_prim_z : SymMatrix = Vec::with_capacity(var_dim_tot);
     let (mut best_feas_delta, mut best_pinf, mut best_dinf, mut best_gap, mut best_prim_val) : (f64, f64, f64, f64, Option<f64>) =
-	(f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::INFINITY, None);
+	(0.0, 0.0, 0.0, 0.0, None);
 
     // PSD blocks of prim_z (without LMIs, prim_z itself is the decision variable)
     let psd_blocks : Vec<(usize, usize)> = if block_size_sum == 0 {
@@ -132,8 +132,8 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 		return (result, prim_val);
 	    }
 
-	// record best solution so far
-	if !(delta > best_feas_delta) && psd_block_check(&prim_z, &psd_blocks) {
+	// record the first passing candidate, then any candidate no worse than the best
+	if (best_prim_val.is_none() || !(delta > best_feas_delta)) && psd_block_check(&prim_z, &psd_blocks) {
 	    best_feas_delta = delta;
 	    best_pinf = pinf;
 	    best_dinf = dinf;
@@ -142,8 +142,8 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	    best_prim_val = Some(prim_val);
 	}
 	
-	// record general stagnation
-	if delta > best_delta {
+	// initialize the minimum on the first iteration, then record general stagnation
+	if count > 1 && delta > best_delta {
 	    it_stag += 1;
 	} else {
 	    best_delta = delta;
