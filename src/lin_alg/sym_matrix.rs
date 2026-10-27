@@ -3,6 +3,9 @@
 pub use crate::lin_alg::matrix::*;
 pub type SymMatrix = Vector;
 
+/// Relative diagonal shift used by the PSD check.
+pub const PSD_TOL: f64 = 1e-9;
+
 // max diagonal of a symmetric matrix
 pub fn max_diag_sym(mat : &SymMatrix, dim : usize) -> f64 {
     let mut max : f64 = mat.first().unwrap_or(&0.0).abs();
@@ -413,7 +416,7 @@ pub fn psd_block_check(mat : &SymMatrix, blocks : &Vec<(usize, usize)>) -> bool 
     let (mut eps, mut idx) : (f64, usize);
     for (start, dim) in blocks {
 	let block = sym_matrix_diag_block(*start, *dim, mat);
-	eps = 1e-9 * max_diag_sym(&block, *dim).max(1.0);
+	eps = PSD_TOL * max_diag_sym(&block, *dim).max(1.0);
 	let mut block_add_scal : SymMatrix = Vec::new();
 	idx = 0;
 	for c in 0..*dim {

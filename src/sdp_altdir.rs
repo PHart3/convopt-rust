@@ -4,6 +4,14 @@ use crate::sdp::*;
 // maximum number of iterations to run
 const TOTAL_STEPS: usize = 5000;
 
+/// Relative residual tolerance for the regularized Gram solve.
+pub const GRAM_RESID_TOL: f64 = 1e-9;
+
+// Accuracy thresholds for the three stagnation counts.
+pub const STAG_TOL1: f64 = 1e-5;
+pub const STAG_TOL2: f64 = 1e-4;
+pub const STAG_TOL3: f64 = 1e-3;
+
 // the alternating direction dual augmented Lagrangian method
 pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant) -> (Vec<SymMatrix>, f64) {
     let (mut obj, (mat_dense, zeros), point, var_dim, symm_dims, block_dims) = sdp_to_standard(sdp, check_constraints);
@@ -84,7 +92,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 		let solved_pre = &solved[..c_len];
 		let resid_top = euclid_distance(&sym_mat_act(&gram_small, solved_pre), &inverse_y_old);
 		let resid_bottom = frob_norm_sym(&gram_small, c_len) * euclid_norm(solved_pre) + euclid_norm(&inverse_y_old);
-		if !(resid_bottom == 0.0 && resid_top == 0.0) && !(resid_top / resid_bottom < 1e-9) {
+		if !(resid_bottom == 0.0 && resid_top == 0.0) && !(resid_top / resid_bottom < GRAM_RESID_TOL) {
 		    panic!("regularized Gram solve is not an accurate solution to original system");
 		}
 	    };
@@ -150,7 +158,7 @@ pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant)
 	    it_stag = 0;
 	}
 	if let Some(best_prim_val) = best_prim_val &&
-	    ((it_stag > stag1 && delta < 1e-5) || (it_stag > stag2 && delta < 1e-4) || (it_stag > stag3 && delta < 1e-3)) {
+	    ((it_stag > stag1 && delta < STAG_TOL1) || (it_stag > stag2 && delta < STAG_TOL2) || (it_stag > stag3 && delta < STAG_TOL3)) {
 		if block_size_sum == 0 {
 		    result.push(best_prim_z);
 		} else {

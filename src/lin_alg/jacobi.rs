@@ -2,6 +2,15 @@
 // Both Jacobi methods compute spectral decomposition (L, Q) of real symmetric matrix via Jacobi rotations
 // and store eigenvalues in L and corresponding eigenvectors in Q.
 
+/// Relative stopping tolerance of both Jacobi eigensolvers.
+pub const JACOBI_TOL: f64 = 1e-12;
+
+/// Relative tolerance for retaining the nonnegative spectral part.
+pub const NONNEG_EIG_TOL: f64 = 1e-9;
+
+/// Relative cutoff for retaining the negative spectral part.
+pub const NEG_EIG_TOL: f64 = 1e-8;
+
 // Jacobi rotation subroutine (where orth stores the eventual eigenvectors)
 fn jacobi_rot<'a>(mat : &'a mut SymMatrix, orth : &'a mut Matrix, dim : usize, k : usize, j : usize) ->
     (&'a mut SymMatrix, &'a mut Matrix, f64) {
@@ -147,7 +156,7 @@ pub fn jacobi_eigen_cach(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 	    k = max.0;
 	    j = maxima[k - 1];
 	}
-	if eigenvals_new[(k * (k + 1)) / 2 + j].abs() < 1e-12 * 1.0_f64.max(max_diag) {
+	if eigenvals_new[(k * (k + 1)) / 2 + j].abs() < JACOBI_TOL * 1.0_f64.max(max_diag) {
 	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
 	} else {
 	    (eigenvals, eigenvects) = (eigenvals_new, eigenvects_new);
@@ -190,7 +199,7 @@ pub fn jacobi_eigen_cyc(a : &mut SymMatrix, dim : usize) -> (Vector, Matrix) {
 		max_diag = eigenvals_new[(n * n + 3 * n) / 2].abs();
 	    }
 	} 
-	if max_offdiag < 1e-12 * 1.0_f64.max(max_diag) {
+	if max_offdiag < JACOBI_TOL * 1.0_f64.max(max_diag) {
 	    return (diag_of_sym_mat(eigenvals_new, dim), eigenvects_new.to_vec())
 	}
     }
@@ -209,7 +218,7 @@ pub fn nonnegeigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) 
     let (eigenvals, eigenvects) =
 	match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
-	if !(*val < -(1e-9 * scale)) {
+	if !(*val < -(NONNEG_EIG_TOL * scale)) {
 	    nonneg_eigenvals.push(*val);
 	    nonneg_eigenvects.extend_from_slice(vect);
 	}
@@ -224,7 +233,7 @@ pub fn negeigendecomp(a : &mut SymMatrix, dim : usize, var : &JacobiVariant) -> 
     let (eigenvals, eigenvects) =
 	match var { Cached => jacobi_eigen_cach(a, dim), Cyclic => jacobi_eigen_cyc(a, dim) };
     for (val, vect) in eigenvals.iter().zip(eigenvects.chunks_exact(dim)) {
-	if *val < -(1e-8 * scale) {
+	if *val < -(NEG_EIG_TOL * scale) {
 	    neg_eigenvals.push(*val);
 	    neg_eigenvects.extend_from_slice(vect);
 	}
