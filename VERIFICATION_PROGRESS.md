@@ -305,7 +305,6 @@ the installed Verus (0.2026.08.23).
 | Construct | Replacement | Where |
 |-----------|-------------|-------|
 | Unary `-x` on `f64` | `crate::trusted::neg(x)` (T7) | `is_significantly_negative`, `negscal_vect` |
-| `f64::INFINITY` | `pos_infinity()` (T7) | `sdpad_loop` sentinels |
 | `x += y`, `v[i] -= y`, `v[i] *= y` on `f64` (compiler crash) | `x = x + y`, etc. | all accumulation loops |
 | `panic!`, `assert!`, `expect`, `unwrap_or_else(panic)` on data-dependent conditions | `crate::trusted::abort(..)` (T8); internal consistency checks became static `assert`s | solvers, eigensolvers, `linear_remove_redundant_sym`, `sdp_to_standard`, `dual_solve` |
 | Iterator chains (`zip`, `map`, `fold`, `collect`, `all`, `enumerate`, `chunks_exact`, `scan`, `chain`, `sum`, `concat`), `for x in &v` | index loops over the same slices (`all` keeps its short circuit) | throughout |

@@ -4,7 +4,7 @@ One record per verification layer: what it establishes, the layers it builds
 on, and the executable functions (or, for spec-only layers, the main
 definitions and lemmas) it covers. All layers are done.
 
-L00 | Trusted exact-real model: `rv: f64 -> real`, the `sqrt_r` axiom, exact-real axioms for vstd's f64 operator and comparison hooks and for literals, `assume_specification` contracts for std f64 methods, wrappers for unsupported primitives (`neg`, `pos_infinity`, `abort`); verified tolerance comparisons |
+L00 | Trusted exact-real model: `rv: f64 -> real`, the `sqrt_r` axiom, exact-real axioms for vstd's f64 operator and comparison hooks and for literals, `assume_specification` contracts for std f64 methods, wrappers for unsupported primitives (`neg`, `abort`); verified tolerance comparisons |
 deps: none |
 targets: float_equality, scaled_near_zero, pivot_below_positive_threshold, is_significantly_negative, residual_is_small, relative_residual_is_small |
 status: done

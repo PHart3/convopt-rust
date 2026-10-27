@@ -237,13 +237,6 @@ pub fn neg(x: f64) -> (r: f64)
     -x
 }
 
-/// f64::INFINITY; its real value is unconstrained.
-#[verifier::external_body]
-#[inline(always)]
-pub fn pos_infinity() -> f64 {
-    f64::INFINITY
-}
-
 /* ---------- T8: program abort ---------- */
 
 /// Aborts the program with a message.  Nothing is claimed about reachability:

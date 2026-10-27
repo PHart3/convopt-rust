@@ -1,7 +1,7 @@
 pub use crate::lin_alg::jacobi::*;
 use crate::sdp::*;
 use crate::lin_alg::comparison::{relative_residual_is_small, residual_is_small};
-use crate::trusted::{abort, pos_infinity};
+use crate::trusted::abort;
 use vstd::prelude::*;
 use vstd::slice::slice_to_vec;
 #[cfg(verus_keep_ghost)]
@@ -864,10 +864,10 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
         prim_z, dual_s, dual_y: Vec::new(), diff: Vec::new(), dual_sfull: Vec::with_capacity(var_dim),
         inverse_y: Vec::with_capacity(s.c_len), dual_sfull_temp: Vec::with_capacity(var_dim),
     };
-    let mut best_delta = pos_infinity();
+    let mut best_delta = 0.0;
     let mut best_prim_z: SymMatrix = Vec::with_capacity(var_dim_tot);
     let (mut best_feas_delta, mut best_pinf, mut best_dinf, mut best_gap): (f64, f64, f64, f64) =
-        (pos_infinity(), pos_infinity(), pos_infinity(), pos_infinity());
+        (0.0, 0.0, 0.0, 0.0);
     let mut best_prim_val: Option<f64> = None;
     // the trajectory so far (states, pens), the index in it of the recorded best candidate,
     // the deltas of the iterations so far and which of them were recorded as candidates
@@ -924,7 +924,7 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
         proof {
             deltas = deltas.push(delta);
             assert(rvs(deltas) =~= rvs(deltas0).push(rv(delta)));
-            lemma_stag_step(rvs(deltas0), rv(best_delta), it_stag as int, rv(delta));
+            lemma_stag_step(rvs(deltas0), rv(best_delta), it_stag as int, rv(delta), count == 1);
             assert forall|j: int| 0 <= j < count implies rv(#[trigger] deltas[j]) == iterate_delta_r(s, &states[j + 1]) by {
                 if j < count - 1 {
                     assert(rv(deltas0[j]) == iterate_delta_r(s, &states[j + 1]));
@@ -938,8 +938,8 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
                 result, value: prim_val, pinf, dinf, gap, termination: Termination::Accuracy,
                 states: Ghost(states), pens: Ghost(pens), iterate: Ghost(count as int),
                 deltas: Ghost(deltas), feasible: Ghost(feasible.push(true)),
-                best_delta: Ghost(if rv(delta) > rv(best_delta) { best_delta } else { delta }),
-                it_stag: Ghost(if rv(delta) > rv(best_delta) { (it_stag + 1) as i32 } else { 0 }),
+                best_delta: Ghost(if count > 1 && rv(delta) > rv(best_delta) { best_delta } else { delta }),
+                it_stag: Ghost(if count > 1 && rv(delta) > rv(best_delta) { (it_stag + 1) as i32 } else { 0 }),
             };
             proof {
                 lemma_objective_value(sdp, check, s, rvs(st.prim_z@));
@@ -948,8 +948,8 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
             return o;
         }
 
-        // record best solution so far
-        let record = !(delta > best_feas_delta) && psd_block_check(&st.prim_z, &s.psd_blocks);
+        // record the first passing candidate, then any candidate no worse than the best
+        let record = (best_prim_val.is_none() || !(delta > best_feas_delta)) && psd_block_check(&st.prim_z, &s.psd_blocks);
         proof {
             lemma_best_feasible_step(rvs(deltas0), feasible, rv(best_feas_delta), best_prim_val is Some, rv(delta), record);
             feasible = feasible.push(record);
@@ -969,8 +969,8 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
             }
         }
 
-        // record general stagnation
-        if delta > best_delta {
+        // initialize the minimum on the first iteration, then record general stagnation
+        if count > 1 && delta > best_delta {
             it_stag += 1;
         } else {
             best_delta = delta;

@@ -24,7 +24,7 @@ which is interpreted only in `bit_vector` mode and never used here.
 | T4 | `axiom_eq`, `axiom_ne`, `axiom_lt`, `axiom_le`, `axiom_gt`, `axiom_ge` | Executable `f64` comparisons return the exact-real comparison of the `rv` values. | Differs from IEEE only on NaN and signed zeros. Ghost comparisons of `f64` are not covered; specifications compare `rv` values. |
 | T5 | `axiom_literals` | Each literal used by the verified code (`0.0`, `0.5`, `1.0`, `1.6`, `2.0`, `5.0`, `1e4`, `1e-3`, `1e-4`, `1e-5`, `1e-8`, `1e-9`, `1e-10`, `1e-12`) denotes its decimal value. | Tolerances and tuning constants are read as the decimals written. The list is exactly the literals in the non-test sources. |
 | T6 | `assume_specification` for `f64::abs`, `max`, `min`, `sqrt`, `mul_add`, `hypot`, `recip`, `signum`, `is_finite` | `abs`, `max`, `min` exact; `sqrt(x) == sqrt_r(x)` for `x >= 0`; `mul_add(x, a, b) == x*a + b`; `hypot(x, y) == sqrt_r(x^2 + y^2)`; `recip(x) == 1/x` for `x != 0`; `signum(x)` is `1` or `-1`, matching the sign of nonzero `x`; `is_finite` unconstrained. | vstd gives these methods no specification; each contract is the exact-real reading of the std documentation. `signum(0)` depends on the sign bit, so it is left open. `is_finite` is inexpressible in the model. Its uses guard aborts or can only clear the consistency flag of `gauss_elim`, whose contract states what a set flag implies. |
-| T7 | `neg`, `pos_infinity` (`external_body`, `inline(always)`) | `rv(neg(x)) == -rv(x)`; `pos_infinity()` unconstrained. | Verus rejects unary `-x` on floats and the std float constants. The wrappers' bodies are exactly the rejected expressions. |
+| T7 | `neg` (`external_body`, `inline(always)`) | `rv(neg(x)) == -rv(x)`. | Verus rejects unary `-x` on floats. The wrapper's body is exactly the rejected expression. |
 | T8 | `abort(msg) -> !` (`external_body`) | Diverges; no pre- or postcondition. | Replaces `panic!` on data-dependent failures, which vstd forbids unless proved unreachable. Postconditions cover normal returns only; reachability of aborts is not analyzed. |
 | T9 | `assume_specification` for `usize::isqrt` | `r * r <= x < (r + 1) * (r + 1)`. | vstd gives `isqrt` no specification; the contract is the std documentation. |
 
@@ -67,11 +67,7 @@ products, `ldlt_decomp`); `hypot` (row norms of `linear_remove_redundant_sym`);
 `recip`, `signum` (`jacobi_rot`); `is_finite` (two abort guards in
 `linear_remove_redundant_sym`, and the RHS-scale test of `gauss_elim`).
 
-**T7**: `neg` in `is_significantly_negative` and `negscal_vect`;
-`pos_infinity` for the five sentinels of `sdpad_loop` (`best_delta`,
-`best_feas_delta`, `best_pinf`, `best_dinf`, `best_gap`: the recorded
-quantities of the best candidate so far), whose contracts hold for any
-sentinel value.
+**T7**: `neg` in `is_significantly_negative` and `negscal_vect`.
 
 **T8**: 20 `abort` calls, all data-dependent exits of the original code:
 - three "division by zero" exits of the triangular and diagonal solvers;

@@ -771,8 +771,7 @@ pub open spec fn iterate_delta_r(s: &SdpadSetup, st: &WgyState) -> real {
 
 /// The stagnation bookkeeping over the deltas of the iterations so far: best bounds every
 /// delta from below, the last it_stag deltas lie strictly above best, and the one before them
-/// equals best (when there is one; initially best is the sentinel +infinity, which the model
-/// leaves unconstrained).
+/// equals best (when there is one; before the first iteration best is unconstrained).
 pub open spec fn stagnation_ok(deltas: Seq<real>, best: real, it_stag: int) -> bool {
     let n = deltas.len() as int;
     &&& 0 <= it_stag <= n
@@ -781,36 +780,38 @@ pub open spec fn stagnation_ok(deltas: Seq<real>, best: real, it_stag: int) -> b
     &&& it_stag < n ==> deltas[n - 1 - it_stag] == best
 }
 
-/// One step of the bookkeeping: a delta above best is a stagnating iteration, any other delta
-/// becomes the best.
-pub open spec fn stag_step(delta: real, best: real, it_stag: int) -> (real, int) {
-    if delta > best { (best, it_stag + 1) } else { (delta, 0) }
+/// One step of the bookkeeping: the delta of the first iteration becomes the best; afterwards
+/// a delta above best is a stagnating iteration, any other delta becomes the best.
+pub open spec fn stag_step(first: bool, delta: real, best: real, it_stag: int) -> (real, int) {
+    if !first && delta > best { (best, it_stag + 1) } else { (delta, 0) }
 }
 
 /// The bookkeeping is preserved by a step.
-pub proof fn lemma_stag_step(deltas: Seq<real>, best: real, it_stag: int, delta: real)
+pub proof fn lemma_stag_step(deltas: Seq<real>, best: real, it_stag: int, delta: real, first: bool)
     requires
         stagnation_ok(deltas, best, it_stag),
+        first == (deltas.len() == 0),
     ensures
-        stagnation_ok(deltas.push(delta), stag_step(delta, best, it_stag).0, stag_step(delta, best, it_stag).1),
+        stagnation_ok(deltas.push(delta), stag_step(first, delta, best, it_stag).0, stag_step(first, delta, best, it_stag).1),
 {
 }
 
-/// best_feas bounds the deltas of the candidate iterations (feasible) from below and, once a
-/// solution has been recorded, is attained by one of them.
+/// Before a solution is recorded, no iteration is a candidate (feasible); afterwards best_feas
+/// bounds the deltas of the candidate iterations from below and is attained by one of them.
 pub open spec fn best_feasible_ok(deltas: Seq<real>, feasible: Seq<bool>, best_feas: real, recorded: bool) -> bool {
     let n = deltas.len() as int;
     &&& feasible.len() == n
+    &&& !recorded ==> forall|k: int| 0 <= k < n ==> !#[trigger] feasible[k]
     &&& forall|k: int| 0 <= k < n && feasible[k] ==> #[trigger] deltas[k] >= best_feas
     &&& recorded ==> exists|k: int| 0 <= k < n && feasible[k] && #[trigger] deltas[k] == best_feas
 }
 
-/// The candidate bookkeeping is preserved by an iteration: a recorded candidate (delta not
-/// above the best) becomes the best.
+/// The candidate bookkeeping is preserved by an iteration: a recorded candidate (the first
+/// one, or one with delta not above the best) becomes the best.
 pub proof fn lemma_best_feasible_step(deltas: Seq<real>, feasible: Seq<bool>, best_feas: real, recorded: bool, delta: real, record: bool)
     requires
         best_feasible_ok(deltas, feasible, best_feas, recorded),
-        record ==> delta <= best_feas,
+        record && recorded ==> delta <= best_feas,
     ensures
         best_feasible_ok(deltas.push(delta), feasible.push(record), if record { delta } else { best_feas }, recorded || record),
 {
