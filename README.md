@@ -4,7 +4,7 @@ This library provides a first-order semidefinite programming (SDP) solver with a
 
 Z. Wen, D. Goldfarb, and W. Yin, “Alternating direction augmented Lagrangian methods for semidefinite programming,” *Mathematical Programming Computation*, 2, 203–230, 2010. [DOI: 10.1007/s12532-010-0017-1](https://doi.org/10.1007/s12532-010-0017-1).
 
-For the paper's convergence guarantees to hold, the user should ensure that both the primal and the dual satisfy Slater's condition. In our implementation, however, if the solver converges on an input, then the returned solution will have small KKT residuals and therefore be optimal up to numerical error. So, in practice, one can simply run the solver on a general SDP problem to see whether it converges to a solution.
+For the paper's convergence guarantees to hold, the user should ensure that both the primal and the dual satisfy Slater's condition. In our implementation, however, if the solver converges on an input, then the returned solution will have small KKT residuals and therefore be optimal for the numerical problem solved (which may have introduced errors from intermediate numerical routines). So, in practice, one can simply run the solver on a general SDP problem to see whether it converges to a solution.
 
 ## Organization
 
@@ -137,11 +137,11 @@ L(B_{s+1} - B_{s+2}, ..., B_{2n+s-1} - B_{2n+s}) = b.
 
 The user passes a boolean flag `check_constraints` to the solver. If true, then 
 the implementation checks whether the constraint matrix `A`, excluding the off-block-diagonal 
-zero constraints, has full rank. If it does not, redundant constraints are removed.
-If the flag is false, then the implementation never runs this check, to save time.
-Instead, it performs a cheap regularization of the Gram matrix of `A` so that it is
-positive definite for the `LDL^T` decomposition. If the regularization produces an
-inaccurate solution relative to the true Gram matrix, then a panic occurs.
+zero constraints, has full numerical rank. If it does not, numerically redundant constraints 
+are removed. If the flag is false, then the implementation never runs this check, to save time.
+Instead, it performs a cheap regularization of the Gram matrix of `A` so that it is positive 
+definite for the `LDL^T` decomposition. If the regularization produces an inaccurate solution 
+relative to the true Gram matrix, then a panic occurs.
 
 The standard-form objective is
 
