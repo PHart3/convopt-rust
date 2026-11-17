@@ -47,9 +47,9 @@ end-to-end soundness of the returned solution (`END_TO_END_SOUNDNESS.md`).
 
 ## Verified-function count
 
-Last full run: **1042 verified, 0 errors** (about 30 s). `--time` reports no
+Last full run: **1043 verified, 0 errors** (about 30 s). `--time` reports no
 slow proof, and no `rlimit` is raised. The `verus!` blocks contain
-17,545 lines of code, not counting blank and comment lines.
+17,559 lines of code, not counting blank and comment lines.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
@@ -79,11 +79,11 @@ the scope; such decreases are not lost proofs.
 | `lin_alg::sym_matrix` | 146 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 41 | L08, L10-L12 |
 | `sdp_spec` | 58 | L16 |
-| `sdpad_spec` | 38 | L17-L19, L21, L22 |
+| `sdpad_spec` | 39 | L17-L19, L21, L22 |
 | `feas_spec` | 58 | L21, L23 |
 | `sdp` | 100 | L15, L16 |
 | `sdp_altdir` | 43 | L17-L19, L23 |
-| **total** | **1042** | |
+| **total** | **1043** | |
 
 ## Tolerances
 
@@ -204,7 +204,11 @@ values available, the linear solver proves facts such as `TOL * s >= 0` or
     at `Z = I, S = 0`; each state is the verified update of its predecessor
     and each penalty the verified update from the new infeasibilities. The
     returned solution, its objective value, the recorded deltas and the
-    termination reason all refer to indices into this trajectory.
+    termination reason all refer to indices into this trajectory. The dual
+    slack `S` of the returned iterate is positive semidefinite for every
+    termination reason (`lemma_trajectory_dual_psd`: it is the positive
+    spectral part computed by the update that produced the iterate), which
+    with `dinf` completes dual feasibility in the KKT picture.
     `best_delta` starts at `0.0` and is set by the first iteration; after it,
     `lemma_outcome_best_delta` shows it is the least recorded delta.
   - `sdpad_verified` (the verified entry point, requiring `sdpad_input_ok`):

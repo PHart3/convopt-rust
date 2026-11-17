@@ -1022,6 +1022,7 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
                     let stb = states[best_idx];
                     lemma_objective_value(sdp, check, s, rvs(stb.prim_z@));
                     assert(solution_ok(s, rvs(stb.prim_z@), o.result@));
+                    lemma_trajectory_dual_psd(s, check, states, pens, best_idx);
                 }
                 return o;
             }

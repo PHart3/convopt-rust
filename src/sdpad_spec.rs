@@ -50,9 +50,10 @@
 // the check (`psd_blocks_ok`), with the best PSD-verified iterate when the
 // stagnation rule fires (`stagnation_ok`, `stagnation_stop`), or with the last
 // iterate after TOTAL_STEPS iterations; the returned iterate is an element of
-// the trajectory (`outcome_ok`). The user's solution is read from its diagonal
-// blocks (`solution_ok`). With check, the residual bound of
-// resid_spec.rs applies to the dense rows (`lemma_reduced_from_residual_bound`).
+// the trajectory, and its dual slack S is positive semidefinite (`outcome_ok`,
+// `lemma_trajectory_dual_psd`). The user's solution is read from its diagonal
+// blocks (`solution_ok`). With check, the residual bound of resid_spec.rs
+// applies to the dense rows (`lemma_reduced_from_residual_bound`).
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -766,6 +767,21 @@ pub proof fn lemma_trajectory_step(s: &SdpadSetup, check: bool, states: Seq<WgyS
     }
 }
 
+/// The dual slack of every iterate after the initial one is positive semidefinite: it is the
+/// positive spectral part computed by the update that produced the iterate.
+pub proof fn lemma_trajectory_dual_psd(s: &SdpadSetup, check: bool, states: Seq<WgyState>, pens: Seq<Penalty>, k: int)
+    requires
+        trajectory_ok(s, check, states, pens),
+        1 <= k <= pens.len(),
+    ensures
+        is_psd(sym_view(rvs(states[k].dual_s@)), s.var_dim as int),
+{
+    let j = k - 1;
+    assert(wgy_update_ok(s, check, pens[j].mu, rv(STEP), &states[j], &states[j + 1]));
+    assert(states[j + 1] == states[k]);
+    lemma_pos_part_psd_sym(rvs(states[k].dual_sfull@), rvs(states[k].dual_s@), s.var_dim as int);
+}
+
 /// delta of the iterate st: max(pinf, dinf, gap) of its KKT quantities (kkt_ok).
 pub open spec fn iterate_delta_r(s: &SdpadSetup, st: &WgyState) -> real {
     let prim = prim_val_r(s, rvs(st.prim_z@));
@@ -879,7 +895,8 @@ pub open spec fn stagnation_stop(delta: real, it_stag: int) -> bool {
 /// reason fixes the iterate: Accuracy (the last iterate, with delta < TOL and PSD-verified
 /// blocks), Stagnation (a recorded PSD-verified candidate attaining the least recorded delta,
 /// after the stopping rule fired on the last iterate), or MaxIter (the last of TOTAL_STEPS
-/// iterates).
+/// iterates). Whatever the reason, the dual slack S of the returned iterate is positive
+/// semidefinite, so with dinf it completes the dual feasibility picture of the KKT quantities.
 pub open spec fn outcome_ok(sdp: &SDP, s: &SdpadSetup, check: bool, o: SdpadOutcome) -> bool {
     let states = o.states@;
     let deltas = rvs(o.deltas@);
@@ -897,6 +914,7 @@ pub open spec fn outcome_ok(sdp: &SDP, s: &SdpadSetup, check: bool, o: SdpadOutc
     &&& solution_ok(s, rvs(st.prim_z@), o.result@)
     &&& kkt_ok(s, &st, rv(o.pinf), rv(o.dinf), rv(o.value), rv(o.gap), delta)
     &&& rv(o.value) == objective_r(sdp, rvs(st.prim_z@))
+    &&& is_psd(sym_view(rvs(st.dual_s@)), s.var_dim as int)
     &&& match o.termination {
             Termination::Accuracy => k == n && psd_blocks_ok(s, rvs(st.prim_z@)) && delta < rv(TOL),
             Termination::Stagnation => psd_blocks_ok(s, rvs(st.prim_z@))

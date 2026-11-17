@@ -99,7 +99,7 @@ deps: L17, L12, L07 |
 targets: wgy_update, penalty_update |
 status: done
 
-L19 | Residuals and KKT quantities: `pinf`, `dinf`, objective values, gap, delta, feasibility check, stagnation and best-solution bookkeeping, solution read-out; the loop outcome over a ghost trajectory from the initial iterates |
+L19 | Residuals and KKT quantities: `pinf`, `dinf`, objective values, gap, delta, feasibility check, stagnation and best-solution bookkeeping, solution read-out; the loop outcome over a ghost trajectory from the initial iterates, with a positive semidefinite dual slack at the returned iterate |
 deps: L18 |
 targets: kkt_quantities, read_solution, sdpad_loop |
 status: done
