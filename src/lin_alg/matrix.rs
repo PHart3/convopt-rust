@@ -88,24 +88,6 @@ pub fn scal_vect(s: f64, vect: &Vector) -> Vector {
     result
 }
 
-// inverse scalar action on vector
-pub fn negscal_vect(s: f64, vect: &Vector) -> Vector {
-    let mut result: Vector = Vec::new();
-    for v in vect {
-        result.push(-(s * v));
-    }
-    result
-}
-
-// computing vector of form vect1 + s * vect2
-pub fn vect_add_scaled(vect1: &Vector, s: f64, vect2: &Vector) -> Vector {
-    let mut result: Vector = Vec::new();
-    for (v1, v2) in vect1.iter().zip(vect2.iter()) {
-        result.push(s.mul_add(*v2, *v1));
-    }
-    result
-}
-
 // evaluates the matrix expression A + (B - C)
 pub fn matrix_add_diff(mat1: &Matrix, mat2: &Matrix, mat3: &Matrix) -> Matrix {
     let mut sum: Matrix = Vec::with_capacity(mat1.len());

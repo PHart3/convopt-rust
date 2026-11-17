@@ -107,18 +107,6 @@ pub fn scale_off_diag(s : f64, dim : usize, mat : &mut SymMatrix) -> &mut SymMat
     mat
 }
 
-// returns the upper half of an arbitrary outer product
-pub fn outer_prod_upper(vect1 : &Vector, vect2 : &Vector) -> SymMatrix {
-    let mut result = Vec::new();
-    let dim = vect1.len();
-    for c in 0..dim {
-	for r in 0..=c {
-	    result.push(vect1[r] * vect2[c]);
-	}
-    }
-    result
-}
-
 // returns outer product of a vector with itself
 pub fn outer_prod_single(vect : &Vector) -> SymMatrix {
     let mut result = Vec::new();
@@ -179,16 +167,6 @@ pub fn sym_matrix_diag_block(start : usize, dim : usize, mat : &SymMatrix) -> Sy
 	    result.push(mat[first + j]);
 	}
 	k += 1;
-    }
-    result
-}
-
-// returns linear map computing diagonal of a symmetric matrix
-pub fn sym_matrix_diagonal(dim : usize) -> Matrix {
-    let size = (dim * (dim + 1)) / 2;
-    let mut result = zero_mat(size, dim);
-    for i in 0..dim {
-	result[((i * i + 3 * i) / 2) * dim + i] = 1.0;
     }
     result
 }
