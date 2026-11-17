@@ -48,8 +48,8 @@ end-to-end soundness of the returned solution (`END_TO_END_SOUNDNESS.md`).
 ## Verified-function count
 
 Last full run: **1042 verified, 0 errors** (about 30 s). `--time` reports no
-slow proof, and no `rlimit` is raised. The `verus!` blocks contain about
-18,000 lines of code, not counting blank and comment lines.
+slow proof, and no `rlimit` is raised. The `verus!` blocks contain
+17,545 lines of code, not counting blank and comment lines.
 
 Verus counts executable functions, lemmas, recursive spec functions, loop
 bodies and `assert .. by (nonlinear_arith)` sub-queries; `external_body`
