@@ -29,6 +29,8 @@ use crate::sdp_spec::*;
 use crate::sdpad_spec::Penalty;
 #[cfg(verus_keep_ghost)]
 use crate::sdpad_spec::*;
+#[cfg(verus_keep_ghost)]
+use crate::feas_spec::{user_outcome_ok, lemma_outcome_sound};
 
 verus! {
 
@@ -866,8 +868,7 @@ fn read_solution(s: &SdpadSetup, z: &SymMatrix) -> (result: Vec<SymMatrix>)
 // adaptation until the current iterate has delta < TOL and PSD-verified blocks, the stagnation
 // rule fires (the best PSD-verified candidate is returned), or TOTAL_STEPS iterations were run;
 // the ghost trajectory (states, pens) records every iterate and the penalty that produced it
-// (the problem sdp is used by the specification only)
-#[allow(unused_variables)]
+#[allow(unused_variables)]  // sdp is only used in the specification
 pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -> (o: SdpadOutcome)
     requires
         sdpad_setup_ok(sdp, check, *s),
@@ -1050,13 +1051,30 @@ pub fn sdpad_loop(sdp: &SDP, s: &SdpadSetup, check: bool, var: &JacobiVariant) -
     }
 }
 
+// the alternating direction dual augmented Lagrangian method (contract: user_outcome_ok,
+// feas_spec.rs, for the setup computed from the input): the setup, the loop, and the
+// end-to-end soundness of the returned solution on the user's problem
+pub fn sdpad_verified(sdp: &SDP, check: bool, var: &JacobiVariant) -> (o: SdpadOutcome)
+    requires
+        sdpad_input_ok(sdp, check),
+    ensures
+        exists|s: SdpadSetup| #[trigger] sdpad_setup_ok(sdp, check, s)
+            && outcome_ok(sdp, &s, check, o)
+            && user_outcome_ok(sdp, check, &s, o),
+{
+    let s = sdpad_setup(sdp, check);
+    let o = sdpad_loop(sdp, &s, check, var);
+    proof {
+        lemma_outcome_sound(sdp, check, &s, o);
+    }
+    o
+}
+
 } // verus!
 
-// the alternating direction dual augmented Lagrangian method: the setup, the verified loop,
-// and the report of how it terminated
+// the verified solver and the report of how it terminated
 pub fn sdpad(sdp : &SDP, check_constraints : bool, jac_variant : &JacobiVariant) -> (Vec<SymMatrix>, f64) {
-    let setup = sdpad_setup(sdp, check_constraints);
-    let o = sdpad_loop(sdp, &setup, check_constraints, jac_variant);
+    let o = sdpad_verified(sdp, check_constraints, jac_variant);
     match o.termination {
         Termination::Accuracy => {
             println!("\nsdpad terminated with desired accuracy\n");

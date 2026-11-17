@@ -475,51 +475,6 @@ pub fn scale_off_diag(s: f64, dim: usize, mat: &mut SymMatrix) -> (result: &mut 
     mat
 }
 
-// returns the upper half of an arbitrary outer product
-pub fn outer_prod_upper(vect1: &Vector, vect2: &Vector) -> (result: SymMatrix)
-    requires
-        vect1@.len() == vect2@.len(),
-    ensures
-        result@.len() == pk_len(vect1@.len() as int),
-        forall|r: int, c: int| 0 <= r <= c < vect1@.len()
-            ==> rv(#[trigger] result@[pk_idx(r, c)]) == rv(vect1@[r]) * rv(vect2@[c]),
-{
-    let mut result = Vec::new();
-    let dim = vect1.len();
-    proof {
-        lemma_pk_col_start_zero();
-    }
-    for c in 0..dim
-        invariant
-            dim == vect1@.len() == vect2@.len(),
-            result@.len() == pk_col_start(c as int),
-            forall|r: int, c2: int| 0 <= r <= c2 < c
-                ==> rv(#[trigger] result@[pk_idx(r, c2)]) == rv(vect1@[r]) * rv(vect2@[c2]),
-    {
-        for r in 0..=c
-            invariant
-                c < dim == vect1@.len() == vect2@.len(),
-                result@.len() == pk_col_start(c as int) + r,
-                forall|r2: int, c2: int| 0 <= r2 <= c2 < c
-                    ==> rv(#[trigger] result@[pk_idx(r2, c2)]) == rv(vect1@[r2]) * rv(vect2@[c2]),
-                forall|r2: int| 0 <= r2 < r
-                    ==> rv(#[trigger] result@[pk_idx(r2, c as int)]) == rv(vect1@[r2]) * rv(vect2@[c as int]),
-        {
-            result.push(vect1[r] * vect2[c]);
-            proof {
-                assert forall|r2: int, c2: int| 0 <= r2 <= c2 < c
-                    implies rv(#[trigger] result@[pk_idx(r2, c2)]) == rv(vect1@[r2]) * rv(vect2@[c2]) by {
-                    lemma_pk_idx_bound(r2, c2, c as int);
-                }
-            }
-        }
-        proof {
-            lemma_pk_col_start_step(c as int);
-        }
-    }
-    result
-}
-
 // returns outer product of a vector with itself
 pub fn outer_prod_single(vect: &Vector) -> (result: SymMatrix)
     ensures
@@ -760,66 +715,6 @@ pub fn sym_matrix_diag_block(start: usize, dim: usize, mat: &SymMatrix) -> (resu
             lemma_pk_col_start_step(i as int);
         }
         k += 1;
-    }
-    result
-}
-
-// returns linear map computing diagonal of a symmetric matrix
-// (a dim x pk_len(dim) column-major matrix with a 1 in row i, column pk_idx(i, i))
-pub fn sym_matrix_diagonal(dim: usize) -> (result: Matrix)
-    requires
-        dim_fits(dim as int),
-        pk_len(dim as int) * dim <= usize::MAX,
-    ensures
-        result@.len() == pk_len(dim as int) * dim,
-        forall|r: int, c: int| 0 <= r < dim && 0 <= c < pk_len(dim as int)
-            ==> #[trigger] cm_entry(rvs(result@), dim as int, r, c) == (if c == pk_idx(r, r) { 1.0real } else { 0.0real }),
-{
-    proof {
-        lemma_dim_fits_idx(dim as int, dim as int);
-    }
-    let size = (dim * (dim + 1)) / 2;
-    let mut result = zero_mat(size, dim);
-    proof {
-        assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < size
-            implies #[trigger] cm_entry(rvs(result@), dim as int, r, c) == 0.0real by {
-            assert(0 <= cm_idx(dim as int, r, c) < size * dim) by (nonlinear_arith)
-                requires 0 <= r < dim, 0 <= c < size;
-        }
-    }
-    for i in 0..dim
-        invariant
-            dim_fits(dim as int),
-            size == pk_len(dim as int),
-            size * dim <= usize::MAX,
-            result@.len() == size * dim,
-            forall|r: int, c: int| 0 <= r < dim && 0 <= c < size
-                ==> #[trigger] cm_entry(rvs(result@), dim as int, r, c)
-                    == (if c == pk_idx(r, r) && r < i { 1.0real } else { 0.0real }),
-    {
-        let ghost prev = result@;
-        proof {
-            lemma_dim_fits_idx(dim as int, i as int);
-            lemma_pk_diag_idx(i as int);
-            lemma_pk_idx_bound(i as int, i as int, dim as int);
-            assert(pk_idx(i as int, i as int) * dim + i < size * dim) by (nonlinear_arith)
-                requires pk_idx(i as int, i as int) + 1 <= size, i < dim;
-        }
-        result[((i * i + 3 * i) / 2) * dim + i] = 1.0;
-        proof {
-            assert forall|r: int, c: int| 0 <= r < dim && 0 <= c < size
-                implies #[trigger] cm_entry(rvs(result@), dim as int, r, c)
-                    == (if c == pk_idx(r, r) && r < i + 1 { 1.0real } else { 0.0real }) by {
-                lemma_cm_idx_injective(dim as int, r, c, i as int, pk_idx(i as int, i as int));
-                assert(0 <= cm_idx(dim as int, r, c) < size * dim) by (nonlinear_arith)
-                    requires 0 <= r < dim, 0 <= c < size;
-                if r == i && c == pk_idx(i as int, i as int) {
-                } else {
-                    assert(cm_entry(rvs(prev), dim as int, r, c)
-                        == (if c == pk_idx(r, r) && r < i { 1.0real } else { 0.0real }));
-                }
-            }
-        }
     }
     result
 }

@@ -14,8 +14,9 @@ build hash, which fails Verus's exact version check. `cargo build` and
 
 ## Layer status
 
-All 23 layers (L00-L22) are done; L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`
-(statements 1-4), L22 the residual bound of the reduction (statement 5).
+All 24 layers (L00-L23) are done; L21 holds the post-hoc proofs of `ADDITIONAL_PROOFS.md`
+(statements 1-4), L22 the residual bound of the reduction (statement 5), and L23 the
+end-to-end soundness of the returned solution (`END_TO_END_SOUNDNESS.md`).
 
 | Layer | Where |
 |-------|-------|
@@ -42,10 +43,11 @@ All 23 layers (L00-L22) are done; L21 holds the post-hoc proofs of `ADDITIONAL_P
 | L20 final audit | this file, `TRUSTED_BASE.md`, `src/trusted.rs` |
 | L21 post-hoc proofs (gap identity, feasibility correspondence, approximate soundness) | `src/feas_spec.rs`; `lemma_gap_identity` in `sdpad_spec.rs`; block PSD lemmas in `mat_spec.rs` |
 | L22 residual bound of the reduction | `src/lin_alg/norm_spec.rs` (rectangular norms), `src/lin_alg/resid_spec.rs` (recovery matrix, error bounds, the theorem); `lemma_reduced_from_residual_bound` in `sdpad_spec.rs` |
+| L23 end-to-end soundness of the returned solution | `user_outcome_ok`, `lemma_outcome_sound` in `feas_spec.rs`; `sdpad_verified` in `sdp_altdir.rs` |
 
 ## Verified-function count
 
-Last full run: **1046 verified, 0 errors** (about 28 s). `--time` reports no
+Last full run: **1042 verified, 0 errors** (about 30 s). `--time` reports no
 slow proof, and no `rlimit` is raised. The `verus!` blocks contain about
 18,000 lines of code, not counting blank and comment lines.
 
@@ -72,16 +74,16 @@ the scope; such decreases are not lost proofs.
 | `lin_alg::reduce_spec` | 14 | L14, L21 |
 | `lin_alg::norm_spec` | 46 | L21, L22 |
 | `lin_alg::resid_spec` | 60 | L22 |
-| `lin_alg::matrix` | 53 | L01, L13 |
+| `lin_alg::matrix` | 48 | L01, L13 |
 | `lin_alg::comparison` | 6 | L00 |
-| `lin_alg::sym_matrix` | 154 | L02, L04-L07, L14, L15 |
+| `lin_alg::sym_matrix` | 146 | L02, L04-L07, L14, L15 |
 | `lin_alg::jacobi` | 41 | L08, L10-L12 |
 | `sdp_spec` | 58 | L16 |
 | `sdpad_spec` | 38 | L17-L19, L21, L22 |
-| `feas_spec` | 50 | L21 |
+| `feas_spec` | 58 | L21, L23 |
 | `sdp` | 100 | L15, L16 |
-| `sdp_altdir` | 42 | L17-L19 |
-| **total** | **1046** | |
+| `sdp_altdir` | 43 | L17-L19, L23 |
+| **total** | **1042** | |
 
 ## Tolerances
 
@@ -205,6 +207,10 @@ values available, the linear solver proves facts such as `TOL * s >= 0` or
     termination reason all refer to indices into this trajectory.
     `best_delta` starts at `0.0` and is set by the first iteration; after it,
     `lemma_outcome_best_delta` shows it is the least recorded delta.
+  - `sdpad_verified` (the verified entry point, requiring `sdpad_input_ok`):
+    for the setup `s` it computes, `sdpad_setup_ok`, `outcome_ok` and the
+    user-level guarantee `user_outcome_ok` (below). The unverified `sdpad`
+    calls it and prints the termination report.
 - **Gap identity** (`sdpad_spec.rs`): for packed `Z`, `S` and multipliers `y`,
   `<C_F, Z>_F - b . y = <Z, S>_F + <Z, C_F - A*(y) - S>_F + y . (A(Z) - b)`
   (`lemma_gap_identity`); with `A(Z) = b` and `C_F - A*(y) = S` the gap is
@@ -238,13 +244,38 @@ values available, the linear solver proves facts such as `TOL * s >= 0` or
     `N <= C TOL phi(Z) + ||U||_F pinf (1 + ||b||)` with `phi`, `C`, `||U||_F`
     from the reduction residual bound (`setup_resid_scale`, `setup_red_const`,
     `setup_recovery_norm`), and `phi(Z) = 0` forces `N = 0`
-    (`lemma_unreduced_residual_pinf`); every equality residual and every LMI
-    linking residual `R_i = W_i - B_i` (`lmi_link_residual`, `W_i` the actual
-    slack `lmi_slack_r`) satisfies `|res_e| <= N`, `||R_i||_F <= N`; a checked
-    block `B_i >= -eps_i I` gives `x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2` for
-    every `x` (`lemma_lmi_slack_shifted`), a bound on the quadratic form since
-    `W_i` need not be symmetric at an approximate point. Nothing bounds `C`
-    and `||U||_F`.
+    (`lemma_unreduced_residual_pinf`, the instance of
+    `lemma_reduced_aug_residual_pinf` for `setup_aug`, the unreduced system
+    of a setup with or without LMIs; the kept residual is the dense part of
+    `A(Z) - b`, `lemma_kept_residual_pinf`); every equality residual and every
+    LMI linking residual `R_i = W_i - B_i` (`user_link_residual`, `W_i` the
+    actual slack `user_slack_r` at the user variables) satisfies
+    `|res_e| <= N`, `||R_i||_F <= N`; a checked block `B_i >= -eps_i I` gives
+    `x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2` for every `x`
+    (`lemma_lmi_slack_shifted`), a bound on the quadratic form since `W_i`
+    need not be symmetric at an approximate point. Nothing bounds `C` and
+    `||U||_F`.
+  - End-to-end soundness (`lemma_outcome_sound`): `sdpad_input_ok`,
+    `sdpad_setup_ok` and `outcome_ok` give `user_outcome_ok(sdp, check, s, o)`.
+    With `z` the returned iterate `o.states[o.iterate].prim_z`, `xs` the
+    real views of `o.result`, and the bound
+    `N = user_resid_bound_r(sdp, check, s, z, pinf)`, which is
+    `pinf (1 + ||b||)` without reduction and
+    `C TOL phi(z) + ||U||_F pinf (1 + ||b||)` with it:
+    - with LMIs (`user_solution_lmi_ok`): `xs = vars_of(z)`,
+      `|sum_n A_n(X_n)_e - b_e| <= N` for every equality row,
+      `||(H_i(X) - M_i) - B_i||_F <= N` for every LMI, `o.value` is the
+      objective at `xs`, and after Accuracy or Stagnation
+      `x^T (H_i(X) - M_i) x >= -(eps_i + ||(H_i(X) - M_i) - B_i||_F) |x|^2`
+      for every `x` and `i`, `eps_i` the PSD check's tolerance of block `B_i`;
+    - without LMIs (`user_solution_single_ok`): `xs = [z]`,
+      `|A(Z)_e - b_e| <= N` when a constraint map is given, `o.value = C(Z)`,
+      and after Accuracy or Stagnation `Z >= -eps I` with the check's
+      tolerance `eps = PSD_TOL max(max_t |Z_tt|, 1)`;
+    - after Accuracy, `pinf < TOL`; MaxIter adds nothing.
+    The blocks `B_i` are read from `z`, so the linking residuals and `phi(z)`
+    refer to the iterate. Both cases cover both values of `check`
+    (`lemma_approx_sound_lmi`, `lemma_approx_sound_single`).
   - Not certified with reduction (`check`): the feasibility of the user's
     problem at a returned point, small absolute LMI violations, and the
     equality of optimal values.
@@ -299,12 +330,13 @@ values available, the linear solver proves facts such as `TOL * s >= 0` or
   `lemma_converged_approx` yields `eigensolver_ok`. The spectral operations
   depend only on this interface.
 - **Standard form and solver.** Contracts are stated on the user data and
-  quantified over the variable `z`. The solver carries the standard form
-  through `sdpad_setup_ok` (its objective witness is `setup_obj0`, exposed by
-  `lemma_setup_obj0`); each iteration is specified by what the code
-  computes (`wgy_update_ok`, `penalty_update_ok`); the loop by `outcome_ok`
-  over the ghost trajectory, extended by `lemma_trajectory_step`. Nothing is
-  claimed about convergence.
+  quantified over the variable `z`; the end-to-end statement
+  `user_outcome_ok` instantiates them at the returned iterate. The solver
+  carries the standard form through `sdpad_setup_ok` (its objective witness
+  is `setup_obj0`, exposed by `lemma_setup_obj0`); each iteration is
+  specified by what the code computes (`wgy_update_ok`,
+  `penalty_update_ok`); the loop by `outcome_ok` over the ghost trajectory,
+  extended by `lemma_trajectory_step`. Nothing is claimed about convergence.
 
 ## Executable changes
 
@@ -314,11 +346,14 @@ The bugs in `EXPOSED_BUGS.md` were fixed. Other changes:
   `packed_row_norm` and `sqrt(2)` once per call.
 - `SDP` fields are `pub`. `sdp_to_standard` requires `sdp_single_input_ok` /
   `sdp_lmi_input_ok` (shapes, one map per objective entry, a nonzero
-  constraint system when `check_constraints` is set without LMIs). `sdpad`
-  informally requires `sdpad_input_ok`, which adds `dim_fits(total_rows(sdp))`.
+  constraint system when `check_constraints` is set without LMIs).
+  `sdpad_verified` requires `sdpad_input_ok`, which adds
+  `dim_fits(total_rows(sdp))`; the printing wrapper `sdpad` inherits it
+  informally.
 - `sdpad` is split into the verified `sdpad_setup`, `dual_solve`,
   `wgy_update`, `penalty_update`, `kkt_quantities`, `read_solution`,
-  `sdpad_loop`, and an unverified printing wrapper. `SdpadSetup`, `WgyState`,
+  `sdpad_loop`, the verified entry point `sdpad_verified` (setup and loop),
+  and an unverified printing wrapper around it. `SdpadSetup`, `WgyState`,
   `SdpadOutcome` (with its ghost trajectory and histories), `Termination`,
   the tuning constants and `TOTAL_STEPS` are public.
 - `dual_solve` always returns a full-length `dual_y` (the original left it
@@ -341,7 +376,7 @@ the installed Verus (0.2026.08.23).
 
 | Construct | Replacement | Where |
 |-----------|-------------|-------|
-| Unary `-x` on `f64` | `crate::trusted::neg(x)` (T7) | `is_significantly_negative`, `negscal_vect` |
+| Unary `-x` on `f64` | `crate::trusted::neg(x)` (T7) | `is_significantly_negative` |
 | `x += y`, `v[i] -= y`, `v[i] *= y` on `f64` (compiler crash) | `x = x + y`, etc. | all accumulation loops |
 | `panic!`, `assert!`, `expect`, `unwrap_or_else(panic)` on data-dependent conditions | `crate::trusted::abort(..)` (T8); internal consistency checks became static `assert`s | solvers, eigensolvers, `linear_remove_redundant_sym`, `sdp_to_standard`, `dual_solve` |
 | Iterator chains (`zip`, `map`, `fold`, `collect`, `all`, `enumerate`, `chunks_exact`, `scan`, `chain`, `sum`, `concat`), `for x in &v` | index loops over the same slices (`all` keeps its short circuit) | throughout |

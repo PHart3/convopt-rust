@@ -205,13 +205,11 @@ pub proof fn lemma_row_scale_pos(e: Seq<real>, row_dim: int, dim: int, pivots: S
 
 /* ---------- the result of the reduction ---------- */
 
-/// The reduced system res (rank rows) obtained from the input a0 through the echelon form e
-/// (of the normalized input) with pivot sequence pivots, for the relative tolerance tol of the
-/// elimination: res row i is echelon row i divided by its Frobenius norm, e has the solution
-/// set and the zero columns of a0, e is in echelon form under the pivot and skip rules with
-/// tolerance tol, and the rows of e without a pivot pass the consistency test with tolerance tol.
-/// The rank is positive (the input of the reduction is nonzero).
-/// The normalized input is a row combination T of e (the row operations of the elimination).
+/// The reduced system res of rank >= 1 rows obtained from a0 with elimination tolerance tol:
+/// the echelon form e of the normalized input, with pivot sequence pivots, has the solution set
+/// and zero columns of a0, obeys the pivot, skip and consistency rules, and is related to the
+/// normalized input by the row operations of the elimination. Row i of res is echelon row i
+/// divided by its Frobenius norm.
 pub open spec fn reduced_with(tol: real, a0: Seq<real>, e: Seq<real>, res: Seq<real>, dim: int, pivots: Seq<int>) -> bool {
     let cd = red_col_dim(dim);
     let rd = red_row_dim(a0, dim);

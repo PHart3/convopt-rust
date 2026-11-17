@@ -11,12 +11,12 @@ status: done
 
 L01 | Vector views (`Seq<real>`) and the basic vector and dense-matrix operations |
 deps: L00 |
-targets: standard_basis, ident_mat, zero_mat, dot_prod, euclid_norm, euclid_distance, vect_add, vect_subt, scal_vect, negscal_vect, vect_add_scaled, matrix_add_diff, ident_mat_low_tri, vector_equality |
+targets: standard_basis, ident_mat, zero_mat, dot_prod, euclid_norm, euclid_distance, vect_add, vect_subt, scal_vect, matrix_add_diff, ident_mat_low_tri, vector_equality |
 status: done
 
 L02 | Packed symmetric view (index lemmas, `sym_entry`), column-major view, and the basic symmetric operations |
 deps: L01 |
-targets: max_diag_sym, frob_prod_sym, frob_norm_sym, frob_dist_sym, sym_mat_one_norm, ident_sym_mat, sym_mat_act, scale_off_diag, outer_prod_upper, outer_prod_single, outer_prod_single_scale, diag_of_sym_mat, sym_matrix_diag_block_map, sym_matrix_diag_block, sym_matrix_diagonal |
+targets: max_diag_sym, frob_prod_sym, frob_norm_sym, frob_dist_sym, sym_mat_one_norm, ident_sym_mat, sym_mat_act, scale_off_diag, outer_prod_single, outer_prod_single_scale, diag_of_sym_mat, sym_matrix_diag_block_map, sym_matrix_diag_block |
 status: done
 
 L03 | Spec-level matrix algebra on index functions: product, transpose, identity, orthogonality, eigenvalues with similarity invariance, the order `A >= -eps I`, the Frobenius product |
@@ -117,4 +117,9 @@ status: done
 L22 | Residual bound of the reduction (statement 5 of `ADDITIONAL_PROOFS.md`): the input is recovered as `[A | b] = U [A_K | b_K] + [E | f]` with `U = D T_K S` and `[E | f] = D T_D H_D`; `||E||_F <= TOL e_A` and `||f|| <= TOL e_b` from the skip bounds and the consistency test; with `d(z) = ||A||_F ||z|| + ||b||` and `C = max(e_A / ||A||_F, e_b / ||b||)`, `||A z - b|| <= C TOL d(z) + ||U||_F ||A_K z - b_K||` for every `z`, in relative form when `d(z) > 0`, and `A z = b` when `d(z) = 0`; rectangular norms with Cauchy-Schwarz, the triangle inequality and the matrix-vector and product bounds |
 deps: L13, L14 |
 targets: (spec/proof only: row_comb, lemma_dropped_row_bounded, lemma_cauchy_schwarz, lemma_mat_vec_rc_bound, lemma_mmul_frob_rc, lemma_recovery_identity, lemma_err_bounds, lemma_relative_residual_bound, lemma_reduction_residual_bound, lemma_reduced_from_residual_bound) |
+status: done
+
+L23 | End-to-end soundness of the returned solution (`END_TO_END_SOUNDNESS.md`): the user-level guarantee `user_outcome_ok` of the loop's outcome (the solution is the variable read from the returned iterate, every equality and LMI linking residual is at most `N`, the reported value is the objective at the solution, a checked iterate gives the quadratic-form bounds on the actual slacks, and `pinf < TOL` with Accuracy), with `N = pinf (1 + ||b||)` without reduction and the residual bound of L22 with it, for problems with and without LMIs; the verified entry point `sdpad_verified` |
+deps: L19, L21 |
+targets: sdpad_verified (spec/proof: user_outcome_ok, user_resid_bound_r, lemma_outcome_sound, lemma_approx_sound_lmi, lemma_approx_sound_single, lemma_setup_aug_single, lemma_kept_residual_pinf, lemma_reduced_aug_residual_pinf) |
 status: done

@@ -82,7 +82,7 @@ products, `ldlt_decomp`); `hypot` (row norms of `linear_remove_redundant_sym`);
 `recip`, `signum` (`jacobi_rot`); `is_finite` (two abort guards in
 `linear_remove_redundant_sym`, and the RHS-scale test of `gauss_elim`).
 
-**T7**: `neg` in `is_significantly_negative` and `negscal_vect`.
+**T7**: `neg` in `is_significantly_negative`.
 
 **T8**: 20 `abort` calls, all data-dependent exits of the original code:
 - three "division by zero" exits of the triangular and diagonal solvers;
@@ -110,6 +110,6 @@ iterators, and the `arithmetic::div_mod` lemmas.
 
 - `sdpad` (`src/sdp_altdir.rs`) is outside `verus!` because it prints the
   termination report (`println!` has no vstd contract). It only calls the
-  verified `sdpad_setup` and `sdpad_loop`, and informally must satisfy
+  verified `sdpad_verified` and informally must satisfy its precondition
   `sdpad_input_ok(sdp, check_constraints)`.
 - `src/main.rs` and `src/sdp_tests.rs` are ordinary Rust.

@@ -45,7 +45,7 @@
 
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
-use vstd::arithmetic::div_mod::{lemma_fundamental_div_mod, lemma_fundamental_div_mod_converse, lemma_div_multiples_vanish};
+use vstd::arithmetic::div_mod::{lemma_fundamental_div_mod, lemma_fundamental_div_mod_converse, lemma_div_multiples_vanish, lemma_div_pos_is_pos};
 #[cfg(verus_keep_ghost)]
 use crate::trusted::rv;
 #[cfg(verus_keep_ghost)]
@@ -278,15 +278,21 @@ pub proof fn lemma_setup_action_point(sdp: &SDP, check: bool, s: &SdpadSetup, z:
 
 /* ---------- the unreduced system behind a setup ---------- */
 
-/// The unreduced standard-form system [A_0 | b_0] of a setup with LMIs: the witness of
-/// std_rows_ok behind the returned dense rows, which equal it without check and reduce it
-/// with check.
+/// The unreduced standard-form system [A_0 | b_0] of a setup: the witness of std_rows_ok
+/// (single_rows_ok without LMIs) behind the returned dense rows, which equal it without check
+/// and reduce it with check.
 pub open spec fn setup_aug(sdp: &SDP, check: bool, s: &SdpadSetup) -> Seq<real> {
     let bd = bdims_r(sdp.lmi@);
     let vd = vdims_r(sdp.lmi@, n_vars(sdp));
     let red = result_aug(s.mat_dense@, s.point@, s.c_len as int);
-    choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
-        && (if check { reduced_from(aug, red, s.var_dim as int) } else { red == aug })
+    if sdp.lmi@.len() == 0 {
+        let d = sdp.objective@[0]@.len() as int;
+        choose|aug: Seq<real>| #[trigger] single_rows_ok(sdp.constraint.0@[0]@, sdp.constraint.1@, d, aug)
+            && (if check { reduced_from(aug, red, d) } else { red == aug })
+    } else {
+        choose|aug: Seq<real>| #[trigger] std_rows_ok(sdp.lmi@, sdp.constraint.0@, sdp.constraint.1@, bd, vd, aug)
+            && (if check { reduced_from(aug, red, s.var_dim as int) } else { red == aug })
+    }
 }
 
 /// Under the setup contract, setup_aug is such a witness: it has total_rows(sdp) rows of
@@ -334,6 +340,50 @@ pub proof fn lemma_setup_aug(sdp: &SDP, check: bool, s: &SdpadSetup)
     assert(aug.len() as int == cd * total) by (nonlinear_arith)
         requires aug.len() as int == total * cd;
     lemma_div_multiples_vanish(total, cd);
+}
+
+/// Without LMIs and with a constraint map, setup_aug is such a witness: it has m rows of
+/// red_col_dim(d) entries for the variable's order d, there are no zero constraints, and the
+/// dense rows are at most as many (exactly as many without reduction, at least one with it).
+pub proof fn lemma_setup_aug_single(sdp: &SDP, check: bool, s: &SdpadSetup)
+    requires
+        sdpad_input_ok(sdp, check),
+        sdpad_setup_ok(sdp, check, *s),
+        sdp.lmi@.len() == 0,
+        sdp.constraint.0@.len() == 1,
+    ensures
+        ({
+            let d = s.var_dim as int;
+            let m = sdp.constraint.1@.len() as int;
+            let aug = setup_aug(sdp, check, s);
+            let red = result_aug(s.mat_dense@, s.point@, s.c_len as int);
+            &&& d == sdp.objective@[0]@.len()
+            &&& single_rows_ok(sdp.constraint.0@[0]@, sdp.constraint.1@, d, aug)
+            &&& if check { reduced_from(aug, red, d) } else { red == aug }
+            &&& aug.len() == m * red_col_dim(d)
+            &&& red_row_dim(aug, d) == m
+            &&& s.mat_dense@.len() == s.c_len * pk_len(d)
+            &&& s.point@.len() == s.c_len
+            &&& s.c_len <= m
+            &&& check ==> s.c_len >= 1
+            &&& !check ==> s.c_len == m
+        }),
+{
+    let d = s.var_dim as int;
+    let cd = red_col_dim(d);
+    let m = sdp.constraint.1@.len() as int;
+    let rows = s.c_len as int;
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
+    let aug = setup_aug(sdp, check, s);
+    let red = result_aug(s.mat_dense@, s.point@, rows);
+    assert(single_rows_ok(sdp.constraint.0@[0]@, sdp.constraint.1@, d, aug)
+        && (if check { reduced_from(aug, red, d) } else { red == aug }));
+    lemma_pk_col_start_monotone(0, d);
+    lemma_reduced_rows(aug, s.mat_dense@, s.point@, rows, m, d, check);
+    assert(aug.len() as int == cd * m) by (nonlinear_arith)
+        requires aug.len() as int == m * cd;
+    lemma_div_multiples_vanish(m, cd);
 }
 
 /* ---------- shapes of the standard form with LMIs ---------- */
@@ -1458,16 +1508,30 @@ pub open spec fn std_resid_vec_r(sdp: &SDP, aug: Seq<real>, z: Seq<real>) -> Seq
     resid_vec_r(aug, lmi_rows(bd) + sdp.constraint.1@.len() as int, pk_len(std_dim(bd, vd)) + 1, z)
 }
 
-/// The actual slack W_i = H_i(X) - M_i of LMI i at the variables read from z.
+/// The actual slack W_i = H_i(X) - M_i of LMI i at the user variables xs.
+pub open spec fn user_slack_r(sdp: &SDP, xs: Seq<Seq<real>>, i: int) -> MatF {
+    let bd = bdims_r(sdp.lmi@);
+    user_lmi_view(sdp.lmi@[i].0@, sdp.lmi@[i].1@, vdims_r(sdp.lmi@, n_vars(sdp)), bd[i], xs)
+}
+
+/// The linking residual R_i = W_i - B_i of LMI i: the actual slack at the user variables xs
+/// less the LMI block B_i of the standard-form variable z.
+pub open spec fn user_link_residual(sdp: &SDP, xs: Seq<Seq<real>>, z: Seq<real>, i: int) -> MatF {
+    msub(user_slack_r(sdp, xs, i), block_view(z, block_off(bdims_r(sdp.lmi@), i)))
+}
+
+/// The actual slack of LMI i at the variables read from z.
 pub open spec fn lmi_slack_r(sdp: &SDP, z: Seq<real>, i: int) -> MatF {
     let bd = bdims_r(sdp.lmi@);
     let vd = vdims_r(sdp.lmi@, n_vars(sdp));
-    user_lmi_view(sdp.lmi@[i].0@, sdp.lmi@[i].1@, vd, bd[i], vars_of(z, block_sum(bd), vd))
+    user_slack_r(sdp, vars_of(z, block_sum(bd), vd), i)
 }
 
-/// The linking residual R_i = W_i - B_i of LMI i: the actual slack less the LMI block of z.
+/// The linking residual of LMI i at the variables read from z.
 pub open spec fn lmi_link_residual(sdp: &SDP, z: Seq<real>, i: int) -> MatF {
-    msub(lmi_slack_r(sdp, z, i), block_view(z, block_off(bdims_r(sdp.lmi@), i)))
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, n_vars(sdp));
+    user_link_residual(sdp, vars_of(z, block_sum(bd), vd), z, i)
 }
 
 /// A checked LMI block B_i >= -eps_i I gives x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2 for every
@@ -1566,9 +1630,91 @@ pub open spec fn setup_recovery_norm(sdp: &SDP, s: &SdpadSetup) -> real {
     frob_rc(recovery_r(aug, e, d, red_transform(aug, e, d)), red_row_dim(aug, d), red_pivots(rv(TOL), aug, e, red, d).len() as int)
 }
 
+/// The kept residual A_K z - b_K, the residuals of the setup's dense rows, is the dense part of
+/// A(z) - b, whose norm is pinf (1 + ||b||).
+pub proof fn lemma_kept_residual_pinf(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>)
+    requires
+        sdpad_setup_ok(sdp, check, *s),
+        z.len() == pk_len(s.var_dim as int),
+    ensures
+        ({
+            let rk = resid_vec_r(result_aug(s.mat_dense@, s.point@, s.c_len as int), s.c_len as int, red_col_dim(s.var_dim as int), z);
+            &&& rk == action_residual_r(s, z).subrange(0, s.c_len as int)
+            &&& norm_r(rk) <= pinf_r(s, z) * (1.0real + norm_r(rvs(s.point@)))
+        }),
+{
+    let d = s.var_dim as int;
+    let (cols, cd) = (pk_len(d), red_col_dim(d));
+    let rows = s.c_len as int;
+    let red = result_aug(s.mat_dense@, s.point@, rows);
+    lemma_action_residual_entries(sdp, check, s, z);
+    let res = action_residual_r(s, z);
+    let rk = resid_vec_r(red, rows, cd, z);
+    assert forall|i: int| 0 <= i < rows implies #[trigger] rk[i] == res[i] by {
+        lemma_result_aug_residual(s.mat_dense@, s.point@, rows, cols, z, i);
+    }
+    assert(rk =~= res.subrange(0, rows));
+    lemma_window_norm_le(res, 0, rows);
+    // ||A(z) - b|| = pinf (1 + ||b||)
+    let b = rvs(s.point@);
+    let den = 1.0real + norm_r(b);
+    lemma_dot_self_nonneg(b);
+    assert((norm_r(res) / den) * den == norm_r(res)) by (nonlinear_arith)
+        requires den != 0.0real;
+}
+
+/// With reduction, the residual N = ||A_0 z - b_0|| of a system aug reduced to the setup's
+/// dense rows satisfies N <= C TOL phi(z) + ||U||_F pinf (1 + ||b||), with the constant C, the
+/// recovery norm ||U||_F and the scale phi(z) of the residual theorem
+/// (lemma_reduced_from_residual_bound), since the kept residual is the dense part of
+/// A(z) - b. A zero scale phi(z) forces N = 0.
+pub proof fn lemma_reduced_aug_residual_pinf(sdp: &SDP, s: &SdpadSetup, aug: Seq<real>, z: Seq<real>)
+    requires
+        sdpad_setup_ok(sdp, true, *s),
+        reduced_from(aug, result_aug(s.mat_dense@, s.point@, s.c_len as int), s.var_dim as int),
+        z.len() == pk_len(s.var_dim as int),
+    ensures
+        ({
+            let d = s.var_dim as int;
+            let red = result_aug(s.mat_dense@, s.point@, s.c_len as int);
+            let e = red_echelon(aug, red, d);
+            let t = red_transform(aug, e, d);
+            let rank = red_pivots(rv(TOL), aug, e, red, d).len() as int;
+            let nr = norm_r(resid_vec_r(aug, red_row_dim(aug, d), red_col_dim(d), z));
+            &&& nr <= red_const_r(aug, d, t, rank) * rv(TOL) * resid_scale_r(aug, red_row_dim(aug, d), red_col_dim(d), z)
+                    + frob_rc(recovery_r(aug, e, d, t), red_row_dim(aug, d), rank)
+                        * (pinf_r(s, z) * (1.0real + norm_r(rvs(s.point@))))
+            &&& resid_scale_r(aug, red_row_dim(aug, d), red_col_dim(d), z) == 0.0real ==> nr == 0.0real
+        }),
+{
+    let d = s.var_dim as int;
+    let (cols, cd) = (pk_len(d), red_col_dim(d));
+    let rows = s.c_len as int;
+    let red = result_aug(s.mat_dense@, s.point@, rows);
+    let e = red_echelon(aug, red, d);
+    assert(reduced_system(rv(TOL), aug, e, red, d));
+    let pivots = red_pivots(rv(TOL), aug, e, red, d);
+    assert(reduced_with(rv(TOL), aug, e, red, d, pivots));
+    let rank = pivots.len() as int;
+    lemma_pk_col_start_monotone(0, d);
+    assert(red.len() == rows * cols + rows);
+    assert(rows * cols + rows == rows * (cols + 1)) by (nonlinear_arith);
+    assert(rank == rows) by (nonlinear_arith)
+        requires cd >= 1, cd * rank == rows * cd;
+    lemma_div_pos_is_pos(aug.len() as int, cd);
+    lemma_reduced_from_residual_bound(aug, red, d, z);
+    lemma_kept_residual_pinf(sdp, true, s, z);
+    let rk = resid_vec_r(red, rank, cd, z);
+    let den = 1.0real + norm_r(rvs(s.point@));
+    let nu = frob_rc(recovery_r(aug, e, d, red_transform(aug, e, d)), red_row_dim(aug, d), rank);
+    lemma_frob_sq_rc_nonneg(recovery_r(aug, e, d, red_transform(aug, e, d)), red_row_dim(aug, d), rank);
+    assert(nu * norm_r(rk) <= nu * (pinf_r(s, z) * den)) by (nonlinear_arith)
+        requires nu >= 0.0real, norm_r(rk) <= pinf_r(s, z) * den;
+}
+
 /// With reduction, the residual N = ||A_0 z - b_0|| of the unreduced system at z satisfies
-/// N <= C TOL phi(z) + ||U||_F pinf (1 + ||b||): the kept residual ||A_K z - b_K|| is the dense
-/// part of A(z) - b, whose norm is pinf (1 + ||b||). A zero scale phi(z) forces N = 0.
+/// N <= C TOL phi(z) + ||U||_F pinf (1 + ||b||), and a zero scale phi(z) forces N = 0
+/// (lemma_reduced_aug_residual_pinf for the unreduced system of the setup).
 pub proof fn lemma_unreduced_residual_pinf(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
     requires
         sdpad_input_ok(sdp, true),
@@ -1583,43 +1729,8 @@ pub proof fn lemma_unreduced_residual_pinf(sdp: &SDP, s: &SdpadSetup, z: Seq<rea
             &&& setup_resid_scale(sdp, s, z) == 0.0real ==> nr == 0.0real
         }),
 {
-    let d = s.var_dim as int;
-    let (cols, cd) = (pk_len(d), red_col_dim(d));
-    let rows = s.c_len as int;
     lemma_setup_aug(sdp, true, s);
-    let aug = setup_aug(sdp, true, s);
-    let red = result_aug(s.mat_dense@, s.point@, rows);
-    let e = red_echelon(aug, red, d);
-    assert(reduced_system(rv(TOL), aug, e, red, d));
-    let pivots = red_pivots(rv(TOL), aug, e, red, d);
-    assert(reduced_with(rv(TOL), aug, e, red, d, pivots));
-    let rank = pivots.len() as int;
-    lemma_pk_col_start_monotone(0, d);
-    assert(red.len() == rows * cols + rows);
-    assert(rows * cols + rows == rows * (cols + 1)) by (nonlinear_arith);
-    assert(rank == rows) by (nonlinear_arith)
-        requires cd >= 1, cd * rank == rows * cd;
-    lemma_reduced_from_residual_bound(aug, red, d, z);
-    // the kept residual is the dense part of A(z) - b
-    lemma_action_residual_entries(sdp, true, s, z);
-    let res = action_residual_r(s, z);
-    let rk = resid_vec_r(red, rank, cd, z);
-    assert forall|i: int| 0 <= i < rows implies #[trigger] rk[i] == res[i] by {
-        lemma_result_aug_residual(s.mat_dense@, s.point@, rows, cols, z, i);
-    }
-    assert(rk =~= res.subrange(0, rows));
-    lemma_window_norm_le(res, 0, rows);
-    // ||A(z) - b|| = pinf (1 + ||b||)
-    let b = rvs(s.point@);
-    let den = 1.0real + norm_r(b);
-    lemma_dot_self_nonneg(b);
-    assert((norm_r(res) / den) * den == norm_r(res)) by (nonlinear_arith)
-        requires den != 0.0real;
-    // ||U||_F >= 0
-    let nu = setup_recovery_norm(sdp, s);
-    lemma_frob_sq_rc_nonneg(recovery_r(aug, e, d, red_transform(aug, e, d)), red_row_dim(aug, d), rank);
-    assert(nu * norm_r(rk) <= nu * (pinf_r(s, z) * den)) by (nonlinear_arith)
-        requires nu >= 0.0real, norm_r(rk) <= pinf_r(s, z) * den;
+    lemma_reduced_aug_residual_pinf(sdp, s, setup_aug(sdp, true, s), z);
 }
 
 /// Approximate soundness with reduction, for any z: with N = ||A_0 z - b_0|| the residual norm
@@ -1688,6 +1799,250 @@ pub proof fn lemma_approx_sound_reduced(sdp: &SDP, s: &SdpadSetup, z: Seq<real>)
     // the objective
     lemma_objective_value(sdp, true, s, z);
     lemma_user_obj_of_vars(sdp.objective@, bsum, vd, z);
+}
+
+/* ---------- end-to-end soundness of the returned solution ---------- */
+
+/// The bound N on the user-level residuals at the returned iterate z with primal
+/// infeasibility pinf: the norm pinf (1 + ||b||) of A(z) - b without reduction, and the bound
+/// C TOL phi(z) + ||U||_F pinf (1 + ||b||) on the residual norm of the unreduced system with it
+/// (lemma_unreduced_residual_pinf).
+pub open spec fn user_resid_bound_r(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>, pinf: real) -> real {
+    let kept = pinf * (1.0real + norm_r(rvs(s.point@)));
+    if check {
+        setup_red_const(sdp, s) * rv(TOL) * setup_resid_scale(sdp, s, z) + setup_recovery_norm(sdp, s) * kept
+    } else {
+        kept
+    }
+}
+
+/// The solution xs = vars_of(z) of a problem with LMIs, read from the standard-form iterate z,
+/// with residual bound nb and objective value val. Every equality residual and every linking
+/// residual R_i = W_i - B_i (actual slack W_i = H_i(X) - M_i, LMI block B_i of z) is at most nb,
+/// and val is the objective at xs. If the iterate passed the PSD check (checked), then
+/// x^T W_i x >= -(eps_i + ||R_i||_F) |x|^2 for every x, with the check's tolerance
+/// eps_i = PSD_TOL max(max_t |(B_i)_tt|, 1). W_i need not be symmetric, so this bounds only its
+/// quadratic form.
+pub open spec fn user_solution_lmi_ok(sdp: &SDP, z: Seq<real>, xs: Seq<Seq<real>>, nb: real, checked: bool, val: real) -> bool {
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, n_vars(sdp));
+    &&& xs.len() == vd.len()
+    &&& xs == vars_of(z, block_sum(bd), vd)
+    &&& forall|e: int| 0 <= e < sdp.constraint.1@.len()
+            ==> abs_r(#[trigger] user_row_r(sdp.constraint.0@, vd, e, xs) - rv(sdp.constraint.1@[e])) <= nb
+    &&& forall|i: int| 0 <= i < bd.len() ==> frob_rc(#[trigger] user_link_residual(sdp, xs, z, i), bd[i], bd[i]) <= nb
+    &&& val == user_obj_r(sdp.objective@, vd, xs)
+    &&& checked ==> forall|i: int| 0 <= i < bd.len()
+            ==> psd_shifted(#[trigger] user_slack_r(sdp, xs, i), bd[i],
+                    psd_check_eps_r(rv(PSD_TOL), z, block_off(bd, i), bd[i]) + frob_rc(user_link_residual(sdp, xs, z, i), bd[i], bd[i]))
+}
+
+/// The solution xs of a problem without LMIs, read from the iterate z, with the residual
+/// bound nb and the objective value val: xs is z itself; every equality residual A(Z)_e - b_e
+/// is bounded by nb when a constraint map is given; val is the objective C(Z); and when the
+/// iterate passed the PSD check (checked), Z >= -eps I with the check's tolerance
+/// eps = PSD_TOL max(max_t |Z_tt|, 1).
+pub open spec fn user_solution_single_ok(sdp: &SDP, z: Seq<real>, xs: Seq<Seq<real>>, nb: real, checked: bool, val: real) -> bool {
+    let d = sdp.objective@[0]@.len() as int;
+    &&& xs.len() == 1
+    &&& xs[0] == z
+    &&& sdp.constraint.0@.len() == 1 ==> forall|e: int| 0 <= e < sdp.constraint.1@.len()
+            ==> abs_r(#[trigger] dot_r(symrow_r(sdp.constraint.0@[0]@, e, d), z) - rv(sdp.constraint.1@[e])) <= nb
+    &&& val == dot_r(part_r(sdp.objective@[0]@, d), z)
+    &&& checked ==> psd_shifted(sym_view(z), d, psd_check_eps_r(rv(PSD_TOL), z, 0, d))
+}
+
+/// The guarantee of the outcome o of the solver on the user's problem, for the setup s: the
+/// returned solution o.result is the solution read from the returned iterate z (the entry
+/// o.iterate of the ghost trajectory), its residuals are bounded by
+/// N = user_resid_bound_r(.., z, o.pinf), o.value is its objective value, the iterate passed
+/// the PSD check when the loop stopped with Accuracy or Stagnation, and o.pinf < TOL when it
+/// stopped with Accuracy. MaxIter carries no accuracy guarantee.
+pub open spec fn user_outcome_ok(sdp: &SDP, check: bool, s: &SdpadSetup, o: SdpadOutcome) -> bool {
+    let z = rvs(o.states@[o.iterate@].prim_z@);
+    let xs = Seq::new(o.result@.len(), |n: int| rvs(o.result@[n]@));
+    let nb = user_resid_bound_r(sdp, check, s, z, rv(o.pinf));
+    let checked = o.termination is Accuracy || o.termination is Stagnation;
+    &&& if sdp.lmi@.len() == 0 {
+            user_solution_single_ok(sdp, z, xs, nb, checked, rv(o.value))
+        } else {
+            user_solution_lmi_ok(sdp, z, xs, nb, checked, rv(o.value))
+        }
+    &&& o.termination is Accuracy ==> rv(o.pinf) < rv(TOL)
+}
+
+/// Without LMIs and with a constraint map, every equality residual at z is bounded by
+/// user_resid_bound_r: without reduction the residuals are the dense part of A(z) - b, with
+/// reduction they are entries of the residual vector of the unreduced system.
+pub proof fn lemma_single_residual_bound(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>)
+    requires
+        sdpad_input_ok(sdp, check),
+        sdpad_setup_ok(sdp, check, *s),
+        sdp.lmi@.len() == 0,
+        sdp.constraint.0@.len() == 1,
+        z.len() == pk_len(s.var_dim as int),
+    ensures
+        forall|e: int| 0 <= e < sdp.constraint.1@.len()
+            ==> abs_r(#[trigger] dot_r(symrow_r(sdp.constraint.0@[0]@, e, s.var_dim as int), z) - rv(sdp.constraint.1@[e]))
+                <= user_resid_bound_r(sdp, check, s, z, pinf_r(s, z)),
+{
+    let d = s.var_dim as int;
+    let (cols, cd) = (pk_len(d), red_col_dim(d));
+    let m = sdp.constraint.1@.len() as int;
+    let nb = user_resid_bound_r(sdp, check, s, z, pinf_r(s, z));
+    lemma_setup_aug_single(sdp, check, s);
+    let aug = setup_aug(sdp, check, s);
+    let r0 = resid_vec_r(aug, m, cd, z);
+    if check {
+        lemma_reduced_aug_residual_pinf(sdp, s, aug, z);
+    } else {
+        lemma_kept_residual_pinf(sdp, false, s, z);
+    }
+    assert(norm_r(r0) <= nb);
+    assert forall|e: int| 0 <= e < m
+        implies abs_r(#[trigger] dot_r(symrow_r(sdp.constraint.0@[0]@, e, d), z) - rv(sdp.constraint.1@[e])) <= nb by {
+        lemma_residual_row_dot(aug, m, cols, e, z);
+        assert(row_dot_r(aug, m, e, z) == dot_r(symrow_r(sdp.constraint.0@[0]@, e, d), z));
+        assert(cm_entry(aug, m, e, cols) == rv(sdp.constraint.1@[e]));
+        assert(r0[e] == row_residual_r(aug, m, cd, e, z));
+        lemma_entry_le_norm(r0, e);
+    }
+}
+
+/// Approximate soundness without LMIs, for any z: z itself is the user's solution, its
+/// equality residuals are bounded by user_resid_bound_r, <C_F, z>_F is the user's objective,
+/// and a successful PSD check gives Z >= -eps I with the check's tolerance (the single block
+/// of the PSD partition is the whole variable).
+pub proof fn lemma_approx_sound_single(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>, checked: bool)
+    requires
+        sdpad_input_ok(sdp, check),
+        sdpad_setup_ok(sdp, check, *s),
+        sdp.lmi@.len() == 0,
+        z.len() == pk_len(s.var_dim as int),
+        checked ==> psd_blocks_ok(s, z),
+    ensures
+        user_solution_single_ok(sdp, z, seq![z], user_resid_bound_r(sdp, check, s, z, pinf_r(s, z)), checked, prim_val_r(s, z)),
+{
+    let d = s.var_dim as int;
+    let obj0 = setup_obj0(sdp, check, s);
+    lemma_setup_obj0(sdp, check, s);
+    assert(d == sdp.objective@[0]@.len() as int);
+    lemma_objective_value(sdp, check, s, z);
+    if sdp.constraint.0@.len() == 1 {
+        lemma_single_residual_bound(sdp, check, s, z);
+    }
+    if checked {
+        // the PSD partition is the single block (0, d)
+        let bd = dims_of(s.block_dims@);
+        let bs = psd_partition(bd, dims_of(s.symm_dims@), d);
+        assert(bs == seq![d]);
+        assert(s.psd_blocks@[0].0 as int == sum_upto(bs, 0) && s.psd_blocks@[0].1 as int == bs[0]);
+        assert(block_psd_ok(rv(PSD_TOL), z, 0, d));
+        assert(meq(block_view(z, 0), sym_view(z), d, d));
+        lemma_psd_shifted_meq(block_view(z, 0), sym_view(z), d, psd_check_eps_r(rv(PSD_TOL), z, 0, d));
+    }
+}
+
+/// Approximate soundness with LMIs, for any z and with or without reduction: the variables
+/// read from z are the user's solution with the residual bound user_resid_bound_r (the
+/// equality and linking residuals are entries, resp. windows, of the unreduced residual
+/// vector, whose norm is pinf (1 + ||b||) without reduction and bounded by
+/// lemma_unreduced_residual_pinf with it), <C_F, z>_F is the user's objective, and a successful
+/// PSD check gives the quadratic-form bounds on the actual slacks.
+pub proof fn lemma_approx_sound_lmi(sdp: &SDP, check: bool, s: &SdpadSetup, z: Seq<real>, checked: bool)
+    requires
+        sdpad_input_ok(sdp, check),
+        sdpad_setup_ok(sdp, check, *s),
+        sdp.lmi@.len() >= 1,
+        z.len() == pk_len(s.var_dim as int),
+        checked ==> psd_blocks_ok(s, z),
+    ensures
+        user_solution_lmi_ok(sdp, z, vars_of(z, block_sum(bdims_r(sdp.lmi@)), vdims_r(sdp.lmi@, n_vars(sdp))),
+            user_resid_bound_r(sdp, check, s, z, pinf_r(s, z)), checked, prim_val_r(s, z)),
+{
+    let d = s.var_dim as int;
+    let nv = n_vars(sdp);
+    let bd = bdims_r(sdp.lmi@);
+    let vd = vdims_r(sdp.lmi@, nv);
+    let bsum = block_sum(bd);
+    let xs = vars_of(z, bsum, vd);
+    let m = sdp.constraint.1@.len() as int;
+    let nb = user_resid_bound_r(sdp, check, s, z, pinf_r(s, z));
+    lemma_setup_aug(sdp, check, s);
+    let aug = setup_aug(sdp, check, s);
+    let r0 = std_resid_vec_r(sdp, aug, z);
+    // the norm of the unreduced residual is bounded by nb
+    if check {
+        lemma_unreduced_residual_pinf(sdp, s, z);
+    } else {
+        lemma_kept_residual_pinf(sdp, false, s, z);
+        assert(r0 == resid_vec_r(result_aug(s.mat_dense@, s.point@, s.c_len as int), s.c_len as int, red_col_dim(d), z));
+    }
+    assert(norm_r(r0) <= nb);
+    lemma_user_residuals(sdp, aug, z);
+    lemma_sq_sum_upto_monotone(bd, 0, bd.len() as int);
+    // the equality residuals are entries of the unreduced residual vector
+    assert forall|e: int| 0 <= e < m
+        implies abs_r(#[trigger] user_row_r(sdp.constraint.0@, vd, e, xs) - rv(sdp.constraint.1@[e])) <= nb by {
+        assert(r0[lmi_rows(bd) + e] == std_residual_r(sdp, aug, lmi_rows(bd) + e, z));
+        lemma_entry_le_norm(r0, lmi_rows(bd) + e);
+    }
+    // the linking residuals are windows of it
+    assert forall|i: int| 0 <= i < bd.len() implies frob_rc(#[trigger] user_link_residual(sdp, xs, z, i), bd[i], bd[i]) <= nb by {
+        lemma_lmi_link_residual_norm(sdp, aug, z, i);
+    }
+    // the actual slacks of a checked iterate
+    if checked {
+        lemma_lmi_blocks_checked(sdp, check, s, z);
+        assert forall|i: int| 0 <= i < bd.len()
+            implies psd_shifted(#[trigger] user_slack_r(sdp, xs, i), bd[i],
+                psd_check_eps_r(rv(PSD_TOL), z, block_off(bd, i), bd[i]) + frob_rc(user_link_residual(sdp, xs, z, i), bd[i], bd[i])) by {
+            lemma_lmi_slack_shifted(sdp, z, i);
+        }
+    }
+    // the objective
+    lemma_objective_value(sdp, check, s, z);
+    lemma_user_obj_of_vars(sdp.objective@, bsum, vd, z);
+}
+
+/// End-to-end soundness: the loop outcome (outcome_ok) for a setup of a well-formed input
+/// satisfies the user-level guarantee user_outcome_ok. The approximate soundness lemmas give
+/// the residual bounds and the objective value of the solution read from the returned iterate.
+pub proof fn lemma_outcome_sound(sdp: &SDP, check: bool, s: &SdpadSetup, o: SdpadOutcome)
+    requires
+        sdpad_input_ok(sdp, check),
+        sdpad_setup_ok(sdp, check, *s),
+        outcome_ok(sdp, s, check, o),
+    ensures
+        user_outcome_ok(sdp, check, s, o),
+{
+    let d = s.var_dim as int;
+    let k = o.iterate@;
+    let st = o.states@[k];
+    let z = rvs(st.prim_z@);
+    let xs = Seq::new(o.result@.len(), |n: int| rvs(o.result@[n]@));
+    let checked = o.termination is Accuracy || o.termination is Stagnation;
+    // the iterate is the update of its predecessor, hence of the packed length
+    let j = k - 1;
+    assert(wgy_update_ok(s, check, o.pens@[j].mu, rv(STEP), &o.states@[j], &o.states@[j + 1]));
+    assert(o.states@[j + 1] == st);
+    assert(z.len() == pk_len(d));
+    assert(rv(o.pinf) == pinf_r(s, z) && rv(o.value) == prim_val_r(s, z));
+    if o.termination is Accuracy {
+        assert(rv(o.pinf) <= delta_r(rv(o.pinf), rv(o.dinf), rv(o.gap)));
+    }
+    if sdp.lmi@.len() == 0 {
+        assert(xs.len() == 1 && xs[0] == z);
+        lemma_approx_sound_single(sdp, check, s, z, checked);
+    } else {
+        let bd = bdims_r(sdp.lmi@);
+        let vd = vdims_r(sdp.lmi@, n_vars(sdp));
+        lemma_setup_obj0(sdp, check, s);
+        assert(dims_of(s.symm_dims@) == vd && s.block_size_sum as int == block_sum(bd));
+        lemma_solution_vars(s, z, o.result@);
+        assert(xs == vars_of(z, block_sum(bd), vd));
+        lemma_approx_sound_lmi(sdp, check, s, z, checked);
+    }
 }
 
 } // verus!

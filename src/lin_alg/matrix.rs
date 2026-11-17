@@ -272,55 +272,6 @@ pub fn scal_vect(s: f64, vect: &Vector) -> (result: Vector)
     result
 }
 
-// inverse scalar action on vector
-pub fn negscal_vect(s: f64, vect: &Vector) -> (result: Vector)
-    ensures
-        result@.len() == vect@.len(),
-        rvs(result@) == vscale_r(-rv(s), rvs(vect@)),
-{
-    let mut result: Vector = Vec::new();
-    let n = vect.len();
-    for i in 0..n
-        invariant
-            n == vect@.len(),
-            result@.len() == i,
-            forall|k: int| 0 <= k < i ==> rv(#[trigger] result@[k]) == -rv(s) * rv(vect@[k]),
-    {
-        result.push(crate::trusted::neg(s * vect[i]));
-        proof {
-            assert(-rv(s) * rv(vect@[i as int]) == -(rv(s) * rv(vect@[i as int]))) by (nonlinear_arith);
-        }
-    }
-    proof {
-        assert(rvs(result@) =~= vscale_r(-rv(s), rvs(vect@)));
-    }
-    result
-}
-
-// computing vector of form vect1 + s * vect2
-pub fn vect_add_scaled(vect1: &Vector, s: f64, vect2: &Vector) -> (result: Vector)
-    requires
-        vect1@.len() == vect2@.len(),
-    ensures
-        result@.len() == vect1@.len(),
-        rvs(result@) == vadd_r(rvs(vect1@), vscale_r(rv(s), rvs(vect2@))),
-{
-    let mut result: Vector = Vec::new();
-    let n = vect1.len();
-    for i in 0..n
-        invariant
-            n == vect1@.len() == vect2@.len(),
-            result@.len() == i,
-            forall|k: int| 0 <= k < i ==> rv(#[trigger] result@[k]) == rv(vect1@[k]) + rv(s) * rv(vect2@[k]),
-    {
-        result.push(s.mul_add(vect2[i], vect1[i]));
-    }
-    proof {
-        assert(rvs(result@) =~= vadd_r(rvs(vect1@), vscale_r(rv(s), rvs(vect2@))));
-    }
-    result
-}
-
 // evaluates the matrix expression A + (B - C)
 pub fn matrix_add_diff(mat1: &Matrix, mat2: &Matrix, mat3: &Matrix) -> (sum: Matrix)
     requires
@@ -422,11 +373,9 @@ verus! {
 
 // Gaussian elimination via partial pivoting
 // also computes numerical coefficient rank and consistency of given augmented matrix
-// (the row operations preserve the solution set of [A | b] and keep zero columns zero; the result is in echelon form
-// with pivots in the columns of A, strictly increasing, nonzero and of magnitude at least TOL * max |entry of A|
-// of the input, and exact zeros below every pivot; the rank is the number of pivots; a consistent system
-// has right-hand sides below TOL * 2^rank * max |b_k| of the input in the rows without a pivot, and is
-// zero if its rank is 0; the input is a row combination T of the result)
+// (the row operations preserve the solution set and zero columns, and yield an echelon form whose pivots have
+// magnitude at least TOL * max |entry of A|; the rank counts the pivots, and a consistent system has right-hand
+// sides below TOL * 2^rank * max |b_k| in the rows without a pivot)
 pub fn gauss_elim(mat: &mut Matrix, col_dim: usize, row_dim: usize) -> (res: (&mut Matrix, usize, bool))
     requires
         col_dim >= 1,

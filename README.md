@@ -30,6 +30,7 @@ Basic floating-point operations are modeled as exact real arithmetic. Under this
 - **Eigensolvers.** Both Jacobi variants share one verified rotation and return `A = Q B Q^T` with `Q^T Q = I`. The cached variant selects the intended pivot, and the cyclic variant visits every pair exactly once per sweep.
 - **Iteration.** Starting from the initial point, each step applies the specified Wen–Goldfarb–Yin update. The returned solution is one of the iterates produced this way.
 - **Residuals.** The reported primal infeasibility, dual infeasibility, and duality gap are exactly the KKT residuals of the returned iterate.
+- **Returned solution.** The verified entry point `sdpad_verified` states its guarantee on the user's problem. Every equality residual and every LMI residual at the returned solution is bounded by the reported primal infeasibility, scaled by `1 + ||b||` and, with constraint reduction, by a data-dependent constant. The reported value is the objective at the solution. After termination with accuracy or stagnation, every LMI slack satisfies the PSD check's bound up to its LMI residual, and with accuracy the primal infeasibility is below the tolerance.
 
 Convergence and floating-point error are outside the scope of this verification. The guarantees cover normal returns, not runs that abort on a failed numerical check.
 
@@ -55,7 +56,7 @@ With Verus 0.2026.08.23 installed, run from the repository root:
 verus src/lib.rs --crate-type=lib --edition=2024 -V no-solver-version-check
 ```
 
-The last full run reported 1046 verified items and 0 errors. The flag skips Verus's Z3 version check, which fails on the version string of the bundled Z3.
+The last full run reported 1055 verified items and 0 errors. The flag skips Verus's Z3 version check, which fails on the version string of the bundled Z3.
 
 The solver still builds and runs as ordinary Rust:
 
