@@ -286,6 +286,12 @@ let sdp_test = SDP::new(
 );
 ```
 
+## Verified version
+
+The [`verus`](../../tree/verus) branch contains a Verus verification of this solver, modified in cosmetic ways to fit within Verus's confines.
+
+The `verus` branch will remain a separate project indefinitely. It will not be merged into `main`.
+
 ## License
 
 This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE.txt) for details.
