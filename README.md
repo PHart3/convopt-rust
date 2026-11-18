@@ -20,6 +20,7 @@ We guided Claude (Fable 5.1) to generate the entire verification, overseeing the
 - `EXPOSED_BUGS.md`: bugs the verification uncovered in the original code, written for human review.
 - `VERUS_AUDIT_GAPS.md`: Codex's audit of an early version. It found two places where the specifications claimed less than intended. Claude has since closed both, and closing the first exposed a bug in the dual solve.
 - `ADDITIONAL_PROOFS.md`: five further statements relating the standard form and its residuals to feasibility of the user's problem, posed and proved by Claude after the main layers.
+- `END_TO_END_SOUNDNESS.md`: the handoff that Claude worked from in a final run to state the solver's guarantee on the user's problem.
 
 ## What is proved
 
